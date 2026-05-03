@@ -65,13 +65,17 @@ export class CanvasRenderer implements Renderer {
     const showGrid = config.showGrid;
     const shadeStrength = config.shadeStrength;
 
-    // Only draw height labels when there's enough screen pixels per hex
-    // for the text to mean anything. The font is then sized so it stays in
-    // a legible 8–14 px range on screen at any zoom.
+    // Height labels: density-throttle when hexes are tiny on screen so the
+    // text is always legible. With small hex sizes we can't fit a label per
+    // tile, so we render only every Nth tile in each axis (`stride`) and
+    // size the font for that effective spacing.
     const labelOnScreen = size * camera.zoom;
-    const showHeights = config.showHeights && labelOnScreen >= 10;
+    const showHeights = config.showHeights;
+    let stride = 1;
     if (showHeights) {
-      const screenFont = Math.max(8, Math.min(14, labelOnScreen * 0.5));
+      // Aim for at least ~22 px between labels on screen.
+      stride = Math.max(1, Math.ceil(22 / Math.max(1, labelOnScreen)));
+      const screenFont = Math.max(10, Math.min(13, labelOnScreen * stride * 0.45));
       const fontPx = screenFont / camera.zoom;
       ctx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
       ctx.textAlign = 'center';
@@ -107,7 +111,7 @@ export class CanvasRenderer implements Renderer {
         ctx.stroke();
       }
 
-      if (showHeights) {
+      if (showHeights && tile.col % stride === 0 && tile.row % stride === 0) {
         const label = tile.height.toFixed(2);
         ctx.strokeStyle = 'rgba(0,0,0,0.7)';
         ctx.strokeText(label, x, y);

@@ -12,7 +12,6 @@ const timeLabel = computed(() => {
   if (!time) return '';
   const d = new Date(time);
   if (Number.isNaN(d.getTime())) return time;
-  // HH:MM on the build date, in the viewer's local zone.
   return d.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -39,9 +38,10 @@ function openCommit() {
     rel="noopener"
     @click.prevent="expanded = !expanded"
     @dblclick="openCommit"
-    :title="`Build ${sha}\n${time}\n(click to expand, double-click to open commit)`"
+    :title="`Build ${sha}\n${time}\n(tap to expand, double-tap to open commit)`"
   >
     <span class="dot" />
+    <span class="label">build</span>
     <span class="sha">{{ shortSha }}</span>
     <span v-if="expanded" class="time">· {{ timeLabel }}</span>
   </a>
@@ -50,32 +50,42 @@ function openCommit() {
 <style scoped>
 .badge {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
+  top: max(10px, env(safe-area-inset-top, 0px));
+  left: max(10px, env(safe-area-inset-left, 0px));
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #c2c2cc;
-  background: rgba(20, 20, 28, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 8px;
+  padding: 6px 12px;
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #e6e6ea;
+  background: rgba(20, 20, 28, 0.85);
+  border: 1px solid rgba(106, 140, 255, 0.4);
   border-radius: 999px;
   text-decoration: none;
   user-select: none;
   cursor: pointer;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   z-index: 10;
 }
-.badge:hover { background: rgba(30, 30, 40, 0.85); }
+.badge:hover { background: rgba(34, 34, 46, 0.95); border-color: rgba(106, 140, 255, 0.7); }
 .dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #6a8cff;
-  box-shadow: 0 0 6px rgba(106, 140, 255, 0.6);
+  box-shadow: 0 0 8px rgba(106, 140, 255, 0.8);
 }
-.sha { letter-spacing: 0.04em; }
-.time { color: #8a8a99; }
+.label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: #8a8a99;
+}
+.sha {
+  letter-spacing: 0.04em;
+  color: #fff;
+}
+.time { color: #8a8a99; font-weight: 400; }
 </style>
