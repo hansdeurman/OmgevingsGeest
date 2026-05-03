@@ -19,11 +19,17 @@ export interface ParamMeta {
   affectsGeneration?: boolean;
 }
 
+/** Visual hex radius in world units. Constant for now — the renderer reads
+ * this directly. Promote it to a slider again later if needed. */
+export const HEX_PIXEL_SIZE = 4;
+
+/** Aspect ratio for the auto-derived grid: rows / cols. */
+const GRID_ASPECT = 0.75;
+
 export const parameterDefs: ParamMeta[] = [
   // World
   { key: 'seed', label: 'Seed', group: 'World', type: 'int', min: 0, max: 99999, step: 1, default: 1337, affectsGeneration: true },
-  { key: 'gridWidth', label: 'Width', group: 'World', type: 'int', min: 8, max: 200, step: 1, default: 80, affectsGeneration: true },
-  { key: 'gridHeight', label: 'Height', group: 'World', type: 'int', min: 8, max: 200, step: 1, default: 60, affectsGeneration: true },
+  { key: 'hexCount', label: 'Hex Count', group: 'World', type: 'int', min: 20, max: 400, step: 1, default: 120, affectsGeneration: true },
 
   // Terrain
   { key: 'noiseScale', label: 'Noise Scale', group: 'Terrain', type: 'number', min: 0.005, max: 0.4, step: 0.001, default: 0.06, affectsGeneration: true },
@@ -34,11 +40,15 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'mountainBoost', label: 'Mountain Boost', group: 'Terrain', type: 'number', min: 0, max: 1.5, step: 0.01, default: 0.35, affectsGeneration: true },
 
   // Render
-  { key: 'hexSize', label: 'Hex Size', group: 'Render', type: 'number', min: 4, max: 60, step: 0.5, default: 12 },
   { key: 'showGrid', label: 'Show Grid', group: 'Render', type: 'boolean', default: false },
   { key: 'showHeights', label: 'Show Heights', group: 'Render', type: 'boolean', default: false },
   { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.45 },
 ];
+
+/** Derive the rectangular grid dimensions from a single hex-count knob. */
+export function gridDimensions(hexCount: number): { width: number; height: number } {
+  return { width: hexCount, height: Math.max(1, Math.round(hexCount * GRID_ASPECT)) };
+}
 
 type Defaults = Record<string, number | boolean>;
 const defaults: Defaults = {};
@@ -50,15 +60,13 @@ for (const p of parameterDefs) defaults[p.key] = p.default;
 export const config = reactive(defaults) as Record<string, number | boolean> & {
   // Convenience typing for known keys.
   seed: number;
-  gridWidth: number;
-  gridHeight: number;
+  hexCount: number;
   noiseScale: number;
   noiseOctaves: number;
   noisePersistence: number;
   noiseLacunarity: number;
   heightExponent: number;
   mountainBoost: number;
-  hexSize: number;
   showGrid: boolean;
   showHeights: boolean;
   shadeStrength: number;

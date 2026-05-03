@@ -3,7 +3,7 @@ import type { World } from '../../world/World';
 import type { Camera } from '../Camera';
 import { offsetToPixel, hexCorners, gridPixelBounds } from '../../math/hex';
 import { heightToRGB, shade, rgbToCss } from '../palette';
-import { config } from '../../config/parameters';
+import { config, HEX_PIXEL_SIZE } from '../../config/parameters';
 
 /**
  * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
@@ -54,7 +54,7 @@ export class CanvasRenderer implements Renderer {
     ctx.fillStyle = '#0a0a10';
     ctx.fillRect(0, 0, w, h);
 
-    const size = config.hexSize;
+    const size = HEX_PIXEL_SIZE;
     const bounds = gridPixelBounds(world.width, world.height, size);
 
     ctx.save();

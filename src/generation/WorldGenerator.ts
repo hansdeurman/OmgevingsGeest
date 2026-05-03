@@ -1,6 +1,6 @@
 import { World } from '../world/World';
 import { generateHeights } from './HeightGenerator';
-import type { config } from '../config/parameters';
+import { gridDimensions, type config } from '../config/parameters';
 
 type Cfg = typeof config;
 
@@ -9,7 +9,8 @@ type Cfg = typeof config;
  * (rivers, biomes, settlements …) get appended here in a fixed order.
  */
 export function buildWorld(cfg: Cfg): World {
-  const world = new World(cfg.gridWidth, cfg.gridHeight);
+  const { width, height } = gridDimensions(cfg.hexCount);
+  const world = new World(width, height);
   generateHeights(world, {
     seed: cfg.seed,
     noiseScale: cfg.noiseScale,
