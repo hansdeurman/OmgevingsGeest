@@ -2,7 +2,7 @@ import type { Renderer, RenderFrame } from '../Renderer';
 import { offsetToPixel, hexCorners, gridPixelBounds } from '../../math/hex';
 import { heightToRGB, shade, rgbToCss } from '../palette';
 import { config, HEX_PIXEL_SIZE } from '../../config/parameters';
-import { drawAirflowOverlay } from './airflowOverlay';
+import { drawAirflowOverlay, drawWindSources, drawSourcePreview } from './airflowOverlay';
 
 /**
  * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
@@ -47,7 +47,7 @@ export class CanvasRenderer implements Renderer {
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
 
-    const { world, camera, windField } = frame;
+    const { world, camera, windField, windSources, sourcePreview } = frame;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
@@ -128,6 +128,14 @@ export class CanvasRenderer implements Renderer {
         maxSpeed: config.windMaxSpeed,
         zoom: camera.zoom,
       });
+    }
+
+    if (windSources && windSources.length) {
+      drawWindSources(ctx, windSources, size, camera.zoom, config.windMaxSpeed);
+    }
+
+    if (sourcePreview) {
+      drawSourcePreview(ctx, sourcePreview.start, sourcePreview.end, size, camera.zoom);
     }
 
     ctx.restore();

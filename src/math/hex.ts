@@ -33,6 +33,27 @@ export function offsetToAxial(col: number, row: number): Axial {
   return { q, r: row };
 }
 
+/**
+ * Inverse of offsetToPixel: pick the nearest hex (col, row) for a pixel
+ * point in world space. Uses the standard cube-rounding algorithm.
+ */
+export function pixelToOffset(px: number, py: number, size: number): Offset {
+  const qf = ((SQRT3 / 3) * px - py / 3) / size;
+  const rf = ((2 / 3) * py) / size;
+  const sf = -qf - rf;
+  let q = Math.round(qf);
+  let r = Math.round(rf);
+  let s = Math.round(sf);
+  const qd = Math.abs(q - qf);
+  const rd = Math.abs(r - rf);
+  const sd = Math.abs(s - sf);
+  if (qd > rd && qd > sd) q = -r - s;
+  else if (rd > sd) r = -q - s;
+  // axial → odd-r offset
+  const col = q + ((r - (r & 1)) >> 1);
+  return { col, row: r };
+}
+
 export function hexCorners(cx: number, cy: number, size: number): Pixel[] {
   const out: Pixel[] = [];
   for (let i = 0; i < 6; i++) {

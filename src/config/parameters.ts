@@ -53,7 +53,7 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.5 },
   { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 5, step: 0.05, default: 2.5 },
   { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.1 },
-  { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 3 },
+  { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 1 },
   { key: 'arrowScale', label: 'Arrow Scale', group: 'Wind', type: 'number', min: 1, max: 30, step: 0.5, default: 8 },
 ];
 

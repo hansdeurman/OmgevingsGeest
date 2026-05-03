@@ -1,6 +1,7 @@
 import type { World } from '../world/World';
 import type { Camera } from './Camera';
 import type { WindField } from '../airflow/WindField';
+import type { WindSource } from '../airflow/sources';
 
 /**
  * Per-frame state handed to the renderer. Only `world` and `camera` are
@@ -11,6 +12,16 @@ export interface RenderFrame {
   world: World;
   camera: Camera;
   windField?: WindField;
+  windSources?: ReadonlyArray<WindSource>;
+  /**
+   * In-progress source preview, in *world* pixel coords (not screen coords).
+   * The renderer applies its own world transform; the caller has already
+   * converted screen → world space.
+   */
+  sourcePreview?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  };
 }
 
 /**

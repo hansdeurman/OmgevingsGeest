@@ -4,9 +4,10 @@ import { Camera } from '../../rendering/Camera';
 import { CanvasRenderer } from '../../rendering/canvas/CanvasRenderer';
 import type { Renderer } from '../../rendering/Renderer';
 import { buildWorld } from '../../generation/WorldGenerator';
-import { config, generationKeys } from '../../config/parameters';
+import { config, generationKeys, HEX_PIXEL_SIZE } from '../../config/parameters';
 import type { World } from '../../world/World';
-import { AirFlowSimulation } from '../../airflow';
+import { AirFlowSimulation, addSource, placingSource, windSources } from '../../airflow';
+import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
 
 const hostRef = ref<HTMLDivElement>();
 
@@ -18,14 +19,36 @@ let raf = 0;
 let lastFrameTime = 0;
 let resizeObs: ResizeObserver | null = null;
 
+// Source placement drag state, kept in world-pixel coords so the renderer
+// can draw a preview directly without re-transforming.
+const sourceDrag = ref<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(
+  null,
+);
+
+/** Convert client (CSS) pixels to world-space pixels (the same coords that
+ *  offsetToPixel produces). Mirrors the transform applied in CanvasRenderer. */
+function clientToWorld(host: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
+  const rect = host.getBoundingClientRect();
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
+  const w = rect.width;
+  const h = rect.height;
+  const bounds = gridPixelBounds(world.width, world.height, HEX_PIXEL_SIZE);
+  return {
+    x: (sx - w / 2 - camera.x) / camera.zoom + bounds.x / 2,
+    y: (sy - h / 2 - camera.y) / camera.zoom + bounds.y / 2,
+  };
+}
+
+/** Magnitude scale for source vectors derived from drag length in world pixels. */
+const SOURCE_DRAG_SCALE = 1 / 12;
+
 function regenerate() {
   world = buildWorld(config);
-  // Rebuild the sim against the new world (dimensions and heights).
   airFlow = new AirFlowSimulation(world);
 }
 
 function frame(now: number) {
-  // dt in seconds, capped so a long pause doesn't blow up the sim.
   const dt = lastFrameTime ? Math.min(0.1, (now - lastFrameTime) / 1000) : 0;
   lastFrameTime = now;
 
@@ -39,12 +62,14 @@ function frame(now: number) {
         overcomeFactor: config.windOvercomeFactor,
         maxSpeed: config.windMaxSpeed,
         smoothing: config.windSmoothing,
-      }, dt);
+      }, dt, windSources);
     }
     renderer.render({
       world,
       camera,
       windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
+      windSources: config.showAirFlow ? windSources : undefined,
+      sourcePreview: sourceDrag.value ?? undefined,
     });
   }
   raf = requestAnimationFrame(frame);
@@ -62,24 +87,62 @@ onMounted(() => {
   });
   resizeObs.observe(host);
 
-  // Pan with drag.
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
+  // Pointer state. We disambiguate two drag modes on mousedown:
+  //   - placeSource: when placingSource is on, OR shift is held.
+  //   - pan: otherwise.
+  let mode: 'idle' | 'pan' | 'source' = 'idle';
+  let panLastX = 0;
+  let panLastY = 0;
+
   host.addEventListener('mousedown', (e) => {
-    dragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-  });
-  window.addEventListener('mouseup', () => { dragging = false; });
-  window.addEventListener('mousemove', (e) => {
-    if (!dragging) return;
-    camera.panBy(e.clientX - lastX, e.clientY - lastY);
-    lastX = e.clientX;
-    lastY = e.clientY;
+    if (placingSource.value || e.shiftKey) {
+      mode = 'source';
+      const w = clientToWorld(host, e.clientX, e.clientY);
+      // Snap source position to the centre of the picked hex.
+      const cell = pixelToOffset(w.x, w.y, HEX_PIXEL_SIZE);
+      const snapped = offsetToPixel(cell.col, cell.row, HEX_PIXEL_SIZE);
+      sourceDrag.value = { start: snapped, end: w };
+      e.preventDefault();
+    } else {
+      mode = 'pan';
+      panLastX = e.clientX;
+      panLastY = e.clientY;
+    }
   });
 
-  // Zoom with wheel, anchored on cursor.
+  window.addEventListener('mousemove', (e) => {
+    if (mode === 'pan') {
+      camera.panBy(e.clientX - panLastX, e.clientY - panLastY);
+      panLastX = e.clientX;
+      panLastY = e.clientY;
+    } else if (mode === 'source' && sourceDrag.value) {
+      sourceDrag.value = {
+        start: sourceDrag.value.start,
+        end: clientToWorld(host, e.clientX, e.clientY),
+      };
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (mode === 'source' && sourceDrag.value) {
+      const { start, end } = sourceDrag.value;
+      const cell = pixelToOffset(start.x, start.y, HEX_PIXEL_SIZE);
+      // Drag direction & length set the source vector; clamp to maxSpeed so
+      // a wild drag doesn't immediately saturate the colour ramp.
+      const dx = (end.x - start.x) * SOURCE_DRAG_SCALE;
+      const dy = (end.y - start.y) * SOURCE_DRAG_SCALE;
+      const mag = Math.hypot(dx, dy);
+      const cap = config.windMaxSpeed;
+      const k = mag > cap ? cap / mag : 1;
+      addSource({ col: cell.col, row: cell.row, vx: dx * k, vy: dy * k });
+      // One-shot: leave placement mode after creating one source.
+      placingSource.value = false;
+      sourceDrag.value = null;
+      e.preventDefault();
+    }
+    mode = 'idle';
+  });
+
   host.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = host.getBoundingClientRect();
@@ -102,8 +165,6 @@ onBeforeUnmount(() => {
   renderer?.detach();
 });
 
-// Regenerate only when generation-affecting params change. Render-only
-// params (hex size, grid, shading) are picked up on the next frame.
 watch(
   () => generationKeys.map((k) => config[k]),
   () => regenerate(),
@@ -111,7 +172,7 @@ watch(
 </script>
 
 <template>
-  <div ref="hostRef" class="host"></div>
+  <div ref="hostRef" class="host" :class="{ placing: placingSource }"></div>
 </template>
 
 <style scoped>
@@ -121,4 +182,6 @@ watch(
   cursor: grab;
 }
 .host:active { cursor: grabbing; }
+.host.placing { cursor: crosshair; }
+.host.placing:active { cursor: crosshair; }
 </style>

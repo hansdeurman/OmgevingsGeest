@@ -1,5 +1,6 @@
 import type { World } from '../../world/World';
 import type { WindField } from '../../airflow/WindField';
+import type { WindSource } from '../../airflow/sources';
 import { offsetToPixel } from '../../math/hex';
 
 export interface AirflowOverlayParams {
@@ -106,4 +107,124 @@ export function drawAirflowOverlay(
       ctx.stroke();
     }
   }
+}
+
+/**
+ * Draw user-placed wind sources: a small circle at the source cell and an
+ * arrow showing the vector being injected. Lives on top of the wind field
+ * so it stays visible regardless of arrow density.
+ */
+export function drawWindSources(
+  ctx: CanvasRenderingContext2D,
+  sources: ReadonlyArray<WindSource>,
+  hexSize: number,
+  zoom: number,
+  maxSpeed: number,
+): void {
+  const lineWidth = 1.6 / zoom;
+  const ringWidth = 2 / zoom;
+  const radius = hexSize * 0.55;
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const s of sources) {
+    const c = offsetToPixel(s.col, s.row, hexSize);
+    const mag = Math.hypot(s.vx, s.vy);
+    const color = windColor(mag, maxSpeed);
+
+    // Outer ring marks the source location.
+    ctx.lineWidth = ringWidth;
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = ringWidth * 0.8;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, radius * 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Direction arrow.
+    if (mag > 0.001) {
+      const ang = Math.atan2(s.vy, s.vx);
+      const cos = Math.cos(ang);
+      const sin = Math.sin(ang);
+      const len = Math.max(hexSize, Math.min(hexSize * 4, mag * 8));
+      const tipX = c.x + cos * len;
+      const tipY = c.y + sin * len;
+      const head = Math.max(2 / zoom, hexSize * 0.6);
+      const px = -sin * head * 0.6;
+      const py = cos * head * 0.6;
+      const backX = tipX - cos * head;
+      const backY = tipY - sin * head;
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = lineWidth + 1.2 / zoom;
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(tipX, tipY);
+      ctx.lineTo(backX + px, backY + py);
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(backX - px, backY - py);
+      ctx.stroke();
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(tipX, tipY);
+      ctx.lineTo(backX + px, backY + py);
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(backX - px, backY - py);
+      ctx.stroke();
+    }
+  }
+}
+
+/**
+ * Draw an in-progress source preview while the user is dragging. Same shape
+ * as a finalised source but rendered semi-transparent so it's visibly draft.
+ */
+export function drawSourcePreview(
+  ctx: CanvasRenderingContext2D,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  hexSize: number,
+  zoom: number,
+): void {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  ctx.save();
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = 2 / zoom;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#ffffff';
+
+  ctx.beginPath();
+  ctx.arc(start.x, start.y, hexSize * 0.55, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (Math.hypot(dx, dy) > 0.5) {
+    const tipX = end.x;
+    const tipY = end.y;
+    const ang = Math.atan2(dy, dx);
+    const cos = Math.cos(ang);
+    const sin = Math.sin(ang);
+    const head = Math.max(2 / zoom, hexSize * 0.7);
+    const pxW = -sin * head * 0.6;
+    const pyW = cos * head * 0.6;
+    const backX = tipX - cos * head;
+    const backY = tipY - sin * head;
+
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(backX + pxW, backY + pyW);
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(backX - pxW, backY - pyW);
+    ctx.stroke();
+  }
+  ctx.restore();
 }

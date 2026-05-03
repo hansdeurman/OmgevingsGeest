@@ -1,6 +1,7 @@
 import type { World } from '../world/World';
 import { offsetNeighbours, NEIGHBOUR_DIRS } from '../math/hex';
 import { WindField } from './WindField';
+import type { WindSource } from './sources';
 
 /**
  * Tunable inputs for one simulation step.
@@ -95,12 +96,31 @@ export class AirFlowSimulation {
   }
 
   /** Run the simulation forward by dt seconds, with internal sub-stepping. */
-  step(world: World, params: AirFlowParams, dt: number): void {
+  step(world: World, params: AirFlowParams, dt: number, sources?: ReadonlyArray<WindSource>): void {
     if (dt <= 0) return;
     const subs = Math.max(1, Math.ceil(dt / AirFlowSimulation.MAX_SUBSTEP));
     const subDt = dt / subs;
     for (let i = 0; i < subs; i++) {
       this.singleStep(world, params, subDt);
+      if (sources && sources.length) this.applySources(sources);
+    }
+  }
+
+  /**
+   * Force the velocity at each source's cell to its (vx, vy). Treated as a
+   * Dirichlet boundary: the source cell ignores the dynamics, neighbouring
+   * cells advect from it normally.
+   */
+  private applySources(sources: ReadonlyArray<WindSource>): void {
+    const { vx, vy } = this.field;
+    const w = this.field.width;
+    const h = this.field.height;
+    for (let i = 0; i < sources.length; i++) {
+      const s = sources[i];
+      if (s.col < 0 || s.col >= w || s.row < 0 || s.row >= h) continue;
+      const idx = s.row * w + s.col;
+      vx[idx] = s.vx;
+      vy[idx] = s.vy;
     }
   }
 
