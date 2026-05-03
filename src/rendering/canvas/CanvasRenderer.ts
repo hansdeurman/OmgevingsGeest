@@ -65,11 +65,14 @@ export class CanvasRenderer implements Renderer {
     const showGrid = config.showGrid;
     const shadeStrength = config.shadeStrength;
 
-    // Only draw height labels when there's room for them on screen.
+    // Only draw height labels when there's enough screen pixels per hex
+    // for the text to mean anything. The font is then sized so it stays in
+    // a legible 8–14 px range on screen at any zoom.
     const labelOnScreen = size * camera.zoom;
-    const showHeights = config.showHeights && labelOnScreen >= 18;
+    const showHeights = config.showHeights && labelOnScreen >= 10;
     if (showHeights) {
-      const fontPx = Math.min(size * 0.45, 16);
+      const screenFont = Math.max(8, Math.min(14, labelOnScreen * 0.5));
+      const fontPx = screenFont / camera.zoom;
       ctx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
