@@ -1,0 +1,99 @@
+import type { Renderer } from '../Renderer';
+import type { World } from '../../world/World';
+import type { Camera } from '../Camera';
+import { offsetToPixel, hexCorners, gridPixelBounds } from '../../math/hex';
+import { heightToRGB, shade, rgbToCss } from '../palette';
+import { config } from '../../config/parameters';
+
+/**
+ * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
+ * and resets the device transform on resize so 1 logical pixel == 1 CSS px.
+ */
+export class CanvasRenderer implements Renderer {
+  private host: HTMLElement | null = null;
+  private canvas: HTMLCanvasElement | null = null;
+  private ctx: CanvasRenderingContext2D | null = null;
+  private dpr = 1;
+
+  attach(host: HTMLElement): void {
+    this.host = host;
+    const canvas = document.createElement('canvas');
+    canvas.style.display = 'block';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    host.appendChild(canvas);
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+  }
+
+  detach(): void {
+    if (this.canvas && this.host) this.host.removeChild(this.canvas);
+    this.canvas = null;
+    this.ctx = null;
+    this.host = null;
+  }
+
+  resize(width: number, height: number): void {
+    if (!this.canvas || !this.ctx) return;
+    this.dpr = window.devicePixelRatio || 1;
+    this.canvas.width = Math.max(1, Math.floor(width * this.dpr));
+    this.canvas.height = Math.max(1, Math.floor(height * this.dpr));
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  }
+
+  render(world: World, camera: Camera): void {
+    const ctx = this.ctx;
+    const canvas = this.canvas;
+    if (!ctx || !canvas) return;
+
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+
+    ctx.fillStyle = '#0a0a10';
+    ctx.fillRect(0, 0, w, h);
+
+    const size = config.hexSize;
+    const bounds = gridPixelBounds(world.width, world.height, size);
+
+    ctx.save();
+    ctx.translate(w / 2 + camera.x, h / 2 + camera.y);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-bounds.x / 2, -bounds.y / 2);
+
+    const showGrid = config.showGrid;
+    const shadeStrength = config.shadeStrength;
+
+    for (const tile of world.tiles) {
+      const { x, y } = offsetToPixel(tile.col, tile.row, size);
+      // Frustum cull in world space (cheap rejection for large grids).
+      const margin = size * 1.5;
+      const sx = (x - bounds.x / 2) * camera.zoom + w / 2 + camera.x;
+      const sy = (y - bounds.y / 2) * camera.zoom + h / 2 + camera.y;
+      if (sx < -margin || sy < -margin || sx > w + margin || sy > h + margin) continue;
+
+      // Shading: scale colour by 1 ± shadeStrength based on height. Cheap
+      // pseudo-relief without a real lighting model.
+      const k = 1 - shadeStrength * 0.5 + tile.height * shadeStrength;
+      const rgb = shade(heightToRGB(tile.height), k);
+
+      const corners = hexCorners(x, y, size);
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+
+      ctx.fillStyle = rgbToCss(rgb);
+      ctx.fill();
+
+      if (showGrid) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+}
