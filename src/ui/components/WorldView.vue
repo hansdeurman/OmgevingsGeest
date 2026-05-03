@@ -6,21 +6,47 @@ import type { Renderer } from '../../rendering/Renderer';
 import { buildWorld } from '../../generation/WorldGenerator';
 import { config, generationKeys } from '../../config/parameters';
 import type { World } from '../../world/World';
+import { AirFlowSimulation } from '../../airflow';
 
 const hostRef = ref<HTMLDivElement>();
 
 let renderer: Renderer;
 let world: World;
+let airFlow: AirFlowSimulation | null = null;
 const camera = new Camera();
 let raf = 0;
+let lastFrameTime = 0;
 let resizeObs: ResizeObserver | null = null;
 
 function regenerate() {
   world = buildWorld(config);
+  // Rebuild the sim against the new world (dimensions and heights).
+  airFlow = new AirFlowSimulation(world);
 }
 
-function frame() {
-  if (renderer && world) renderer.render(world, camera);
+function frame(now: number) {
+  // dt in seconds, capped so a long pause doesn't blow up the sim.
+  const dt = lastFrameTime ? Math.min(0.1, (now - lastFrameTime) / 1000) : 0;
+  lastFrameTime = now;
+
+  if (renderer && world) {
+    if (airFlow && config.showAirFlow && dt > 0) {
+      airFlow.step(world, {
+        ambientSpeed: config.windAmbientSpeed,
+        ambientDirection: (config.windAmbientAngle * Math.PI) / 180,
+        damping: config.windDamping,
+        terrainCoupling: config.windTerrainCoupling,
+        overcomeFactor: config.windOvercomeFactor,
+        maxSpeed: config.windMaxSpeed,
+        smoothing: config.windSmoothing,
+      }, dt);
+    }
+    renderer.render({
+      world,
+      camera,
+      windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
+    });
+  }
   raf = requestAnimationFrame(frame);
 }
 

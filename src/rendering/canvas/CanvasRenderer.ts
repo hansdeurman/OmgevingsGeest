@@ -1,9 +1,8 @@
-import type { Renderer } from '../Renderer';
-import type { World } from '../../world/World';
-import type { Camera } from '../Camera';
+import type { Renderer, RenderFrame } from '../Renderer';
 import { offsetToPixel, hexCorners, gridPixelBounds } from '../../math/hex';
 import { heightToRGB, shade, rgbToCss } from '../palette';
 import { config, HEX_PIXEL_SIZE } from '../../config/parameters';
+import { drawAirflowOverlay } from './airflowOverlay';
 
 /**
  * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
@@ -43,11 +42,12 @@ export class CanvasRenderer implements Renderer {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
-  render(world: World, camera: Camera): void {
+  render(frame: RenderFrame): void {
     const ctx = this.ctx;
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
 
+    const { world, camera, windField } = frame;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
@@ -118,6 +118,16 @@ export class CanvasRenderer implements Renderer {
         ctx.fillStyle = '#fff';
         ctx.fillText(label, x, y);
       }
+    }
+
+    if (windField && config.showAirFlow) {
+      drawAirflowOverlay(ctx, world, windField, {
+        hexSize: size,
+        stride: config.arrowStride,
+        arrowScale: config.arrowScale,
+        maxSpeed: config.windMaxSpeed,
+        zoom: camera.zoom,
+      });
     }
 
     ctx.restore();

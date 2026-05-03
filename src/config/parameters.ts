@@ -43,6 +43,18 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'showGrid', label: 'Show Grid', group: 'Render', type: 'boolean', default: false },
   { key: 'showHeights', label: 'Show Heights', group: 'Render', type: 'boolean', default: false },
   { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.45 },
+
+  // Wind — runs the airflow simulation and draws arrows over the terrain.
+  { key: 'showAirFlow', label: 'Show Air Flow', group: 'Wind', type: 'boolean', default: true },
+  { key: 'windAmbientSpeed', label: 'Ambient Speed', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 1.0 },
+  { key: 'windAmbientAngle', label: 'Ambient Angle', group: 'Wind', type: 'int', min: 0, max: 359, step: 1, default: 0 },
+  { key: 'windDamping', label: 'Damping', group: 'Wind', type: 'number', min: 0.1, max: 5, step: 0.05, default: 1.5 },
+  { key: 'windTerrainCoupling', label: 'Terrain Coupling', group: 'Wind', type: 'number', min: 0, max: 30, step: 0.1, default: 6 },
+  { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.5 },
+  { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 5, step: 0.05, default: 2.5 },
+  { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.1 },
+  { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 3 },
+  { key: 'arrowScale', label: 'Arrow Scale', group: 'Wind', type: 'number', min: 1, max: 30, step: 0.5, default: 8 },
 ];
 
 /** Derive the rectangular grid dimensions from a single hex-count knob. */
@@ -70,6 +82,16 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   showGrid: boolean;
   showHeights: boolean;
   shadeStrength: number;
+  showAirFlow: boolean;
+  windAmbientSpeed: number;
+  windAmbientAngle: number;
+  windDamping: number;
+  windTerrainCoupling: number;
+  windOvercomeFactor: number;
+  windMaxSpeed: number;
+  windSmoothing: number;
+  arrowStride: number;
+  arrowScale: number;
 };
 
 export const generationKeys = parameterDefs

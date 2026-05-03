@@ -58,3 +58,51 @@ export const AXIAL_NEIGHBOURS: ReadonlyArray<Axial> = [
   { q: -1, r: 1 },
   { q: 0, r: 1 },
 ];
+
+/**
+ * Six neighbour deltas in offset coords. Order is fixed (E, NE, NW, W, SW, SE)
+ * and matches NEIGHBOUR_DIRS index-for-index, so simulations can iterate one
+ * loop and use both the (col,row) delta and the geometric direction together.
+ *
+ * Odd-r layout: odd rows are shifted half a hex to the right, so their
+ * diagonal neighbour columns differ by +1 instead of -1.
+ */
+export interface OffsetDelta { dc: number; dr: number; }
+
+export const OFFSET_NEIGHBOURS_EVEN: ReadonlyArray<OffsetDelta> = [
+  { dc:  1, dr:  0 }, // E
+  { dc:  0, dr: -1 }, // NE
+  { dc: -1, dr: -1 }, // NW
+  { dc: -1, dr:  0 }, // W
+  { dc: -1, dr:  1 }, // SW
+  { dc:  0, dr:  1 }, // SE
+];
+
+export const OFFSET_NEIGHBOURS_ODD: ReadonlyArray<OffsetDelta> = [
+  { dc:  1, dr:  0 }, // E
+  { dc:  1, dr: -1 }, // NE
+  { dc:  0, dr: -1 }, // NW
+  { dc: -1, dr:  0 }, // W
+  { dc:  0, dr:  1 }, // SW
+  { dc:  1, dr:  1 }, // SE
+];
+
+export function offsetNeighbours(row: number): ReadonlyArray<OffsetDelta> {
+  return (row & 1) === 0 ? OFFSET_NEIGHBOURS_EVEN : OFFSET_NEIGHBOURS_ODD;
+}
+
+const SQRT3_2 = Math.sqrt(3) / 2;
+
+/**
+ * Unit vectors from a hex centre to each of the six neighbours, in pixel
+ * coords (y down, matching canvas). Index matches OFFSET_NEIGHBOURS_*:
+ * [E, NE, NW, W, SW, SE]. Independent of row parity.
+ */
+export const NEIGHBOUR_DIRS: ReadonlyArray<Pixel> = [
+  { x:  1.0, y:  0.0 },
+  { x:  0.5, y: -SQRT3_2 },
+  { x: -0.5, y: -SQRT3_2 },
+  { x: -1.0, y:  0.0 },
+  { x: -0.5, y:  SQRT3_2 },
+  { x:  0.5, y:  SQRT3_2 },
+];
