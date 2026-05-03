@@ -16,10 +16,24 @@ function onRange(e: Event) {
   config[props.meta.key] = props.meta.type === 'int' ? Math.round(v) : v;
 }
 
+function decimalsForStep(step: number | undefined): number {
+  if (!step || step >= 1) return 0;
+  const s = step.toString();
+  // Handle scientific notation like 1e-3.
+  if (s.includes('e') || s.includes('E')) {
+    const [mantissa, exp] = s.toLowerCase().split('e');
+    const baseDecimals = (mantissa.split('.')[1] ?? '').length;
+    return Math.max(0, baseDecimals - parseInt(exp, 10));
+  }
+  const dot = s.indexOf('.');
+  return dot < 0 ? 0 : s.length - dot - 1;
+}
+
 const display = computed(() => {
   const v = value.value;
   if (typeof v === 'number') {
-    return props.meta.type === 'int' ? v.toString() : v.toFixed(3);
+    if (props.meta.type === 'int') return v.toString();
+    return v.toFixed(decimalsForStep(props.meta.step));
   }
   return String(v);
 });

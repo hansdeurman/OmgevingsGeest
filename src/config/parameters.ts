@@ -36,6 +36,7 @@ export const parameterDefs: ParamMeta[] = [
   // Render
   { key: 'hexSize', label: 'Hex Size', group: 'Render', type: 'number', min: 4, max: 60, step: 0.5, default: 12 },
   { key: 'showGrid', label: 'Show Grid', group: 'Render', type: 'boolean', default: false },
+  { key: 'showHeights', label: 'Show Heights', group: 'Render', type: 'boolean', default: false },
   { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.45 },
 ];
 
@@ -59,6 +60,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   mountainBoost: number;
   hexSize: number;
   showGrid: boolean;
+  showHeights: boolean;
   shadeStrength: number;
 };
 

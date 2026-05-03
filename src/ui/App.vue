@@ -1,14 +1,38 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import WorldView from './components/WorldView.vue';
 import DevPanel from './components/DevPanel.vue';
 import BuildBadge from './components/BuildBadge.vue';
 
+const PANEL_STORAGE_KEY = 'omgevingsgeest:panel-open';
+
+function readStored(): boolean | null {
+  try {
+    const v = localStorage.getItem(PANEL_STORAGE_KEY);
+    return v === null ? null : v === '1';
+  } catch {
+    return null;
+  }
+}
+
 const open = ref(true);
 
 onMounted(() => {
-  // Default to closed on narrow screens (phones) so the world isn't covered.
-  if (window.innerWidth < 720) open.value = false;
+  const stored = readStored();
+  if (stored !== null) {
+    open.value = stored;
+  } else if (window.innerWidth < 720) {
+    // First visit on a phone: default to closed so the world isn't covered.
+    open.value = false;
+  }
+});
+
+watch(open, (v) => {
+  try {
+    localStorage.setItem(PANEL_STORAGE_KEY, v ? '1' : '0');
+  } catch {
+    /* localStorage unavailable (private mode, etc.) — ignore. */
+  }
 });
 </script>
 

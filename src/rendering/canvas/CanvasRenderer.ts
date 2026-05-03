@@ -65,6 +65,17 @@ export class CanvasRenderer implements Renderer {
     const showGrid = config.showGrid;
     const shadeStrength = config.shadeStrength;
 
+    // Only draw height labels when there's room for them on screen.
+    const labelOnScreen = size * camera.zoom;
+    const showHeights = config.showHeights && labelOnScreen >= 18;
+    if (showHeights) {
+      const fontPx = Math.min(size * 0.45, 16);
+      ctx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 2 / camera.zoom;
+    }
+
     for (const tile of world.tiles) {
       const { x, y } = offsetToPixel(tile.col, tile.row, size);
       // Frustum cull in world space (cheap rejection for large grids).
@@ -91,6 +102,14 @@ export class CanvasRenderer implements Renderer {
         ctx.strokeStyle = 'rgba(0,0,0,0.25)';
         ctx.lineWidth = 0.5;
         ctx.stroke();
+      }
+
+      if (showHeights) {
+        const label = tile.height.toFixed(2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.strokeText(label, x, y);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, x, y);
       }
     }
 
