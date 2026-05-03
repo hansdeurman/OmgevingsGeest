@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import WorldView from './components/WorldView.vue';
 import DevPanel from './components/DevPanel.vue';
+import BuildBadge from './components/BuildBadge.vue';
 </script>
 
 <template>
   <div class="app">
-    <WorldView class="world" />
+    <div class="world-wrap">
+      <WorldView class="world" />
+      <BuildBadge />
+    </div>
     <DevPanel class="panel" />
   </div>
 </template>
@@ -30,6 +34,7 @@ html, body, #app {
   height: 100vh;
 }
 
-.world { position: relative; overflow: hidden; }
+.world-wrap { position: relative; overflow: hidden; }
+.world { position: relative; overflow: hidden; height: 100%; }
 .panel { border-left: 1px solid #1f1f28; background: #14141c; overflow: auto; }
 </style>
