@@ -11,15 +11,10 @@ interface Stop {
   rgb: RGB;
 }
 
+// Pure mountain ramp: deep brown at sea level → white at the peaks.
 const STOPS: Stop[] = [
-  { h: 0.0, rgb: [22, 38, 70] },     // deep
-  { h: 0.25, rgb: [46, 86, 132] },   // shallow
-  { h: 0.34, rgb: [212, 200, 150] }, // sand
-  { h: 0.45, rgb: [96, 142, 78] },   // grass
-  { h: 0.6, rgb: [120, 96, 60] },    // hills
-  { h: 0.78, rgb: [120, 116, 110] }, // stone
-  { h: 0.92, rgb: [220, 220, 225] }, // snow
-  { h: 1.0, rgb: [255, 255, 255] },  // peak
+  { h: 0.0, rgb: [58, 36, 22] },
+  { h: 1.0, rgb: [255, 255, 255] },
 ];
 
 function mix(a: RGB, b: RGB, t: number): RGB {
