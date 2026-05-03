@@ -59,13 +59,13 @@ export function drawAirflowOverlay(
   const lineWidth = 1.4 / zoom;
   const minHead = 2 / zoom;
 
-  // Cells we render an arrow for. Arrow length is capped to the cluster size
-  // so neighbours don't overlap badly when the field is dense.
-  const maxLen = size * stride * 1.4;
-
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = lineWidth;
+
+  // Anything below this counts as numerically dead (avoids drawing degenerate
+  // direction arrows for cells that have effectively zero wind).
+  const deadEpsilon = 1e-4;
 
   for (let row = 0; row < world.height; row += stride) {
     for (let col = 0; col < world.width; col += stride) {
@@ -73,9 +73,11 @@ export function drawAirflowOverlay(
       const vx = field.vx[idx];
       const vy = field.vy[idx];
       const mag = Math.hypot(vx, vy);
-      if (mag < 0.05) continue;
+      if (mag < deadEpsilon) continue;
 
-      const len = Math.min(maxLen, Math.max(size * 0.6, mag * params.arrowScale));
+      // Strong wind genuinely produces longer arrows (no upper cap). Floor at
+      // ~half a hex so weak cells still show a visible nub.
+      const len = Math.max(size * 0.5, mag * params.arrowScale);
       const ang = Math.atan2(vy, vx);
       const cos = Math.cos(ang);
       const sin = Math.sin(ang);

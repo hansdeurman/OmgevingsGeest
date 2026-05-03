@@ -61,6 +61,7 @@ function frame(now: number) {
         terrainCoupling: config.windTerrainCoupling,
         overcomeFactor: config.windOvercomeFactor,
         maxSpeed: config.windMaxSpeed,
+        advection: config.windAdvection,
         smoothing: config.windSmoothing,
       }, dt, windSources);
     }

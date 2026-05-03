@@ -1,5 +1,6 @@
 import type { World } from '../world/World';
 import { offsetNeighbours, NEIGHBOUR_DIRS } from '../math/hex';
+import { HEX_PIXEL_SIZE } from '../config/parameters';
 import { WindField } from './WindField';
 import type { WindSource } from './sources';
 
@@ -23,6 +24,13 @@ export interface AirFlowParams {
   maxSpeed: number;
   /** 0..1 blend with neighbour-average per step; gentle visual smoothing. */
   smoothing: number;
+  /**
+   * Multiplier on the natural CFL advection rate. The physical rate is
+   * `speed * dt / hex_size`; this multiplier scales how aggressively each
+   * cell pulls its velocity from its upwind neighbour each step. 1 = pure
+   * CFL, higher values make wind propagate visibly faster.
+   */
+  advection: number;
 }
 
 /**
@@ -192,6 +200,7 @@ export class AirFlowSimulation {
     }
 
     // ----- Phase 2: optional 6-neighbour smoothing pass -----
+    // Scratch -> field, blending each cell with the neighbour average.
     const s = Math.max(0, Math.min(1, params.smoothing));
     if (s > 0) {
       const r = 1 - s;
@@ -222,6 +231,55 @@ export class AirFlowSimulation {
         }
       }
     } else {
+      vx.set(this.nextVx);
+      vy.set(this.nextVy);
+    }
+
+    // ----- Phase 3: upwind advection -----
+    // Each cell pulls a fraction of its velocity from the neighbour most
+    // *upwind* of itself. This is what actually transports wind across the
+    // map (the diffusion above only spreads it isotropically). Blend factor
+    // is the CFL number `speed * dt / hex_size`, scaled by `advection`.
+    const advRate = Math.max(0, params.advection);
+    if (advRate > 0) {
+      this.nextVx.set(vx);
+      this.nextVy.set(vy);
+      const invHex = 1 / HEX_PIXEL_SIZE;
+
+      for (let row = 0; row < h; row++) {
+        const offs = offsetNeighbours(row);
+        for (let col = 0; col < w; col++) {
+          const idx = row * w + col;
+          const cvx = vx[idx];
+          const cvy = vy[idx];
+          const speed = Math.hypot(cvx, cvy);
+          if (speed < 1e-5) continue;
+
+          // Upwind neighbour: maximises -(v · d_i).
+          let bestI = -1;
+          let bestDot = 0;
+          for (let i = 0; i < 6; i++) {
+            const d = NEIGHBOUR_DIRS[i];
+            const dot = -(cvx * d.x + cvy * d.y);
+            if (dot > bestDot) {
+              bestDot = dot;
+              bestI = i;
+            }
+          }
+          if (bestI < 0) continue;
+
+          const o = offs[bestI];
+          const nc = col + o.dc;
+          const nr = row + o.dr;
+          if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
+          const ni = nr * w + nc;
+
+          const alpha = Math.min(1, advRate * speed * dt * invHex);
+          this.nextVx[idx] = cvx * (1 - alpha) + vx[ni] * alpha;
+          this.nextVy[idx] = cvy * (1 - alpha) + vy[ni] * alpha;
+        }
+      }
+
       vx.set(this.nextVx);
       vy.set(this.nextVy);
     }
