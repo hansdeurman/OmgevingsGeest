@@ -1,7 +1,7 @@
 import type { World } from '../../world/World';
 import type { WindField } from '../../airflow/WindField';
 import type { WindSource } from '../../airflow/sources';
-import { offsetToPixel } from '../../math/hex';
+import { offsetToPixel, hexCorners } from '../../math/hex';
 
 export interface AirflowOverlayParams {
   hexSize: number;
@@ -40,6 +40,44 @@ export function windColor(magnitude: number, maxSpeed: number): string {
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
+}
+
+/**
+ * Fill each hex with a translucent white tint scaled by density. This is the
+ * "parcel of air" — it travels with the velocity field and lets you see where
+ * a burst has gone, separately from the velocity arrows themselves.
+ *
+ * `referenceDensity` is the value that maps to fully visible (alpha ≈ max).
+ * Anything above that saturates; below it fades linearly. Pick this to match
+ * the burst strength you're injecting.
+ */
+export function drawDensityOverlay(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  field: WindField,
+  hexSize: number,
+  referenceDensity: number,
+  maxAlpha = 0.55,
+): void {
+  const ref = Math.max(1e-4, referenceDensity);
+  // Anything below this is invisible anyway — skip the polygon work.
+  const cutoff = ref * 0.01;
+  for (let row = 0; row < world.height; row++) {
+    for (let col = 0; col < world.width; col++) {
+      const idx = row * world.width + col;
+      const d = field.density[idx];
+      if (d <= cutoff) continue;
+      const a = Math.min(maxAlpha, (d / ref) * maxAlpha);
+      const c = offsetToPixel(col, row, hexSize);
+      const corners = hexCorners(c.x, c.y, hexSize);
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(220, 235, 255, ${a.toFixed(3)})`;
+      ctx.fill();
+    }
+  }
 }
 
 /**

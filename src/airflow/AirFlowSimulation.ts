@@ -2,7 +2,7 @@ import type { World } from '../world/World';
 import { offsetNeighbours, NEIGHBOUR_DIRS } from '../math/hex';
 import { HEX_PIXEL_SIZE } from '../config/parameters';
 import { WindField } from './WindField';
-import type { WindSource } from './sources';
+import type { WindSource, WindBurst } from './sources';
 
 /**
  * Tunable inputs for one simulation step.
@@ -31,6 +31,12 @@ export interface AirFlowParams {
    * CFL, higher values make wind propagate visibly faster.
    */
   advection: number;
+  /**
+   * Linear drag rate on the scalar density field (per second). Mirrors
+   * `damping` for velocity but acts on density only. Keep low — too much and
+   * a parcel evaporates before you can watch it travel.
+   */
+  densityDamping: number;
 }
 
 /**
@@ -61,6 +67,8 @@ export class AirFlowSimulation {
   /** Scratch buffers for the two-phase update (force step then smoothing). */
   private readonly nextVx: Float32Array;
   private readonly nextVy: Float32Array;
+  /** Scratch buffer for density advection (mirrors nextVx/nextVy). */
+  private readonly nextDensity: Float32Array;
 
   /** Sub-stepping cap. dt larger than this is split into smaller pieces. */
   private static readonly MAX_SUBSTEP = 1 / 30;
@@ -71,6 +79,7 @@ export class AirFlowSimulation {
     this.smoothedHeight = new Float32Array(n);
     this.nextVx = new Float32Array(n);
     this.nextVy = new Float32Array(n);
+    this.nextDensity = new Float32Array(n);
     this.smoothHeights(world);
   }
 
@@ -103,15 +112,32 @@ export class AirFlowSimulation {
     }
   }
 
-  /** Run the simulation forward by dt seconds, with internal sub-stepping. */
-  step(world: World, params: AirFlowParams, dt: number, sources?: ReadonlyArray<WindSource>): void {
+  /**
+   * Run the simulation forward by dt seconds, with internal sub-stepping.
+   * Bursts (one-shot impulses) are stamped exactly once at the start of the
+   * call — sub-stepping does NOT re-apply them. Continuous sources are
+   * re-applied after every sub-step so they hold their Dirichlet boundary.
+   */
+  step(
+    world: World,
+    params: AirFlowParams,
+    dt: number,
+    sources?: ReadonlyArray<WindSource>,
+    bursts?: ReadonlyArray<WindBurst>,
+  ): void {
     if (dt <= 0) return;
+    if (bursts && bursts.length) this.applyBursts(bursts);
     const subs = Math.max(1, Math.ceil(dt / AirFlowSimulation.MAX_SUBSTEP));
     const subDt = dt / subs;
     for (let i = 0; i < subs; i++) {
       this.singleStep(world, params, subDt);
       if (sources && sources.length) this.applySources(sources);
     }
+  }
+
+  /** Reset velocity AND density to zero. Used when firing a clean test burst. */
+  clearField(): void {
+    this.field.clear();
   }
 
   /**
@@ -132,10 +158,29 @@ export class AirFlowSimulation {
     }
   }
 
+  /**
+   * Stamp a one-shot impulse onto each burst's cell: write velocity AND
+   * density at that index. After this returns, the regular dynamics take over
+   * and the parcel is on its own — no re-injection across sub-steps.
+   */
+  private applyBursts(bursts: ReadonlyArray<WindBurst>): void {
+    const { vx, vy, density } = this.field;
+    const w = this.field.width;
+    const h = this.field.height;
+    for (let i = 0; i < bursts.length; i++) {
+      const b = bursts[i];
+      if (b.col < 0 || b.col >= w || b.row < 0 || b.row >= h) continue;
+      const idx = b.row * w + b.col;
+      vx[idx] = b.vx;
+      vy[idx] = b.vy;
+      density[idx] = b.density;
+    }
+  }
+
   private singleStep(world: World, params: AirFlowParams, dt: number): void {
     const w = world.width;
     const h = world.height;
-    const { vx, vy } = this.field;
+    const { vx, vy, density } = this.field;
     const sh = this.smoothedHeight;
 
     const ax = Math.cos(params.ambientDirection) * params.ambientSpeed;
@@ -235,15 +280,20 @@ export class AirFlowSimulation {
       vy.set(this.nextVy);
     }
 
-    // ----- Phase 3: upwind advection -----
+    // ----- Phase 3: upwind advection (velocity AND density together) -----
     // Each cell pulls a fraction of its velocity from the neighbour most
     // *upwind* of itself. This is what actually transports wind across the
     // map (the diffusion above only spreads it isotropically). Blend factor
     // is the CFL number `speed * dt / hex_size`, scaled by `advection`.
+    //
+    // Density is advected by the same blend with the same upwind pick, so the
+    // air parcel travels with its own velocity. We compute it in the same
+    // sweep to share the (speed, upwind, alpha) work.
     const advRate = Math.max(0, params.advection);
     if (advRate > 0) {
       this.nextVx.set(vx);
       this.nextVy.set(vy);
+      this.nextDensity.set(density);
       const invHex = 1 / HEX_PIXEL_SIZE;
 
       for (let row = 0; row < h; row++) {
@@ -277,11 +327,21 @@ export class AirFlowSimulation {
           const alpha = Math.min(1, advRate * speed * dt * invHex);
           this.nextVx[idx] = cvx * (1 - alpha) + vx[ni] * alpha;
           this.nextVy[idx] = cvy * (1 - alpha) + vy[ni] * alpha;
+          this.nextDensity[idx] = density[idx] * (1 - alpha) + density[ni] * alpha;
         }
       }
 
       vx.set(this.nextVx);
       vy.set(this.nextVy);
+      density.set(this.nextDensity);
+    }
+
+    // ----- Phase 4: density damping -----
+    // Mild first-order rate decay so a parcel slowly fades while it travels —
+    // matches the user-visible expectation that "amplitude gets slightly less".
+    const dRetain = Math.exp(-Math.max(0, params.densityDamping) * dt);
+    if (dRetain < 1) {
+      for (let i = 0; i < density.length; i++) density[i] *= dRetain;
     }
   }
 }

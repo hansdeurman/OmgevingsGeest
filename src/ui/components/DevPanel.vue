@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { parameterDefs, type ParamMeta } from '../../config/parameters';
-import { placingSource, windSources, clearSources } from '../../airflow';
+import { config, parameterDefs, gridDimensions, type ParamMeta } from '../../config/parameters';
+import {
+  placingSource,
+  windSources,
+  clearSources,
+  fireBurst,
+  requestFieldClear,
+} from '../../airflow';
+import { NEIGHBOUR_DIRS } from '../../math/hex';
 import ParameterControl from './ParameterControl.vue';
 
 const groups = computed(() => {
@@ -17,6 +24,46 @@ const groups = computed(() => {
 function togglePlacing() {
   placingSource.value = !placingSource.value;
 }
+
+/**
+ * Six hex directions in the order matching NEIGHBOUR_DIRS:
+ *   [E, NE, NW, W, SW, SE]
+ *
+ * The user asked for "60 degrees in the hex map" — every entry here is one
+ * of the six 60° axes, so any of these is a valid axis-aligned test.
+ */
+const burstDirections: ReadonlyArray<{ label: string; index: number }> = [
+  { label: 'E',  index: 0 },
+  { label: 'NE', index: 1 },
+  { label: 'NW', index: 2 },
+  { label: 'W',  index: 3 },
+  { label: 'SW', index: 4 },
+  { label: 'SE', index: 5 },
+];
+
+/**
+ * Fire a one-frame burst at the map centre, pointing along hex direction `i`.
+ * Always clears the field first so each test runs in isolation — that's the
+ * whole point of this tool.
+ */
+function fireDirectionalBurst(i: number) {
+  const { width, height } = gridDimensions(config.hexCount);
+  const col = (width / 2) | 0;
+  const row = (height / 2) | 0;
+  const d = NEIGHBOUR_DIRS[i];
+  requestFieldClear.value = true;
+  fireBurst({
+    col,
+    row,
+    vx: d.x * config.burstSpeed,
+    vy: d.y * config.burstSpeed,
+    density: config.burstDensity,
+  });
+}
+
+function clearField() {
+  requestFieldClear.value = true;
+}
 </script>
 
 <template>
@@ -29,6 +76,29 @@ function togglePlacing() {
     <section v-for="[group, params] in groups" :key="group">
       <h3>{{ group }}</h3>
       <ParameterControl v-for="p in params" :key="p.key" :meta="p" />
+      <!-- Direction grid lives inside the Test Burst group (kept separate
+           from generic ParameterControls because it isn't a single value). -->
+      <template v-if="group === 'Test Burst'">
+        <div class="burst-grid">
+          <button
+            v-for="d in burstDirections"
+            :key="d.index"
+            type="button"
+            class="primary"
+            :title="`Fire 1-frame burst pointing ${d.label} from map centre`"
+            @click="fireDirectionalBurst(d.index)"
+          >
+            {{ d.label }}
+          </button>
+        </div>
+        <div class="srow buttons">
+          <button type="button" class="ghost" @click="clearField">Clear Field</button>
+        </div>
+        <p class="tip">
+          Fires a one-frame impulse from the map centre along one of the six 60° hex axes.
+          Watch the parcel travel: amplitude decays, density follows, a sliver disperses sideways.
+        </p>
+      </template>
     </section>
 
     <section>
@@ -84,6 +154,14 @@ h3 {
   gap: 8px;
 }
 .srow.buttons { gap: 6px; }
+
+.burst-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+}
+.burst-grid button { padding: 6px 0; }
 .count { color: #c2c2cc; }
 .hint { color: #6a8cff; font-style: italic; font-size: 11px; }
 .tip { margin: 6px 0 0; color: #6b6b78; font-size: 11px; line-height: 1.4; }

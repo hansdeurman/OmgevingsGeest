@@ -6,7 +6,15 @@ import type { Renderer } from '../../rendering/Renderer';
 import { buildWorld } from '../../generation/WorldGenerator';
 import { config, generationKeys, HEX_PIXEL_SIZE } from '../../config/parameters';
 import type { World } from '../../world/World';
-import { AirFlowSimulation, addSource, placingSource, windSources } from '../../airflow';
+import {
+  AirFlowSimulation,
+  addSource,
+  placingSource,
+  windSources,
+  windBursts,
+  clearBursts,
+  requestFieldClear,
+} from '../../airflow';
 import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
 
 const hostRef = ref<HTMLDivElement>();
@@ -53,6 +61,12 @@ function frame(now: number) {
   lastFrameTime = now;
 
   if (renderer && world) {
+    // Honour clear requests (from the test-burst tooling) before the next
+    // step so a fresh burst lands on a clean field.
+    if (airFlow && requestFieldClear.value) {
+      airFlow.clearField();
+      requestFieldClear.value = false;
+    }
     if (airFlow && config.showAirFlow && dt > 0) {
       airFlow.step(world, {
         ambientSpeed: config.windAmbientSpeed,
@@ -63,13 +77,17 @@ function frame(now: number) {
         maxSpeed: config.windMaxSpeed,
         advection: config.windAdvection,
         smoothing: config.windSmoothing,
-      }, dt, windSources);
+        densityDamping: config.windDensityDamping,
+      }, dt, windSources, windBursts);
+      // Bursts are one-shot — drain them after the step has stamped them in.
+      if (windBursts.length) clearBursts();
     }
     renderer.render({
       world,
       camera,
       windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
       windSources: config.showAirFlow ? windSources : undefined,
+      densityReference: config.showDensity ? config.burstDensity : undefined,
       sourcePreview: sourceDrag.value ?? undefined,
     });
   }

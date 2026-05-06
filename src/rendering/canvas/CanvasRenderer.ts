@@ -2,7 +2,12 @@ import type { Renderer, RenderFrame } from '../Renderer';
 import { offsetToPixel, hexCorners, gridPixelBounds } from '../../math/hex';
 import { heightToRGB, shade, rgbToCss } from '../palette';
 import { config, HEX_PIXEL_SIZE } from '../../config/parameters';
-import { drawAirflowOverlay, drawWindSources, drawSourcePreview } from './airflowOverlay';
+import {
+  drawAirflowOverlay,
+  drawWindSources,
+  drawSourcePreview,
+  drawDensityOverlay,
+} from './airflowOverlay';
 
 /**
  * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
@@ -47,7 +52,7 @@ export class CanvasRenderer implements Renderer {
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
 
-    const { world, camera, windField, windSources, sourcePreview } = frame;
+    const { world, camera, windField, windSources, densityReference, sourcePreview } = frame;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
@@ -118,6 +123,12 @@ export class CanvasRenderer implements Renderer {
         ctx.fillStyle = '#fff';
         ctx.fillText(label, x, y);
       }
+    }
+
+    // Density backdrop sits between terrain and the velocity arrows so a
+    // travelling parcel reads as a soft "cloud" with arrows on top.
+    if (windField && config.showAirFlow && densityReference !== undefined) {
+      drawDensityOverlay(ctx, world, windField, size, densityReference);
     }
 
     if (windField && config.showAirFlow) {

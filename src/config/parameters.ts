@@ -58,8 +58,17 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 5, step: 0.05, default: 2.5 },
   { key: 'windAdvection', label: 'Propagation', group: 'Wind', type: 'number', min: 0, max: 50, step: 0.5, default: 12 },
   { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.05 },
+  // Density evaporates slowly as the parcel travels — distinct from velocity
+  // damping so we can tune "how visible is the wave" independently from
+  // "how quickly does flow strength die out".
+  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.08 },
   { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 1 },
   { key: 'arrowScale', label: 'Arrow Scale', group: 'Wind', type: 'number', min: 1, max: 30, step: 0.5, default: 8 },
+
+  // Test bursts — tooling for examining the simulation in isolation.
+  { key: 'showDensity', label: 'Show Density', group: 'Test Burst', type: 'boolean', default: true },
+  { key: 'burstSpeed', label: 'Burst Speed', group: 'Test Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 2 },
+  { key: 'burstDensity', label: 'Burst Density', group: 'Test Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 1 },
 ];
 
 /** Derive the rectangular grid dimensions from a single hex-count knob. */
@@ -96,8 +105,12 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windMaxSpeed: number;
   windAdvection: number;
   windSmoothing: number;
+  windDensityDamping: number;
   arrowStride: number;
   arrowScale: number;
+  showDensity: boolean;
+  burstSpeed: number;
+  burstDensity: number;
 };
 
 export const generationKeys = parameterDefs

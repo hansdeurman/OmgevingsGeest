@@ -14,6 +14,12 @@ export interface RenderFrame {
   windField?: WindField;
   windSources?: ReadonlyArray<WindSource>;
   /**
+   * Reference density used by the density overlay to set alpha. Typically
+   * matches the burst strength so a fresh parcel reads as fully opaque.
+   * If undefined, the density overlay is not drawn.
+   */
+  densityReference?: number;
+  /**
    * In-progress source preview, in *world* pixel coords (not screen coords).
    * The renderer applies its own world transform; the caller has already
    * converted screen → world space.
