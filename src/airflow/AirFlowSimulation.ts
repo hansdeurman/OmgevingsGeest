@@ -288,15 +288,25 @@ export class AirFlowSimulation {
         const cvx = vx[idx];
         const cvy = vy[idx];
         const speed = Math.hypot(cvx, cvy);
+        const myDens = density[idx];
 
-        // Ambient + terrain accumulator.
-        let fx = ax;
-        let fy = ay;
+        // Density-gated forcing: forces require air to act on. An empty
+        // mountain cell has no density and therefore feels no terrain push,
+        // no pressure, no ambient — nothing to push around. Linear ramp:
+        // 0 (empty) .. 1 (≥ reference). Density that *did* end up at high
+        // ground feels proportional terrain force that drains it back to
+        // the valleys, exactly as the user described.
+        const densityFactor = Math.min(1, myDens / densRef);
+
+        // Ambient (gated): no air, no breeze.
+        let fx = ax * densityFactor;
+        let fy = ay * densityFactor;
 
         // White-noise turbulence forcing. Amplitude grows with local speed so
-        // calm areas stay calm and busy areas chop. Skipped when turb = 0.
-        if (turb > 0) {
-          const k = turb * (0.25 + speed);
+        // calm areas stay calm and busy areas chop. Skipped when turb = 0 or
+        // there is nothing to perturb.
+        if (turb > 0 && densityFactor > 0) {
+          const k = turb * (0.25 + speed) * densityFactor;
           fx += (Math.random() - 0.5) * 2 * k;
           fy += (Math.random() - 0.5) * 2 * k;
         }
@@ -304,13 +314,11 @@ export class AirFlowSimulation {
         // Local height gradient AND density gradient in pixel space. Both
         // are sums of (delta * neighbour_dir) over the 6-ring; ∇h points
         // uphill, ∇ρ points toward higher density. We compute them in one
-        // sweep to share the neighbour iteration. Smoothed heights avoid
-        // spikes at cliffs.
+        // sweep to share the neighbour iteration.
         let gx = 0;
         let gy = 0;
         let dgx = 0;
         let dgy = 0;
-        const myDens = density[idx];
         for (let i = 0; i < 6; i++) {
           const o = offs[i];
           const nc = col + o.dc;
@@ -330,22 +338,22 @@ export class AirFlowSimulation {
         // coupling; the *pull-downhill* effect is `downhillRatio` of that.
         // We split based on whether the velocity has an uphill component
         // (v · ∇h > 0). With v at rest the dot product is zero and we apply
-        // the gentler downhill regime — the slope still nudges air, just
-        // less aggressively than it would push back against an uphill gust.
-        // Strong winds feel less of it (overcome term).
+        // the gentler downhill regime. Strong winds feel less of it (overcome
+        // term). All gated by densityFactor — empty cells have no air for
+        // the slope to push around.
         const vDotGrad = cvx * gx + cvy * gy;
         const dirFactor = vDotGrad > 0 ? 1 : downhillRatio;
-        const tk = (coupling * dirFactor) / (1 + speed * overcome);
+        const tk = (coupling * dirFactor * densityFactor) / (1 + speed * overcome);
         fx -= gx * tk;
         fy -= gy * tk;
 
         // Pressure force from density: `f = -pressure * ∇ρ`. Pushes velocity
-        // toward lower density, i.e. away from where the parcel has piled up.
-        // This is what drives circulation back to sinks instead of letting
-        // density just accumulate at a steady state.
-        if (pressure > 0) {
-          fx -= dgx * pressure;
-          fy -= dgy * pressure;
+        // toward lower density. Also gated — only existing air pushes itself
+        // outward, not the void next to a parcel.
+        if (pressure > 0 && densityFactor > 0) {
+          const pk = pressure * densityFactor;
+          fx -= dgx * pk;
+          fy -= dgy * pk;
         }
 
         // Integrate: damped velocity + force impulse over dt.
