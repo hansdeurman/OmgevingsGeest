@@ -18,7 +18,7 @@ import {
   clearBursts,
   requestFieldClear,
 } from '../../airflow';
-import { gridPixelBounds, pixelToOffset, offsetToPixel, offsetNeighbours, NEIGHBOUR_DIRS } from '../../math/hex';
+import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
 
 const hostRef = ref<HTMLDivElement>();
 
@@ -113,10 +113,12 @@ onMounted(() => {
   renderer.resize(host.clientWidth, host.clientHeight);
   regenerate();
 
-  // First-mount test scenario: flatten the world and seed 6 outward-firing
-  // burst sources in a hex-distance-3 ring around the centre. Lets us
-  // examine the new two-axis advection split in isolation from terrain.
-  // Subsequent regenerates (seed change, etc.) bring back real terrain
+  // First-mount test scenario: flatten the world and seed 12 outward-firing
+  // burst sources in a ring at radius 5 hexes from the centre, every 30°.
+  // Six of them sit on hex axes (the natural lattice directions), the other
+  // six fall between axes — exactly the directions where single-neighbour
+  // push used to lock up. With the new two-axis flux split they should all
+  // propagate cleanly outward. Subsequent regenerates restore real terrain
   // and don't replant these sources.
   for (let i = 0; i < world.tiles.length; i++) world.tiles[i].height = 0;
   airFlow = new AirFlowSimulation(world);
@@ -125,21 +127,24 @@ onMounted(() => {
     const { width, height } = gridDimensions(config.hexCount);
     const cx = Math.floor(width / 2);
     const cy = Math.floor(height / 2);
-    for (let i = 0; i < 6; i++) {
-      let c = cx;
-      let r = cy;
-      for (let s = 0; s < 3; s++) {
-        const offs = offsetNeighbours(r);
-        c += offs[i].dc;
-        r += offs[i].dr;
-      }
-      if (c < 0 || c >= width || r < 0 || r >= height) continue;
-      const dir = NEIGHBOUR_DIRS[i];
+    const centerPx = offsetToPixel(cx, cy, HEX_PIXEL_SIZE);
+    // Radius in pixel space corresponding to 5 hex hops along an axis.
+    const radiusPx = 5 * Math.sqrt(3) * HEX_PIXEL_SIZE;
+    const placed = new Set<number>();
+    for (let i = 0; i < 12; i++) {
+      const angle = (i * Math.PI) / 6; // 0°, 30°, 60°, …
+      const tx = centerPx.x + radiusPx * Math.cos(angle);
+      const ty = centerPx.y + radiusPx * Math.sin(angle);
+      const cell = pixelToOffset(tx, ty, HEX_PIXEL_SIZE);
+      if (cell.col < 0 || cell.col >= width || cell.row < 0 || cell.row >= height) continue;
+      const idx = cell.row * width + cell.col;
+      if (placed.has(idx)) continue;
+      placed.add(idx);
       addSource({
-        col: c,
-        row: r,
-        vx: dir.x * config.burstSpeed,
-        vy: dir.y * config.burstSpeed,
+        col: cell.col,
+        row: cell.row,
+        vx: Math.cos(angle) * config.burstSpeed,
+        vy: Math.sin(angle) * config.burstSpeed,
         density: config.burstDensity,
         duration: config.burstDuration,
         period: config.burstPeriod,
