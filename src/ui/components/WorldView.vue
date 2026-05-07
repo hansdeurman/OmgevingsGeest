@@ -57,6 +57,7 @@ const SOURCE_DRAG_SCALE = 1 / 12;
 function regenerate() {
   world = buildWorld(config);
   airFlow = new AirFlowSimulation(world);
+  airFlow.setBaseline(config.windDensityBaseline);
 }
 
 function frame(now: number) {
@@ -86,7 +87,7 @@ function frame(now: number) {
         heightDensityLoss: config.windHeightDensityLoss,
         densityDiffusion: config.windDensityDiffusion,
         velocityDensityCoupling: config.windVelocityDensityCoupling,
-        densityReference: config.burstDensity,
+        baseline: config.windDensityBaseline,
         turbulence: config.windTurbulence,
       }, dt, windSources, windBursts, windSinks);
       // Bursts are one-shot — drain them after the step has stamped them in.
@@ -235,6 +236,13 @@ onBeforeUnmount(() => {
 watch(
   () => generationKeys.map((k) => config[k]),
   () => regenerate(),
+);
+
+// Baseline slider: refills density everywhere when the user moves it.
+// User opts in by touching the slider; mid-experiment they can leave it.
+watch(
+  () => config.windDensityBaseline,
+  (v) => airFlow?.setBaseline(v),
 );
 </script>
 

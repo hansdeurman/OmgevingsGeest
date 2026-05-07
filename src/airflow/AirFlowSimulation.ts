@@ -78,16 +78,17 @@ export interface AirFlowParams {
    * The intuition: velocity is "the velocity of a parcel" — without a parcel,
    * there's nothing to be moving, so velocity bleeds off. 0 = independent
    * (legacy); higher = stronger gating. Defaults to roughly 1/sec in fully
-   * empty cells, smoothly disabled as density approaches the reference.
+   * empty cells, smoothly disabled as density approaches the baseline.
    */
   velocityDensityCoupling: number;
   /**
-   * Density level at which `velocityDensityCoupling` is fully relieved (no
-   * extra decay). Cells with density >= this value behave normally; cells
-   * below feel proportional extra damping, scaling linearly to full
-   * coupling at density = 0. Typically the burst density.
+   * Baseline density level. The whole field is initialised to this value, so
+   * every cell starts with "atmospheric air" present. It also serves as the
+   * reference for V↔ρ coupling and force gating: cells at baseline behave
+   * normally; cells below baseline (e.g. near sinks) lack air and feel
+   * proportionally less force / more velocity decay.
    */
-  densityReference: number;
+  baseline: number;
 }
 
 /**
@@ -141,6 +142,7 @@ export class AirFlowSimulation {
   /** Discard wind state. Called when the world is regenerated. */
   reset(world: World): void {
     this.field.reset();
+    this.field.density.fill(this.currentBaseline);
     this.smoothHeights(world);
   }
 
@@ -179,9 +181,26 @@ export class AirFlowSimulation {
     }
   }
 
-  /** Reset velocity AND density to zero. Used when firing a clean test burst. */
+  /** Tracked baseline density. The whole field is filled with this on init,
+   *  reset, or "Clear Field". Sources push density above it, sinks pull it
+   *  below — so deviations from this level are what actually drive flow. */
+  private currentBaseline = 1;
+
+  /**
+   * Set the baseline density and *immediately* refill the entire density
+   * field to that value, wiping any user-built parcels. Called on slider
+   * changes from the UI; user explicitly opts in by moving the slider.
+   */
+  setBaseline(value: number): void {
+    this.currentBaseline = value;
+    this.field.density.fill(value);
+  }
+
+  /** Reset velocity to zero and density to the current baseline. */
   clearField(): void {
-    this.field.clear();
+    this.field.vx.fill(0);
+    this.field.vy.fill(0);
+    this.field.density.fill(this.currentBaseline);
   }
 
   /**
@@ -277,7 +296,7 @@ export class AirFlowSimulation {
     const pressure = Math.max(0, params.pressure);
     const heightLoss = Math.max(0, params.heightDensityLoss);
     const vdCoupling = Math.max(0, params.velocityDensityCoupling);
-    const densRef = Math.max(1e-3, params.densityReference);
+    const baseline = Math.max(1e-3, params.baseline);
 
     // ----- Phase 1: apply forces, write to scratch buffer -----
     for (let row = 0; row < h; row++) {
@@ -296,7 +315,7 @@ export class AirFlowSimulation {
         // 0 (empty) .. 1 (≥ reference). Density that *did* end up at high
         // ground feels proportional terrain force that drains it back to
         // the valleys, exactly as the user described.
-        const densityFactor = Math.min(1, myDens / densRef);
+        const densityFactor = Math.min(1, myDens / baseline);
 
         // Ambient (gated): no air, no breeze.
         let fx = ax * densityFactor;
@@ -521,8 +540,8 @@ export class AirFlowSimulation {
     if (vdCoupling > 0) {
       for (let i = 0; i < density.length; i++) {
         const d = density[i];
-        if (d >= densRef) continue;
-        const lack = 1 - d / densRef; // 0 (full) .. 1 (empty)
+        if (d >= baseline) continue;
+        const lack = 1 - d / baseline; // 0 (full) .. 1 (empty)
         const r = Math.exp(-vdCoupling * lack * dt);
         vx[i] *= r;
         vy[i] *= r;

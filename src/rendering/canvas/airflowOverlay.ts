@@ -45,33 +45,14 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * RGB tuple on the same blue → green → red ramp `windColor` uses, but
- * returned as components so we can attach our own alpha for translucent
- * fills. Saturates at t = 1.
- */
-function rampRGB(t: number): [number, number, number] {
-  const tt = Math.max(0, Math.min(1, t));
-  let r: number;
-  let g: number;
-  let b: number;
-  if (tt < 0.5) {
-    const k = tt * 2;
-    r = lerp(60, 100, k);
-    g = lerp(140, 220, k);
-    b = lerp(255, 110, k);
-  } else {
-    const k = (tt - 0.5) * 2;
-    r = lerp(100, 240, k);
-    g = lerp(220, 80, k);
-    b = lerp(110, 60, k);
-  }
-  return [r | 0, g | 0, b | 0];
-}
-
-/**
- * Fill each hex with a translucent tint coloured by density on the same
- * ramp the arrows use, so a "parcel" reads as a coloured cloud underneath
- * the arrows. Alpha uses sqrt(t) so even faint traces show up.
+ * Render density as *deviation from baseline*. Cells at baseline draw
+ * nothing — only the parts of the field where there's more or less air than
+ * normal. Above baseline → warm (orange/red). Below → cool (cyan/blue).
+ * Magnitude of deviation drives both saturation and alpha (sqrt curve so
+ * faint deviations still read).
+ *
+ * `referenceDensity` is what saturates the ramp — typically the burst
+ * density value, i.e. how much "above baseline" is full red.
  */
 export function drawDensityOverlay(
   ctx: CanvasRenderingContext2D,
@@ -79,27 +60,42 @@ export function drawDensityOverlay(
   field: WindField,
   hexSize: number,
   referenceDensity: number,
+  baseline: number,
   maxAlpha = 0.7,
 ): void {
-  const ref = Math.max(1e-4, referenceDensity);
-  // Anything below this is invisible anyway — skip the polygon work.
-  const cutoff = ref * 0.01;
+  const span = Math.max(1e-3, referenceDensity - baseline);
+  // Don't draw cells whose deviation is essentially zero — keeps baseline
+  // areas visually clean and saves a lot of polygon work.
+  const cutoff = span * 0.02;
   for (let row = 0; row < world.height; row++) {
     for (let col = 0; col < world.width; col++) {
       const idx = row * world.width + col;
-      const d = field.density[idx];
-      if (d <= cutoff) continue;
-      const t = Math.min(1, d / ref);
-      // sqrt-curve so low density still reads; full saturation at t = 1.
-      const a = Math.min(maxAlpha, Math.sqrt(t) * maxAlpha);
-      const [r, g, b] = rampRGB(t);
+      const dev = field.density[idx] - baseline;
+      if (Math.abs(dev) < cutoff) continue;
+      const t = Math.max(-1, Math.min(1, dev / span));
+      const absT = Math.abs(t);
+      const a = Math.min(maxAlpha, Math.sqrt(absT) * maxAlpha);
+      let r: number;
+      let g: number;
+      let b: number;
+      if (t > 0) {
+        // Above baseline: yellow → orange → red.
+        r = lerp(220, 250, absT);
+        g = lerp(180, 70, absT);
+        b = lerp(60, 50, absT);
+      } else {
+        // Below baseline: cyan → mid-blue → deep blue.
+        r = lerp(80, 40, absT);
+        g = lerp(200, 120, absT);
+        b = lerp(220, 200, absT);
+      }
       const c = offsetToPixel(col, row, hexSize);
       const corners = hexCorners(c.x, c.y, hexSize);
       ctx.beginPath();
       ctx.moveTo(corners[0].x, corners[0].y);
       for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
       ctx.closePath();
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
+      ctx.fillStyle = `rgba(${r | 0}, ${g | 0}, ${b | 0}, ${a.toFixed(3)})`;
       ctx.fill();
     }
   }

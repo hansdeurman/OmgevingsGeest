@@ -67,10 +67,15 @@ export const parameterDefs: ParamMeta[] = [
   // Default 0 — the diffusion was muddying the parcel/no-parcel distinction
   // and propagating velocity into mountains.
   { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0 },
-  // Density evaporates slowly as the parcel travels — distinct from velocity
-  // damping so we can tune "how visible is the wave" independently from
-  // "how quickly does flow strength die out".
-  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.08 },
+  // Baseline density. The whole field is initialised to this on world
+  // build / Clear Field. Sources push density above; sinks pull below.
+  // Deviations from this level are what drive flow — you don't have a
+  // "where does the air go" problem because the field is always full.
+  { key: 'windDensityBaseline', label: 'ρ Baseline', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1 },
+  // Decay of density toward zero (legacy "density evaporates" mode). 0 is
+  // the default for the baseline-density model — total density should stay
+  // roughly conserved, modulated by sinks.
+  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0 },
   // Pressure: high-density cells push velocity outward toward low-density
   // cells. This is what lets the system circulate (back to sinks) instead of
   // equilibrating. Set to 0 for the older velocity-only behaviour.
@@ -143,6 +148,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windAdvection: number;
   windSmoothing: number;
   windDensityDamping: number;
+  windDensityBaseline: number;
   windPressure: number;
   windVelocityDensityCoupling: number;
   windHeightDensityLoss: number;

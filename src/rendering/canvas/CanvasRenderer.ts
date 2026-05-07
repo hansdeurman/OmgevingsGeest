@@ -129,7 +129,7 @@ export class CanvasRenderer implements Renderer {
     // Density backdrop sits between terrain and the velocity arrows so a
     // travelling parcel reads as a soft "cloud" with arrows on top.
     if (windField && config.showAirFlow && densityReference !== undefined) {
-      drawDensityOverlay(ctx, world, windField, size, densityReference);
+      drawDensityOverlay(ctx, world, windField, size, densityReference, config.windDensityBaseline);
     }
 
     if (windField && config.showAirFlow) {
