@@ -16,7 +16,7 @@ export class WindField {
   readonly density: Float32Array;
 
   /** Magnitude of the random per-cell seed used by `seed()`. */
-  static readonly SEED_AMPLITUDE = 0.01;
+  static readonly SEED_AMPLITUDE = 0;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -37,17 +37,15 @@ export class WindField {
   }
 
   /**
-   * Seed the velocity field with a tiny random vector per cell. Pure zero is a
-   * fixed point of the dynamics (the terrain force is direction-gated), so a
-   * micro-perturbation lets the simulation actually evolve. Density is left
-   * at zero so test bursts start from a clean, predictable parcel.
+   * Initialise to a clean rest state. Density is zero, velocity is zero. The
+   * gradient-based terrain force isn't direction-gated anymore, so true zero
+   * is no longer a stuck fixed point — we don't need a noise seed to "kick"
+   * the system into motion. Anything with a non-zero force (sources, ambient,
+   * turbulence) will move it; otherwise it stays calm, as it should.
    */
   seed(): void {
-    const a = WindField.SEED_AMPLITUDE;
-    for (let i = 0; i < this.vx.length; i++) {
-      this.vx[i] = (Math.random() - 0.5) * a;
-      this.vy[i] = (Math.random() - 0.5) * a;
-    }
+    this.vx.fill(0);
+    this.vy.fill(0);
     this.density.fill(0);
   }
 

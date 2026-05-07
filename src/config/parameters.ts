@@ -63,7 +63,10 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.1 },
   { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
   { key: 'windAdvection', label: 'Propagation', group: 'Wind', type: 'number', min: 0, max: 50, step: 0.5, default: 12 },
-  { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.05 },
+  // Smoothing is purely cosmetic (averages each cell with its 6 neighbours).
+  // Default 0 — the diffusion was muddying the parcel/no-parcel distinction
+  // and propagating velocity into mountains.
+  { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0 },
   // Density evaporates slowly as the parcel travels — distinct from velocity
   // damping so we can tune "how visible is the wave" independently from
   // "how quickly does flow strength die out".
@@ -75,7 +78,7 @@ export const parameterDefs: ParamMeta[] = [
   // Velocity follows the parcel: cells without density bleed off velocity at
   // this rate (per second, scaled linearly by 1 - density/reference). Zero
   // = velocity is independent of density.
-  { key: 'windVelocityDensityCoupling', label: 'V↔ρ Coupling', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.6 },
+  { key: 'windVelocityDensityCoupling', label: 'V↔ρ Coupling', group: 'Wind', type: 'number', min: 0, max: 10, step: 0.05, default: 2.5 },
   // Density loss when air climbs a slope (per unit normalised height delta,
   // applied as exp(-dh * loss) on the inflow term). Default ~1 = a parcel
   // crossing a 0.3-tall ridge keeps ~74% of its density.

@@ -104,9 +104,6 @@ export function drawAirflowOverlay(
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Anything below this counts as numerically dead (avoids drawing degenerate
-  // direction arrows for cells that have effectively zero wind).
-  const deadEpsilon = 1e-4;
   const maxSpeed = Math.max(0.0001, params.maxSpeed);
 
   for (let row = 0; row < world.height; row += stride) {
@@ -115,11 +112,13 @@ export function drawAirflowOverlay(
       const vx = field.vx[idx];
       const vy = field.vy[idx];
       const mag = Math.hypot(vx, vy);
-      if (mag < deadEpsilon) continue;
+      // Length is purely proportional to magnitude (no half-hex floor). We
+      // skip arrows that would be invisibly short — that's how we get
+      // visual signal: cells with real wind read clearly, calm cells stay
+      // empty instead of being pretend-vague gestures.
+      const len = mag * params.arrowScale;
+      if (len < size * 0.25) continue;
       const dens = field.density[idx];
-
-      // Length scales with velocity (with a floor so weak cells still nub).
-      const len = Math.max(size * 0.5, mag * params.arrowScale);
       const ang = Math.atan2(vy, vx);
       const cos = Math.cos(ang);
       const sin = Math.sin(ang);
