@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - claude/hexagon-environment-game-8JtoN
+      - claude/fix-airflow-simulation-L8CHE
       - main
   workflow_dispatch:
 

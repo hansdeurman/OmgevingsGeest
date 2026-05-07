@@ -280,15 +280,16 @@ export class AirFlowSimulation {
       vy.set(this.nextVy);
     }
 
-    // ----- Phase 3: upwind advection (velocity AND density together) -----
-    // Each cell pulls a fraction of its velocity from the neighbour most
-    // *upwind* of itself. This is what actually transports wind across the
-    // map (the diffusion above only spreads it isotropically). Blend factor
-    // is the CFL number `speed * dt / hex_size`, scaled by `advection`.
+    // ----- Phase 3: inflow-driven advection (velocity AND density together) -----
+    // Each cell pulls a fraction of its state from the neighbour most actively
+    // flowing INTO it. Critically, the rate is set by *that neighbour's* speed,
+    // not the cell's own — otherwise a still cell pulls nothing (alpha = 0) and
+    // the wave can never reach quiet air, only diffuse there via smoothing.
+    // That was the symptom of "even a continuous source dies after a few hexes".
     //
-    // Density is advected by the same blend with the same upwind pick, so the
-    // air parcel travels with its own velocity. We compute it in the same
-    // sweep to share the (speed, upwind, alpha) work.
+    // For neighbour i at unit direction d_i (this -> neighbour), the component
+    // of its velocity pointing back toward us is -(v_N · d_i). The largest
+    // positive value identifies the dominant inflow.
     const advRate = Math.max(0, params.advection);
     if (advRate > 0) {
       this.nextVx.set(vx);
@@ -300,34 +301,28 @@ export class AirFlowSimulation {
         const offs = offsetNeighbours(row);
         for (let col = 0; col < w; col++) {
           const idx = row * w + col;
-          const cvx = vx[idx];
-          const cvy = vy[idx];
-          const speed = Math.hypot(cvx, cvy);
-          if (speed < 1e-5) continue;
 
-          // Upwind neighbour: maximises -(v · d_i).
-          let bestI = -1;
-          let bestDot = 0;
+          let bestNi = -1;
+          let bestInflow = 0;
           for (let i = 0; i < 6; i++) {
+            const o = offs[i];
+            const nc = col + o.dc;
+            const nr = row + o.dr;
+            if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
+            const ni = nr * w + nc;
             const d = NEIGHBOUR_DIRS[i];
-            const dot = -(cvx * d.x + cvy * d.y);
-            if (dot > bestDot) {
-              bestDot = dot;
-              bestI = i;
+            const inflow = -(vx[ni] * d.x + vy[ni] * d.y);
+            if (inflow > bestInflow) {
+              bestInflow = inflow;
+              bestNi = ni;
             }
           }
-          if (bestI < 0) continue;
+          if (bestNi < 0) continue;
 
-          const o = offs[bestI];
-          const nc = col + o.dc;
-          const nr = row + o.dr;
-          if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-          const ni = nr * w + nc;
-
-          const alpha = Math.min(1, advRate * speed * dt * invHex);
-          this.nextVx[idx] = cvx * (1 - alpha) + vx[ni] * alpha;
-          this.nextVy[idx] = cvy * (1 - alpha) + vy[ni] * alpha;
-          this.nextDensity[idx] = density[idx] * (1 - alpha) + density[ni] * alpha;
+          const alpha = Math.min(1, advRate * bestInflow * dt * invHex);
+          this.nextVx[idx] = vx[idx] * (1 - alpha) + vx[bestNi] * alpha;
+          this.nextVy[idx] = vy[idx] * (1 - alpha) + vy[bestNi] * alpha;
+          this.nextDensity[idx] = density[idx] * (1 - alpha) + density[bestNi] * alpha;
         }
       }
 
