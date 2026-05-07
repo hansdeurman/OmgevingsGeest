@@ -428,23 +428,34 @@ export class AirFlowSimulation {
       vy.set(this.nextVy);
     }
 
-    // ----- Phase 3: flux-based advection (conservative push) -----
+    // ----- Phase 3: flux-based advection (conservative push, 2-axis split) -----
     // Each cell pushes momentum AND above-baseline density to its downwind
-    // neighbour. The flux moves out of A and into B, so A loses exactly what
-    // B gains — the cloud *travels* through the field instead of leaking
-    // velocity behind it. CFL-scaled by `advection`.
+    // neighbours. The flux moves out of A and into the *two* adjacent hex
+    // axes that flank the velocity angle, weighted by where the velocity
+    // points between them — a velocity exactly aligned with E sends 100%
+    // east; a velocity at 30° (between E and SE) sends 50% east, 50% SE.
+    //
+    // This kills the 6-axis lattice anisotropy: a velocity in any direction
+    // propagates correctly, not just along the six hex axes. Same trick
+    // bilinear interpolation does on rectangular grids in Stam's "Stable
+    // Fluids" paper, adapted to hex by splitting between the two flanking
+    // axes instead of four flanking corners.
     //
     // Density flux only moves the deviation from baseline: atmospheric
     // baseline air stays put, only the parcel (positive deviation) or hole
-    // (negative deviation, near a sink) actually advects. That's why a
-    // burst of air can cross the whole map without leaving high velocity
-    // in its wake.
+    // (negative deviation, near a sink) actually advects.
     const advRate = Math.max(0, params.advection);
     if (advRate > 0) {
       this.nextVx.set(vx);
       this.nextVy.set(vy);
       this.nextDensity.set(density);
       const invHex = 1 / HEX_PIXEL_SIZE;
+
+      // NEIGHBOUR_DIRS in CCW (canvas y-down) angle order (0°, 60°, 120°,
+      // 180°, 240°, 300°) — i.e. E, SE, SW, W, NW, NE. Maps each 60°
+      // bucket to the right index in NEIGHBOUR_DIRS.
+      const sortedDir: ReadonlyArray<number> = [0, 5, 4, 3, 2, 1];
+      const SIXTH = Math.PI / 3;
 
       for (let row = 0; row < h; row++) {
         const offs = offsetNeighbours(row);
@@ -455,52 +466,52 @@ export class AirFlowSimulation {
           const speed = Math.hypot(cvx, cvy);
           if (speed < 1e-5) continue;
 
-          // Downwind: maximises v · d.
-          let bestDot = 0;
-          let bestI = -1;
-          for (let i = 0; i < 6; i++) {
-            const d = NEIGHBOUR_DIRS[i];
-            const dot = cvx * d.x + cvy * d.y;
-            if (dot > bestDot) {
-              bestDot = dot;
-              bestI = i;
-            }
-          }
-          if (bestI < 0) continue;
-
-          const o = offs[bestI];
-          const nc = col + o.dc;
-          const nr = row + o.dr;
-          if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-          const ni = nr * w + nc;
+          // Project velocity angle onto the two flanking 60° axes.
+          const angle = Math.atan2(cvy, cvx);
+          const angleNorm = (angle + 2 * Math.PI) % (2 * Math.PI);
+          const bucketF = angleNorm / SIXTH;
+          const bucket = Math.floor(bucketF) % 6;
+          const w2 = bucketF - Math.floor(bucketF);
+          const w1 = 1 - w2;
+          const dirA = sortedDir[bucket];
+          const dirB = sortedDir[(bucket + 1) % 6];
 
           // CFL-scaled flux fraction. At alpha = 1 the cell empties its
-          // momentum into the downwind neighbour in one substep — that's
-          // exactly the "moves along" behaviour we want for fast bursts.
+          // momentum into its downwind pair in one substep — that's the
+          // "moves along" behaviour we want for fast bursts.
           const alpha = Math.min(1, advRate * speed * dt * invHex);
 
-          // Velocity flux: all of A's velocity moves with the parcel.
           const fluxVx = cvx * alpha;
           const fluxVy = cvy * alpha;
+          const dDev = density[idx] - baseline;
+          const fluxD = dDev * alpha;
+
+          // A loses the full outgoing flux up front.
           this.nextVx[idx] -= fluxVx;
           this.nextVy[idx] -= fluxVy;
-          this.nextVx[ni] += fluxVx;
-          this.nextVy[ni] += fluxVy;
+          this.nextDensity[idx] -= fluxD;
 
-          // Density flux: only the deviation from baseline travels. Sender
-          // loses the full deviation; receiver gains it scaled by uphill
-          // height-loss (orographic precipitation).
-          const dDev = density[idx] - baseline;
-          if (dDev !== 0) {
+          // Distribute to up to two adjacent neighbours, with uphill loss
+          // applied to the density side only (orographic precipitation).
+          const send = (dirIdx: number, weight: number): void => {
+            if (weight <= 0) return;
+            const o = offs[dirIdx];
+            const nc = col + o.dc;
+            const nr = row + o.dr;
+            if (nc < 0 || nc >= w || nr < 0 || nr >= h) return;
+            const ni = nr * w + nc;
+            this.nextVx[ni] += fluxVx * weight;
+            this.nextVy[ni] += fluxVy * weight;
             let arriveFactor = 1;
             if (heightLoss > 0) {
               const dh = sh[ni] - sh[idx];
               if (dh > 0) arriveFactor = Math.exp(-dh * heightLoss);
             }
-            const sentD = dDev * alpha;
-            this.nextDensity[idx] -= sentD;
-            this.nextDensity[ni] += sentD * arriveFactor;
-          }
+            this.nextDensity[ni] += fluxD * weight * arriveFactor;
+          };
+
+          send(dirA, w1);
+          send(dirB, w2);
         }
       }
 
