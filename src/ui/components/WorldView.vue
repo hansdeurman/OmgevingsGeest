@@ -189,7 +189,18 @@ onMounted(() => {
         const mag = Math.hypot(sx, sy);
         const cap = config.windMaxSpeed;
         const k = mag > cap ? cap / mag : 1;
-        addSource({ col: cell.col, row: cell.row, vx: sx * k, vy: sy * k });
+        // Continuous sources inject density too — same value as bursts.
+        // Velocity without an air parcel makes no physical sense and was
+        // producing pure-velocity blue fans that the V↔ρ coupling can't
+        // make peace with. An always-on source is just a burst with
+        // duration = period = Infinity; both flavours deserve density.
+        addSource({
+          col: cell.col,
+          row: cell.row,
+          vx: sx * k,
+          vy: sy * k,
+          density: config.burstDensity,
+        });
       }
       // One-shot: leave placement mode after creating one source.
       placingSource.value = false;
