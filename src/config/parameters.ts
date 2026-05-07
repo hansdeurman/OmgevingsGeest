@@ -59,7 +59,7 @@ export const parameterDefs: ParamMeta[] = [
   // down but the block-up effect dominates.
   { key: 'windDownhillRatio', label: 'Downhill Ratio', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.3 },
   { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.5 },
-  { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 5, step: 0.05, default: 2.5 },
+  { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
   { key: 'windAdvection', label: 'Propagation', group: 'Wind', type: 'number', min: 0, max: 50, step: 0.5, default: 12 },
   { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.05 },
   // Density evaporates slowly as the parcel travels — distinct from velocity
@@ -70,6 +70,10 @@ export const parameterDefs: ParamMeta[] = [
   // cells. This is what lets the system circulate (back to sinks) instead of
   // equilibrating. Set to 0 for the older velocity-only behaviour.
   { key: 'windPressure', label: 'Pressure', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1.5 },
+  // Velocity follows the parcel: cells without density bleed off velocity at
+  // this rate (per second, scaled linearly by 1 - density/reference). Zero
+  // = velocity is independent of density.
+  { key: 'windVelocityDensityCoupling', label: 'V↔ρ Coupling', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.6 },
   // Density loss when air climbs a slope (per unit normalised height delta,
   // applied as exp(-dh * loss) on the inflow term). Default ~1 = a parcel
   // crossing a 0.3-tall ridge keeps ~74% of its density.
@@ -83,8 +87,8 @@ export const parameterDefs: ParamMeta[] = [
 
   // Burst tooling — directional test buttons + drag-placed periodic sources.
   { key: 'showDensity', label: 'Show Density', group: 'Burst', type: 'boolean', default: true },
-  { key: 'burstSpeed', label: 'Burst Speed', group: 'Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 2 },
-  { key: 'burstDensity', label: 'Burst Density', group: 'Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 1 },
+  { key: 'burstSpeed', label: 'Burst Speed', group: 'Burst', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
+  { key: 'burstDensity', label: 'Burst Density', group: 'Burst', type: 'number', min: 0.1, max: 20, step: 0.1, default: 3 },
   // Burst-source duty cycle (snapshotted at placement). Duration is how long
   // each pulse stays "on"; period is the gap between pulse starts.
   { key: 'burstDuration', label: 'On Time', group: 'Burst', type: 'number', min: 0.05, max: 5, step: 0.05, default: 0.3 },
@@ -131,6 +135,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windSmoothing: number;
   windDensityDamping: number;
   windPressure: number;
+  windVelocityDensityCoupling: number;
   windHeightDensityLoss: number;
   windTurbulence: number;
   arrowStride: number;

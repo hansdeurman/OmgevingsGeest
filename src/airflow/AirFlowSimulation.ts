@@ -65,6 +65,21 @@ export interface AirFlowParams {
    * climb — analogue of orographic precipitation.
    */
   heightDensityLoss: number;
+  /**
+   * How aggressively velocity decays in cells that aren't carrying density.
+   * The intuition: velocity is "the velocity of a parcel" — without a parcel,
+   * there's nothing to be moving, so velocity bleeds off. 0 = independent
+   * (legacy); higher = stronger gating. Defaults to roughly 1/sec in fully
+   * empty cells, smoothly disabled as density approaches the reference.
+   */
+  velocityDensityCoupling: number;
+  /**
+   * Density level at which `velocityDensityCoupling` is fully relieved (no
+   * extra decay). Cells with density >= this value behave normally; cells
+   * below feel proportional extra damping, scaling linearly to full
+   * coupling at density = 0. Typically the burst density.
+   */
+  densityReference: number;
 }
 
 /**
@@ -262,6 +277,8 @@ export class AirFlowSimulation {
     const turb = Math.max(0, params.turbulence);
     const pressure = Math.max(0, params.pressure);
     const heightLoss = Math.max(0, params.heightDensityLoss);
+    const vdCoupling = Math.max(0, params.velocityDensityCoupling);
+    const densRef = Math.max(1e-3, params.densityReference);
 
     // ----- Phase 1: apply forces, write to scratch buffer -----
     for (let row = 0; row < h; row++) {
@@ -450,6 +467,22 @@ export class AirFlowSimulation {
     const dRetain = Math.exp(-Math.max(0, params.densityDamping) * dt);
     if (dRetain < 1) {
       for (let i = 0; i < density.length; i++) density[i] *= dRetain;
+    }
+
+    // ----- Phase 5: density-coupled velocity decay -----
+    // Velocity follows the parcel: where there's no density passing through,
+    // there's nothing for the velocity field to be the velocity of. Cells
+    // below `densityReference` get extra exponential damping proportional
+    // to how empty they are. At density >= reference the gate is fully off.
+    if (vdCoupling > 0) {
+      for (let i = 0; i < density.length; i++) {
+        const d = density[i];
+        if (d >= densRef) continue;
+        const lack = 1 - d / densRef; // 0 (full) .. 1 (empty)
+        const r = Math.exp(-vdCoupling * lack * dt);
+        vx[i] *= r;
+        vy[i] *= r;
+      }
     }
   }
 }

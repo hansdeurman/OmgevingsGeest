@@ -138,6 +138,9 @@ export class CanvasRenderer implements Renderer {
         stride: config.arrowStride,
         arrowScale: config.arrowScale,
         maxSpeed: config.windMaxSpeed,
+        // Arrow colour is keyed to density. Default to burstDensity when the
+        // overlay backdrop is off so arrows stay correctly normalised.
+        densityReference: densityReference ?? config.burstDensity,
         zoom: camera.zoom,
       });
     }

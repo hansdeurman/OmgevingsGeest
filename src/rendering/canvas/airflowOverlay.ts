@@ -9,8 +9,10 @@ export interface AirflowOverlayParams {
   stride: number;
   /** Pixels per unit of wind speed in arrow length. */
   arrowScale: number;
-  /** Speed at which the colour ramp tops out (becomes red). */
+  /** Speed at which the WIDTH ramp tops out (i.e. shows max stroke). */
   maxSpeed: number;
+  /** Density at which the COLOUR ramp tops out (becomes red). */
+  densityReference: number;
   /** Camera zoom — used to keep stroke widths consistent on screen. */
   zoom: number;
 }
@@ -93,17 +95,19 @@ export function drawAirflowOverlay(
   const { hexSize: size, zoom } = params;
   const stride = Math.max(1, params.stride | 0);
 
-  // Stroke width and minimum head size in screen pixels (constant across zoom).
-  const lineWidth = 1.4 / zoom;
+  // Width scales with velocity magnitude so a fast cell visibly shouts.
+  // Bounds in screen pixels (constant across zoom).
+  const widthMin = 0.6 / zoom;
+  const widthMax = 3.0 / zoom;
   const minHead = 2 / zoom;
 
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.lineWidth = lineWidth;
 
   // Anything below this counts as numerically dead (avoids drawing degenerate
   // direction arrows for cells that have effectively zero wind).
   const deadEpsilon = 1e-4;
+  const maxSpeed = Math.max(0.0001, params.maxSpeed);
 
   for (let row = 0; row < world.height; row += stride) {
     for (let col = 0; col < world.width; col += stride) {
@@ -112,17 +116,15 @@ export function drawAirflowOverlay(
       const vy = field.vy[idx];
       const mag = Math.hypot(vx, vy);
       if (mag < deadEpsilon) continue;
+      const dens = field.density[idx];
 
-      // Strong wind genuinely produces longer arrows (no upper cap). Floor at
-      // ~half a hex so weak cells still show a visible nub.
+      // Length scales with velocity (with a floor so weak cells still nub).
       const len = Math.max(size * 0.5, mag * params.arrowScale);
       const ang = Math.atan2(vy, vx);
       const cos = Math.cos(ang);
       const sin = Math.sin(ang);
       const c = offsetToPixel(col, row, size);
 
-      // Draw line + arrowhead from (-len/2) to (+len/2) along the wind dir,
-      // computed inline to avoid the cost of save/translate/rotate per arrow.
       const halfLen = len * 0.5;
       const tipX = c.x + cos * halfLen;
       const tipY = c.y + sin * halfLen;
@@ -130,14 +132,19 @@ export function drawAirflowOverlay(
       const tailY = c.y - sin * halfLen;
 
       const head = Math.max(minHead, len * 0.32);
-      // Perpendicular components for the head wings.
       const px = -sin * head * 0.55;
       const py = cos * head * 0.55;
-      // A point slightly back from the tip along the shaft.
       const backX = tipX - cos * head;
       const backY = tipY - sin * head;
 
-      ctx.strokeStyle = windColor(mag, params.maxSpeed);
+      // Width = velocity magnitude (strong → fat). Colour = density (loaded
+      // → red). The two channels are visually orthogonal: a long fat blue
+      // arrow = lots of velocity but no parcel; a stubby red arrow = dense
+      // parcel barely moving; long fat red = the good stuff.
+      const tSpeed = Math.min(1, mag / maxSpeed);
+      ctx.lineWidth = widthMin + (widthMax - widthMin) * tSpeed;
+      ctx.strokeStyle = windColor(dens, params.densityReference);
+
       ctx.beginPath();
       ctx.moveTo(tailX, tailY);
       ctx.lineTo(tipX, tipY);
