@@ -1,16 +1,32 @@
 import { reactive, ref } from 'vue';
 
 /**
- * A user-placed wind generator: at this hex, force the wind vector to be
- * exactly (vx, vy) every step. Acts as a Dirichlet boundary condition for
- * the simulation — predictable visuals, no source-cell dynamics, while
- * neighbouring cells advect normally.
+ * A user-placed wind generator. While "on", it forces velocity (and density,
+ * if non-zero) at its cell to its configured (vx, vy, density) — Dirichlet
+ * boundary, predictable visuals, no source-cell dynamics, while neighbouring
+ * cells advect normally.
+ *
+ * `duration` and `period` together describe a duty cycle:
+ *   - duration = Infinity (or duration >= period): always on (continuous).
+ *   - 0 < duration < period: fires for `duration` seconds out of every
+ *     `period` seconds. Phase is tracked internally and advances each step.
+ *
+ * Lifetime properties are snapshotted at placement and never change for that
+ * source — the user sets them ahead of time, then leaves the source alone.
  */
 export interface WindSource {
   col: number;
   row: number;
   vx: number;
   vy: number;
+  /** Density injected while "on". 0 for velocity-only sources. */
+  density: number;
+  /** Seconds the source is "on" per cycle. Use Infinity for always-on. */
+  duration: number;
+  /** Cycle length in seconds. Use Infinity (or any value) when always-on. */
+  period: number;
+  /** Internal phase tracker, advances by dt and wraps modulo period. */
+  phase: number;
 }
 
 /**
@@ -55,8 +71,30 @@ export const placingSource = ref(false);
 export type PlacementMode = 'continuous' | 'burst';
 export const placementMode = ref<PlacementMode>('continuous');
 
-export function addSource(s: WindSource): void {
-  windSources.push(s);
+/**
+ * Lightweight constructor: callers supply position + velocity, optionally
+ * override the burst-cycle fields. Defaults yield an always-on continuous
+ * source matching the legacy behaviour.
+ */
+export function addSource(s: {
+  col: number;
+  row: number;
+  vx: number;
+  vy: number;
+  density?: number;
+  duration?: number;
+  period?: number;
+}): void {
+  windSources.push({
+    col: s.col,
+    row: s.row,
+    vx: s.vx,
+    vy: s.vy,
+    density: s.density ?? 0,
+    duration: s.duration ?? Infinity,
+    period: s.period ?? Infinity,
+    phase: 0,
+  });
 }
 
 export function clearSources(): void {

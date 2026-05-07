@@ -9,7 +9,6 @@ import type { World } from '../../world/World';
 import {
   AirFlowSimulation,
   addSource,
-  fireBurst,
   placingSource,
   placementMode,
   windSources,
@@ -80,6 +79,7 @@ function frame(now: number) {
         advection: config.windAdvection,
         smoothing: config.windSmoothing,
         densityDamping: config.windDensityDamping,
+        turbulence: config.windTurbulence,
       }, dt, windSources, windBursts);
       // Bursts are one-shot — drain them after the step has stamped them in.
       if (windBursts.length) clearBursts();
@@ -148,29 +148,35 @@ onMounted(() => {
     if (mode === 'source' && sourceDrag.value) {
       const { start, end } = sourceDrag.value;
       const cell = pixelToOffset(start.x, start.y, HEX_PIXEL_SIZE);
-      // Drag direction & length set the source vector; clamp to maxSpeed so
-      // a wild drag doesn't immediately saturate the colour ramp.
-      const dx = (end.x - start.x) * SOURCE_DRAG_SCALE;
-      const dy = (end.y - start.y) * SOURCE_DRAG_SCALE;
-      const mag = Math.hypot(dx, dy);
-      const cap = config.windMaxSpeed;
-      const k = mag > cap ? cap / mag : 1;
-      const vx = dx * k;
-      const vy = dy * k;
-      // Branch on the *placement mode* chosen before the drag began. Bursts
-      // fire once and disappear; continuous sources persist. Drag-placed
-      // bursts deliberately do NOT clear the field — that's reserved for the
-      // directional Test Burst buttons, which are explicit isolation runs.
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      // Branch on the *placement mode* chosen before the drag began. The
+      // mode also changes how strength is sourced: continuous uses drag
+      // length (clamped to maxSpeed); burst takes its strength from the
+      // slider, so the drag only sets direction. The source's burst params
+      // (duration, period, density) are snapshotted here and never change.
       if (placementMode.value === 'burst') {
-        fireBurst({
+        const mag = Math.hypot(dx, dy);
+        if (mag < 1e-3) { mode = 'idle'; sourceDrag.value = null; return; }
+        const speed = config.burstSpeed;
+        const vx = (dx / mag) * speed;
+        const vy = (dy / mag) * speed;
+        addSource({
           col: cell.col,
           row: cell.row,
           vx,
           vy,
           density: config.burstDensity,
+          duration: config.burstDuration,
+          period: config.burstPeriod,
         });
       } else {
-        addSource({ col: cell.col, row: cell.row, vx, vy });
+        const sx = dx * SOURCE_DRAG_SCALE;
+        const sy = dy * SOURCE_DRAG_SCALE;
+        const mag = Math.hypot(sx, sy);
+        const cap = config.windMaxSpeed;
+        const k = mag > cap ? cap / mag : 1;
+        addSource({ col: cell.col, row: cell.row, vx: sx * k, vy: sy * k });
       }
       // One-shot: leave placement mode after creating one source.
       placingSource.value = false;

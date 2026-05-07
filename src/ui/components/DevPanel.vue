@@ -77,9 +77,9 @@ function clearField() {
     <section v-for="[group, params] in groups" :key="group">
       <h3>{{ group }}</h3>
       <ParameterControl v-for="p in params" :key="p.key" :meta="p" />
-      <!-- Direction grid lives inside the Test Burst group (kept separate
-           from generic ParameterControls because it isn't a single value). -->
-      <template v-if="group === 'Test Burst'">
+      <!-- Direction grid lives inside the Burst group (kept separate from
+           generic ParameterControls because it isn't a single value). -->
+      <template v-if="group === 'Burst'">
         <div class="burst-grid">
           <button
             v-for="d in burstDirections"
@@ -210,7 +210,7 @@ h3 {
   accent-color: #6a8cff;
   margin: 0;
 }
-.srow.mode input[type="radio"]:disabled + ~ * { opacity: 0.5; }
+.srow.mode label:has(input:disabled) { opacity: 0.5; }
 .count { color: #c2c2cc; }
 .hint { color: #6a8cff; font-style: italic; font-size: 11px; }
 .tip { margin: 6px 0 0; color: #6b6b78; font-size: 11px; line-height: 1.4; }

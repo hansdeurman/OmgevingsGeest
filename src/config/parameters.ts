@@ -62,13 +62,21 @@ export const parameterDefs: ParamMeta[] = [
   // damping so we can tune "how visible is the wave" independently from
   // "how quickly does flow strength die out".
   { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.08 },
+  // Random per-step forcing. Breaks symmetry on otherwise-static convergent
+  // flows; the field stops looking frozen, wind wobbles and finds escape
+  // paths between sources. Zero = fully deterministic.
+  { key: 'windTurbulence', label: 'Turbulence', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.5 },
   { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 1 },
   { key: 'arrowScale', label: 'Arrow Scale', group: 'Wind', type: 'number', min: 1, max: 30, step: 0.5, default: 8 },
 
-  // Test bursts — tooling for examining the simulation in isolation.
-  { key: 'showDensity', label: 'Show Density', group: 'Test Burst', type: 'boolean', default: true },
-  { key: 'burstSpeed', label: 'Burst Speed', group: 'Test Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 2 },
-  { key: 'burstDensity', label: 'Burst Density', group: 'Test Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 1 },
+  // Burst tooling — directional test buttons + drag-placed periodic sources.
+  { key: 'showDensity', label: 'Show Density', group: 'Burst', type: 'boolean', default: true },
+  { key: 'burstSpeed', label: 'Burst Speed', group: 'Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 2 },
+  { key: 'burstDensity', label: 'Burst Density', group: 'Burst', type: 'number', min: 0.1, max: 5, step: 0.1, default: 1 },
+  // Burst-source duty cycle (snapshotted at placement). Duration is how long
+  // each pulse stays "on"; period is the gap between pulse starts.
+  { key: 'burstDuration', label: 'On Time', group: 'Burst', type: 'number', min: 0.05, max: 5, step: 0.05, default: 0.3 },
+  { key: 'burstPeriod', label: 'Period', group: 'Burst', type: 'number', min: 0.1, max: 10, step: 0.1, default: 2.0 },
 ];
 
 /** Derive the rectangular grid dimensions from a single hex-count knob. */
@@ -106,11 +114,14 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windAdvection: number;
   windSmoothing: number;
   windDensityDamping: number;
+  windTurbulence: number;
   arrowStride: number;
   arrowScale: number;
   showDensity: boolean;
   burstSpeed: number;
   burstDensity: number;
+  burstDuration: number;
+  burstPeriod: number;
 };
 
 export const generationKeys = parameterDefs

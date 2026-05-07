@@ -37,6 +37,12 @@ export interface AirFlowParams {
    * a parcel evaporates before you can watch it travel.
    */
   densityDamping: number;
+  /**
+   * Per-step random forcing amplitude (units of velocity per second). Adds
+   * white noise to each cell's force during phase 1 — breaks symmetry,
+   * livens up otherwise-static convergent flow. Zero = fully deterministic.
+   */
+  turbulence: number;
 }
 
 /**
@@ -131,7 +137,7 @@ export class AirFlowSimulation {
     const subDt = dt / subs;
     for (let i = 0; i < subs; i++) {
       this.singleStep(world, params, subDt);
-      if (sources && sources.length) this.applySources(sources);
+      if (sources && sources.length) this.applySources(sources, subDt);
     }
   }
 
@@ -141,20 +147,35 @@ export class AirFlowSimulation {
   }
 
   /**
-   * Force the velocity at each source's cell to its (vx, vy). Treated as a
-   * Dirichlet boundary: the source cell ignores the dynamics, neighbouring
-   * cells advect from it normally.
+   * Apply each source's Dirichlet boundary at its cell, gated by the source's
+   * duty cycle. A source with `duration >= period` (or duration = Infinity)
+   * is always on. Otherwise it's on for `duration` seconds out of every
+   * `period` seconds, with phase advanced by dt and wrapped modulo period.
+   * Density is injected only while "on" and only for sources that carry
+   * density (continuous velocity-only sources leave density alone).
    */
-  private applySources(sources: ReadonlyArray<WindSource>): void {
-    const { vx, vy } = this.field;
+  private applySources(sources: ReadonlyArray<WindSource>, dt: number): void {
+    const { vx, vy, density } = this.field;
     const w = this.field.width;
     const h = this.field.height;
     for (let i = 0; i < sources.length; i++) {
       const s = sources[i];
       if (s.col < 0 || s.col >= w || s.row < 0 || s.row >= h) continue;
+
+      // Advance phase. Always-on sources skip the modulo (period = Infinity).
+      const periodic = Number.isFinite(s.period) && s.period > 0;
+      if (periodic) {
+        s.phase = (s.phase + dt) % s.period;
+      } else {
+        s.phase += dt;
+      }
+      const isOn = !periodic || s.phase < s.duration;
+      if (!isOn) continue;
+
       const idx = s.row * w + s.col;
       vx[idx] = s.vx;
       vy[idx] = s.vy;
+      if (s.density > 0) density[idx] = s.density;
     }
   }
 
@@ -192,6 +213,10 @@ export class AirFlowSimulation {
     const overcome = params.overcomeFactor;
     const maxSpeed = params.maxSpeed;
     const maxSpeedSq = maxSpeed * maxSpeed;
+    // Turbulence amplitude. Scales force perturbation per cell per step. The
+    // factor breaks symmetry on otherwise-static convergent flows so the wind
+    // wobbles and finds escape paths between sources.
+    const turb = Math.max(0, params.turbulence);
 
     // ----- Phase 1: apply forces, write to scratch buffer -----
     for (let row = 0; row < h; row++) {
@@ -206,6 +231,14 @@ export class AirFlowSimulation {
         // Ambient + terrain accumulator.
         let fx = ax;
         let fy = ay;
+
+        // White-noise turbulence forcing. Amplitude grows with local speed so
+        // calm areas stay calm and busy areas chop. Skipped when turb = 0.
+        if (turb > 0) {
+          const k = turb * (0.25 + speed);
+          fx += (Math.random() - 0.5) * 2 * k;
+          fy += (Math.random() - 0.5) * 2 * k;
+        }
 
         for (let i = 0; i < 6; i++) {
           const o = offs[i];
