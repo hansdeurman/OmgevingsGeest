@@ -49,20 +49,20 @@ export interface AirFlowParams {
  * Hexagonal air-flow simulation.
  *
  * Each step:
- *   1. Apply ambient force.
- *   2. For each uphill neighbour the wind is heading toward, push back with
- *      a force proportional to the height delta and inversely modulated by
- *      the wind's current speed (the "overcome" term — fast wind ignores
- *      terrain more than slow wind).
+ *   1. Apply ambient force + per-cell turbulence noise.
+ *   2. Apply a downhill terrain force = -∇h scaled by `coupling`, attenuated
+ *      by speed via the "overcome" term (fast wind ignores small terrain).
+ *      Gradient-based, so the force naturally redirects flow around hills:
+ *      a wind heading toward a peak feels both deceleration AND a sideways
+ *      nudge toward whichever flank is lower.
  *   3. Damp via first-order rate.
  *   4. Optionally blend with the 6-neighbour velocity average.
+ *   5. Inflow-driven advection of velocity AND density.
+ *   6. Mild density damping.
  *
  * Stability tricks (the user warned us about cliff edges):
  *   - Heights are pre-smoothed with a 1-ring box blur so gradients sampled
  *     from `smoothedHeight` don't spike at sharp cliffs.
- *   - The terrain term is *direction-gated* (only fires when v · d > 0), so a
- *     cell sitting next to a tall neighbour doesn't get pushed sideways by a
- *     wind that wasn't even heading that way.
  *   - dt is sub-stepped so a long pause/tab-switch can't blow up the field.
  *   - Hard speed cap as the final safety net.
  */
@@ -240,25 +240,30 @@ export class AirFlowSimulation {
           fy += (Math.random() - 0.5) * 2 * k;
         }
 
+        // Local height gradient in pixel space. Sum (dh * neighbour_dir) over
+        // the 6-ring; the result points uphill with magnitude ~slope. We use
+        // smoothed heights to avoid spikes at cliffs.
+        let gx = 0;
+        let gy = 0;
         for (let i = 0; i < 6; i++) {
           const o = offs[i];
           const nc = col + o.dc;
           const nr = row + o.dr;
           if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-
           const dh = sh[nr * w + nc] - myH;
-          if (dh <= 0) continue; // neighbour is downhill, no pushback
-
           const d = NEIGHBOUR_DIRS[i];
-          const dot = cvx * d.x + cvy * d.y;
-          if (dot <= 0) continue; // wind isn't heading uphill, skip
-
-          // Strong winds overcome terrain. The (1 + speed*overcome) divisor
-          // smoothly attenuates the push.
-          const push = (dh * coupling) / (1 + speed * overcome);
-          fx -= d.x * push;
-          fy -= d.y * push;
+          gx += dh * d.x;
+          gy += dh * d.y;
         }
+
+        // Terrain force: push *downhill* (against the gradient), regardless
+        // of which way the wind is currently pointing. This is what makes
+        // wind hitting a wall slow down AND deflect toward the lower flank
+        // instead of just decelerating dead. Strong winds feel less of it
+        // (overcome term), so a fast gust still tops the saddle.
+        const tk = coupling / (1 + speed * overcome);
+        fx -= gx * tk;
+        fy -= gy * tk;
 
         // Integrate: damped velocity + force impulse over dt.
         let nvx = cvx * retain + fx * dt;
