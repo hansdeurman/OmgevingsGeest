@@ -53,12 +53,14 @@ export const parameterDefs: ParamMeta[] = [
   // Friction. Very mild by default so wind from a source travels far and dies
   // off slowly, with no decay at all when set to 0.
   { key: 'windDamping', label: 'Damping', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.005, default: 0.05 },
-  { key: 'windTerrainCoupling', label: 'Terrain Coupling', group: 'Wind', type: 'number', min: 0, max: 60, step: 0.5, default: 20 },
+  { key: 'windTerrainCoupling', label: 'Terrain Coupling', group: 'Wind', type: 'number', min: 0, max: 200, step: 1, default: 60 },
   // Ratio of "pulled downhill" force to "blocked uphill" force. 0 = pure
   // uphill block; 1 = symmetric. Realistic values 0.2..0.5 — air slides
   // down but the block-up effect dominates.
   { key: 'windDownhillRatio', label: 'Downhill Ratio', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.3 },
-  { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.5 },
+  // Lower = terrain stays strong even at high speed (default kept gentle so
+  // a fast gust still tops the saddle). 0 = terrain is purely speed-blind.
+  { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.1 },
   { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
   { key: 'windAdvection', label: 'Propagation', group: 'Wind', type: 'number', min: 0, max: 50, step: 0.5, default: 12 },
   { key: 'windSmoothing', label: 'Smoothing', group: 'Wind', type: 'number', min: 0, max: 1, step: 0.01, default: 0.05 },

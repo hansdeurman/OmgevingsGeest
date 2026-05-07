@@ -98,14 +98,18 @@ export interface AirFlowParams {
  *   6. Mild density damping.
  *
  * Stability tricks (the user warned us about cliff edges):
- *   - Heights are pre-smoothed with a 1-ring box blur so gradients sampled
- *     from `smoothedHeight` don't spike at sharp cliffs.
- *   - dt is sub-stepped so a long pause/tab-switch can't blow up the field.
+ *   - Sub-stepping bounds dt so a long pause/tab-switch can't blow up the field.
  *   - Hard speed cap as the final safety net.
  */
 export class AirFlowSimulation {
   readonly field: WindField;
-  /** Smoothed terrain heights — used in place of raw heights for gradients. */
+  /**
+   * Per-tile terrain heights mirrored into a typed array for cache locality
+   * in the gradient sweep. Originally box-blurred for stability, but that
+   * blur was attenuating sharp peaks ~7× and making mountains feel
+   * suspiciously soft. Raw heights now; the substep cap + speed cap handle
+   * any cliff edge sharpness fine.
+   */
   private readonly smoothedHeight: Float32Array;
   /** Scratch buffers for the two-phase update (force step then smoothing). */
   private readonly nextVx: Float32Array;
@@ -132,26 +136,13 @@ export class AirFlowSimulation {
     this.smoothHeights(world);
   }
 
-  /** 1-pass box blur over the 6-neighbour ring + self. */
+  /**
+   * Mirror raw heights into the typed array. (No blur — see class doc.)
+   * Kept as a method so reset() can re-run it after world regeneration.
+   */
   private smoothHeights(world: World): void {
-    const w = world.width;
-    const h = world.height;
-    for (let row = 0; row < h; row++) {
-      const offs = offsetNeighbours(row);
-      for (let col = 0; col < w; col++) {
-        const idx = row * w + col;
-        let sum = world.tiles[idx].height;
-        let count = 1;
-        for (let i = 0; i < 6; i++) {
-          const o = offs[i];
-          const nc = col + o.dc;
-          const nr = row + o.dr;
-          if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-          sum += world.tiles[nr * w + nc].height;
-          count++;
-        }
-        this.smoothedHeight[idx] = sum / count;
-      }
+    for (let i = 0; i < world.tiles.length; i++) {
+      this.smoothedHeight[i] = world.tiles[i].height;
     }
   }
 
