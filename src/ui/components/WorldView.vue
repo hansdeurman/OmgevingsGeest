@@ -4,7 +4,7 @@ import { Camera } from '../../rendering/Camera';
 import { CanvasRenderer } from '../../rendering/canvas/CanvasRenderer';
 import type { Renderer } from '../../rendering/Renderer';
 import { buildWorld } from '../../generation/WorldGenerator';
-import { config, generationKeys, HEX_PIXEL_SIZE } from '../../config/parameters';
+import { config, generationKeys, gridDimensions, HEX_PIXEL_SIZE } from '../../config/parameters';
 import type { World } from '../../world/World';
 import {
   AirFlowSimulation,
@@ -18,7 +18,7 @@ import {
   clearBursts,
   requestFieldClear,
 } from '../../airflow';
-import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
+import { gridPixelBounds, pixelToOffset, offsetToPixel, offsetNeighbours, NEIGHBOUR_DIRS } from '../../math/hex';
 
 const hostRef = ref<HTMLDivElement>();
 
@@ -112,6 +112,40 @@ onMounted(() => {
   renderer.attach(host);
   renderer.resize(host.clientWidth, host.clientHeight);
   regenerate();
+
+  // First-mount test scenario: flatten the world and seed 6 outward-firing
+  // burst sources in a hex-distance-3 ring around the centre. Lets us
+  // examine the new two-axis advection split in isolation from terrain.
+  // Subsequent regenerates (seed change, etc.) bring back real terrain
+  // and don't replant these sources.
+  for (let i = 0; i < world.tiles.length; i++) world.tiles[i].height = 0;
+  airFlow = new AirFlowSimulation(world);
+  airFlow.setBaseline(config.windDensityBaseline);
+  {
+    const { width, height } = gridDimensions(config.hexCount);
+    const cx = Math.floor(width / 2);
+    const cy = Math.floor(height / 2);
+    for (let i = 0; i < 6; i++) {
+      let c = cx;
+      let r = cy;
+      for (let s = 0; s < 3; s++) {
+        const offs = offsetNeighbours(r);
+        c += offs[i].dc;
+        r += offs[i].dr;
+      }
+      if (c < 0 || c >= width || r < 0 || r >= height) continue;
+      const dir = NEIGHBOUR_DIRS[i];
+      addSource({
+        col: c,
+        row: r,
+        vx: dir.x * config.burstSpeed,
+        vy: dir.y * config.burstSpeed,
+        density: config.burstDensity,
+        duration: config.burstDuration,
+        period: config.burstPeriod,
+      });
+    }
+  }
 
   resizeObs = new ResizeObserver(() => {
     renderer.resize(host.clientWidth, host.clientHeight);
