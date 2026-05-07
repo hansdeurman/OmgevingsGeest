@@ -428,16 +428,17 @@ export class AirFlowSimulation {
       vy.set(this.nextVy);
     }
 
-    // ----- Phase 3: inflow-driven advection (velocity AND density together) -----
-    // Each cell pulls a fraction of its state from the neighbour most actively
-    // flowing INTO it. Critically, the rate is set by *that neighbour's* speed,
-    // not the cell's own — otherwise a still cell pulls nothing (alpha = 0) and
-    // the wave can never reach quiet air, only diffuse there via smoothing.
-    // That was the symptom of "even a continuous source dies after a few hexes".
+    // ----- Phase 3: flux-based advection (conservative push) -----
+    // Each cell pushes momentum AND above-baseline density to its downwind
+    // neighbour. The flux moves out of A and into B, so A loses exactly what
+    // B gains — the cloud *travels* through the field instead of leaking
+    // velocity behind it. CFL-scaled by `advection`.
     //
-    // For neighbour i at unit direction d_i (this -> neighbour), the component
-    // of its velocity pointing back toward us is -(v_N · d_i). The largest
-    // positive value identifies the dominant inflow.
+    // Density flux only moves the deviation from baseline: atmospheric
+    // baseline air stays put, only the parcel (positive deviation) or hole
+    // (negative deviation, near a sink) actually advects. That's why a
+    // burst of air can cross the whole map without leaving high velocity
+    // in its wake.
     const advRate = Math.max(0, params.advection);
     if (advRate > 0) {
       this.nextVx.set(vx);
@@ -449,36 +450,57 @@ export class AirFlowSimulation {
         const offs = offsetNeighbours(row);
         for (let col = 0; col < w; col++) {
           const idx = row * w + col;
+          const cvx = vx[idx];
+          const cvy = vy[idx];
+          const speed = Math.hypot(cvx, cvy);
+          if (speed < 1e-5) continue;
 
-          let bestNi = -1;
-          let bestInflow = 0;
+          // Downwind: maximises v · d.
+          let bestDot = 0;
+          let bestI = -1;
           for (let i = 0; i < 6; i++) {
-            const o = offs[i];
-            const nc = col + o.dc;
-            const nr = row + o.dr;
-            if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-            const ni = nr * w + nc;
             const d = NEIGHBOUR_DIRS[i];
-            const inflow = -(vx[ni] * d.x + vy[ni] * d.y);
-            if (inflow > bestInflow) {
-              bestInflow = inflow;
-              bestNi = ni;
+            const dot = cvx * d.x + cvy * d.y;
+            if (dot > bestDot) {
+              bestDot = dot;
+              bestI = i;
             }
           }
-          if (bestNi < 0) continue;
+          if (bestI < 0) continue;
 
-          const alpha = Math.min(1, advRate * bestInflow * dt * invHex);
-          this.nextVx[idx] = vx[idx] * (1 - alpha) + vx[bestNi] * alpha;
-          this.nextVy[idx] = vy[idx] * (1 - alpha) + vy[bestNi] * alpha;
-          // Density inflow loses a fraction when crossing uphill — a parcel
-          // climbing a slope leaves a bit behind (analogue of orographic
-          // precipitation). Downhill or flat: full transfer.
-          let densityInflow = density[bestNi];
-          if (heightLoss > 0) {
-            const dh = sh[idx] - sh[bestNi];
-            if (dh > 0) densityInflow *= Math.exp(-dh * heightLoss);
+          const o = offs[bestI];
+          const nc = col + o.dc;
+          const nr = row + o.dr;
+          if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
+          const ni = nr * w + nc;
+
+          // CFL-scaled flux fraction. At alpha = 1 the cell empties its
+          // momentum into the downwind neighbour in one substep — that's
+          // exactly the "moves along" behaviour we want for fast bursts.
+          const alpha = Math.min(1, advRate * speed * dt * invHex);
+
+          // Velocity flux: all of A's velocity moves with the parcel.
+          const fluxVx = cvx * alpha;
+          const fluxVy = cvy * alpha;
+          this.nextVx[idx] -= fluxVx;
+          this.nextVy[idx] -= fluxVy;
+          this.nextVx[ni] += fluxVx;
+          this.nextVy[ni] += fluxVy;
+
+          // Density flux: only the deviation from baseline travels. Sender
+          // loses the full deviation; receiver gains it scaled by uphill
+          // height-loss (orographic precipitation).
+          const dDev = density[idx] - baseline;
+          if (dDev !== 0) {
+            let arriveFactor = 1;
+            if (heightLoss > 0) {
+              const dh = sh[ni] - sh[idx];
+              if (dh > 0) arriveFactor = Math.exp(-dh * heightLoss);
+            }
+            const sentD = dDev * alpha;
+            this.nextDensity[idx] -= sentD;
+            this.nextDensity[ni] += sentD * arriveFactor;
           }
-          this.nextDensity[idx] = density[idx] * (1 - alpha) + densityInflow * alpha;
         }
       }
 
