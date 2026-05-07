@@ -29,7 +29,7 @@ const GRID_ASPECT = 0.75;
 export const parameterDefs: ParamMeta[] = [
   // World
   { key: 'seed', label: 'Seed', group: 'World', type: 'int', min: 0, max: 99999, step: 1, default: 1337, affectsGeneration: true },
-  { key: 'hexCount', label: 'Hex Count', group: 'World', type: 'int', min: 20, max: 400, step: 1, default: 120, affectsGeneration: true },
+  { key: 'hexCount', label: 'Hex Count', group: 'World', type: 'int', min: 20, max: 400, step: 1, default: 40, affectsGeneration: true },
 
   // Terrain
   { key: 'noiseScale', label: 'Noise Scale', group: 'Terrain', type: 'number', min: 0.005, max: 0.4, step: 0.001, default: 0.06, affectsGeneration: true },
