@@ -18,6 +18,14 @@ export interface AirFlowParams {
   damping: number;
   /** Strength of terrain pushback per unit of normalised height delta. */
   terrainCoupling: number;
+  /**
+   * Asymmetry: how strongly the *downhill pull* acts relative to the *uphill
+   * block*. 0 = wind heading uphill is blocked but wind heading downhill is
+   * never accelerated by terrain. 1 = symmetric (downhill pull as strong as
+   * uphill block). Realistic values are 0.2..0.5 — air prefers to slide down
+   * but the block-up effect is the dominant one.
+   */
+  downhillRatio: number;
   /** Higher values let fast wind ignore terrain (flow over instead of around). */
   overcomeFactor: number;
   /** Hard cap on wind speed; prevents any single cell from exploding. */
@@ -210,6 +218,7 @@ export class AirFlowSimulation {
     // First-order rate damping: v *= exp(-damping*dt). retain<1 always.
     const retain = Math.exp(-Math.max(0, params.damping) * dt);
     const coupling = params.terrainCoupling;
+    const downhillRatio = Math.max(0, Math.min(1, params.downhillRatio));
     const overcome = params.overcomeFactor;
     const maxSpeed = params.maxSpeed;
     const maxSpeedSq = maxSpeed * maxSpeed;
@@ -256,12 +265,16 @@ export class AirFlowSimulation {
           gy += dh * d.y;
         }
 
-        // Terrain force: push *downhill* (against the gradient), regardless
-        // of which way the wind is currently pointing. This is what makes
-        // wind hitting a wall slow down AND deflect toward the lower flank
-        // instead of just decelerating dead. Strong winds feel less of it
-        // (overcome term), so a fast gust still tops the saddle.
-        const tk = coupling / (1 + speed * overcome);
+        // Asymmetric terrain force: the *block-uphill* effect is the full
+        // coupling; the *pull-downhill* effect is `downhillRatio` of that.
+        // We split based on whether the velocity has an uphill component
+        // (v · ∇h > 0). With v at rest the dot product is zero and we apply
+        // the gentler downhill regime — the slope still nudges air, just
+        // less aggressively than it would push back against an uphill gust.
+        // Strong winds feel less of it (overcome term).
+        const vDotGrad = cvx * gx + cvy * gy;
+        const dirFactor = vDotGrad > 0 ? 1 : downhillRatio;
+        const tk = (coupling * dirFactor) / (1 + speed * overcome);
         fx -= gx * tk;
         fy -= gy * tk;
 

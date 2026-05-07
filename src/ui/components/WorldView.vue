@@ -74,6 +74,7 @@ function frame(now: number) {
         ambientDirection: (config.windAmbientAngle * Math.PI) / 180,
         damping: config.windDamping,
         terrainCoupling: config.windTerrainCoupling,
+        downhillRatio: config.windDownhillRatio,
         overcomeFactor: config.windOvercomeFactor,
         maxSpeed: config.windMaxSpeed,
         advection: config.windAdvection,
