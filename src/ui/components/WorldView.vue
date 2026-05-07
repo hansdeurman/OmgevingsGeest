@@ -9,9 +9,11 @@ import type { World } from '../../world/World';
 import {
   AirFlowSimulation,
   addSource,
+  addSink,
   placingSource,
   placementMode,
   windSources,
+  windSinks,
   windBursts,
   clearBursts,
   requestFieldClear,
@@ -80,8 +82,10 @@ function frame(now: number) {
         advection: config.windAdvection,
         smoothing: config.windSmoothing,
         densityDamping: config.windDensityDamping,
+        pressure: config.windPressure,
+        heightDensityLoss: config.windHeightDensityLoss,
         turbulence: config.windTurbulence,
-      }, dt, windSources, windBursts);
+      }, dt, windSources, windBursts, windSinks);
       // Bursts are one-shot — drain them after the step has stamped them in.
       if (windBursts.length) clearBursts();
     }
@@ -90,6 +94,7 @@ function frame(now: number) {
       camera,
       windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
       windSources: config.showAirFlow ? windSources : undefined,
+      windSinks: config.showAirFlow ? windSinks : undefined,
       densityReference: config.showDensity ? config.burstDensity : undefined,
       sourcePreview: sourceDrag.value ?? undefined,
     });
@@ -156,7 +161,11 @@ onMounted(() => {
       // length (clamped to maxSpeed); burst takes its strength from the
       // slider, so the drag only sets direction. The source's burst params
       // (duration, period, density) are snapshotted here and never change.
-      if (placementMode.value === 'burst') {
+      if (placementMode.value === 'sink') {
+        // Sinks have no direction or strength; the drag is just visual
+        // feedback while picking the cell. Rate comes from the slider.
+        addSink({ col: cell.col, row: cell.row, rate: config.sinkRate });
+      } else if (placementMode.value === 'burst') {
         const mag = Math.hypot(dx, dy);
         if (mag < 1e-3) { mode = 'idle'; sourceDrag.value = null; return; }
         const speed = config.burstSpeed;

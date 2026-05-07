@@ -45,8 +45,25 @@ export interface WindBurst {
   density: number;
 }
 
+/**
+ * A density sink: at this hex, drain density at `rate` per second. Sinks are
+ * the counterpart of density-emitting sources — together they let the system
+ * sustain a circulation rather than equilibrating to a static fixed point.
+ * Pairing is done manually by the user (set a sink's rate to match a
+ * source's effective output); we don't enforce it in the data model.
+ */
+export interface WindSink {
+  col: number;
+  row: number;
+  /** Density units removed per second from the sink cell. */
+  rate: number;
+}
+
 /** Reactive list of placed sources. Mutated via add/clear and watched by Vue. */
 export const windSources = reactive<WindSource[]>([]);
+
+/** Reactive list of placed sinks. */
+export const windSinks = reactive<WindSink[]>([]);
 
 /** Pending one-shot impulses. Drained by the per-frame simulator wiring. */
 export const windBursts = reactive<WindBurst[]>([]);
@@ -63,12 +80,13 @@ export const requestFieldClear = ref(false);
 export const placingSource = ref(false);
 
 /**
- * UI state: which kind of source is created when the user mouseups after a
- * placement drag. Locked in *before* placement begins; the resulting source
- * keeps that nature for its lifetime (continuous sources persist in
- * `windSources`; bursts are one-shot via `windBursts`).
+ * UI state: which kind of entity is placed on mouseup. Locked in before the
+ * drag begins; once placed the entity's nature is fixed.
+ *   - 'continuous' — always-on velocity Dirichlet source.
+ *   - 'burst'      — periodic density+velocity source with duty cycle.
+ *   - 'sink'       — density drain (no velocity).
  */
-export type PlacementMode = 'continuous' | 'burst';
+export type PlacementMode = 'continuous' | 'burst' | 'sink';
 export const placementMode = ref<PlacementMode>('continuous');
 
 /**
@@ -99,6 +117,14 @@ export function addSource(s: {
 
 export function clearSources(): void {
   windSources.splice(0, windSources.length);
+}
+
+export function addSink(s: WindSink): void {
+  windSinks.push(s);
+}
+
+export function clearSinks(): void {
+  windSinks.splice(0, windSinks.length);
 }
 
 export function fireBurst(b: WindBurst): void {

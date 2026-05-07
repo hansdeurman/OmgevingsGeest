@@ -3,14 +3,18 @@ export { AirFlowSimulation, type AirFlowParams } from './AirFlowSimulation';
 export {
   type WindSource,
   type WindBurst,
+  type WindSink,
   type PlacementMode,
   windSources,
+  windSinks,
   windBursts,
   placingSource,
   placementMode,
   requestFieldClear,
   addSource,
+  addSink,
   clearSources,
+  clearSinks,
   fireBurst,
   clearBursts,
 } from './sources';

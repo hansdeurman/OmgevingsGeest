@@ -1,6 +1,6 @@
 import type { World } from '../../world/World';
 import type { WindField } from '../../airflow/WindField';
-import type { WindSource } from '../../airflow/sources';
+import type { WindSource, WindSink } from '../../airflow/sources';
 import { offsetToPixel, hexCorners } from '../../math/hex';
 
 export interface AirflowOverlayParams {
@@ -220,6 +220,52 @@ export function drawWindSources(
       ctx.lineTo(backX - px, backY - py);
       ctx.stroke();
     }
+  }
+}
+
+/**
+ * Draw density sinks. Visually distinct from sources: red double-ring with
+ * an inward-pointing X to read as "drain". No direction arrow — sinks are
+ * scalar consumers, not vectors.
+ */
+export function drawWindSinks(
+  ctx: CanvasRenderingContext2D,
+  sinks: ReadonlyArray<WindSink>,
+  hexSize: number,
+  zoom: number,
+): void {
+  const ringWidth = 2 / zoom;
+  const lineWidth = 1.6 / zoom;
+  const radius = hexSize * 0.55;
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const s of sinks) {
+    const c = offsetToPixel(s.col, s.row, hexSize);
+
+    ctx.lineWidth = ringWidth;
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ff5566';
+    ctx.lineWidth = ringWidth * 0.8;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, radius * 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inward-pointing X marks the drain.
+    const r = radius * 0.5;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = '#ff8090';
+    ctx.beginPath();
+    ctx.moveTo(c.x - r, c.y - r);
+    ctx.lineTo(c.x + r, c.y + r);
+    ctx.moveTo(c.x - r, c.y + r);
+    ctx.lineTo(c.x + r, c.y - r);
+    ctx.stroke();
   }
 }
 

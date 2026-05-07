@@ -66,6 +66,14 @@ export const parameterDefs: ParamMeta[] = [
   // damping so we can tune "how visible is the wave" independently from
   // "how quickly does flow strength die out".
   { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.08 },
+  // Pressure: high-density cells push velocity outward toward low-density
+  // cells. This is what lets the system circulate (back to sinks) instead of
+  // equilibrating. Set to 0 for the older velocity-only behaviour.
+  { key: 'windPressure', label: 'Pressure', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1.5 },
+  // Density loss when air climbs a slope (per unit normalised height delta,
+  // applied as exp(-dh * loss) on the inflow term). Default ~1 = a parcel
+  // crossing a 0.3-tall ridge keeps ~74% of its density.
+  { key: 'windHeightDensityLoss', label: 'Height Loss', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1 },
   // Random per-step forcing. Breaks symmetry on otherwise-static convergent
   // flows; the field stops looking frozen, wind wobbles and finds escape
   // paths between sources. Zero = fully deterministic.
@@ -81,6 +89,9 @@ export const parameterDefs: ParamMeta[] = [
   // each pulse stays "on"; period is the gap between pulse starts.
   { key: 'burstDuration', label: 'On Time', group: 'Burst', type: 'number', min: 0.05, max: 5, step: 0.05, default: 0.3 },
   { key: 'burstPeriod', label: 'Period', group: 'Burst', type: 'number', min: 0.1, max: 10, step: 0.1, default: 2.0 },
+  // Sink drain rate (density units removed per second). Match to a paired
+  // source's effective output if you want roughly conservative flow.
+  { key: 'sinkRate', label: 'Sink Rate', group: 'Burst', type: 'number', min: 0.1, max: 20, step: 0.1, default: 3 },
 ];
 
 /** Derive the rectangular grid dimensions from a single hex-count knob. */
@@ -119,6 +130,8 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windAdvection: number;
   windSmoothing: number;
   windDensityDamping: number;
+  windPressure: number;
+  windHeightDensityLoss: number;
   windTurbulence: number;
   arrowStride: number;
   arrowScale: number;
@@ -127,6 +140,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   burstDensity: number;
   burstDuration: number;
   burstPeriod: number;
+  sinkRate: number;
 };
 
 export const generationKeys = parameterDefs

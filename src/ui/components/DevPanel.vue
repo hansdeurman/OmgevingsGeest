@@ -5,7 +5,9 @@ import {
   placingSource,
   placementMode,
   windSources,
+  windSinks,
   clearSources,
+  clearSinks,
   fireBurst,
   requestFieldClear,
 } from '../../airflow';
@@ -103,16 +105,16 @@ function clearField() {
     </section>
 
     <section>
-      <h3>Sources</h3>
+      <h3>Sources &amp; Sinks</h3>
       <div class="srow">
         <span class="count">
-          {{ windSources.length }} placed
+          {{ windSources.length }} src · {{ windSinks.length }} sink
         </span>
         <span v-if="placingSource" class="hint">drag on map to place</span>
       </div>
-      <!-- Mode is locked in BEFORE the drag begins; once a source/burst is
-           placed, its nature is fixed for that source. Disabled mid-drag so
-           the user can't change horses halfway. -->
+      <!-- Mode is locked in BEFORE the drag begins; once a source/sink is
+           placed, its nature is fixed. Disabled mid-drag so the user can't
+           change horses halfway. -->
       <div class="srow mode" role="radiogroup" aria-label="Placement mode">
         <label>
           <input
@@ -132,6 +134,15 @@ function clearField() {
           />
           Burst
         </label>
+        <label>
+          <input
+            type="radio"
+            v-model="placementMode"
+            value="sink"
+            :disabled="placingSource"
+          />
+          Sink
+        </label>
       </div>
       <div class="srow buttons">
         <button
@@ -141,7 +152,9 @@ function clearField() {
         >
           {{ placingSource
             ? 'Cancel'
-            : placementMode === 'burst' ? 'Add Burst' : 'Add Source' }}
+            : placementMode === 'sink' ? 'Add Sink'
+            : placementMode === 'burst' ? 'Add Burst'
+            : 'Add Source' }}
         </button>
         <button
           type="button"
@@ -149,14 +162,24 @@ function clearField() {
           :disabled="!windSources.length"
           @click="clearSources"
         >
-          Clear
+          Clear src
+        </button>
+        <button
+          type="button"
+          class="ghost"
+          :disabled="!windSinks.length"
+          @click="clearSinks"
+        >
+          Clear sink
         </button>
       </div>
       <p class="tip">
         Tip: hold Shift and drag on the map for the same effect.
         <span v-if="placementMode === 'burst'">
-          A drag-placed burst fires once and does not clear the field —
-          handy for stacking multiple impulses.
+          A drag-placed burst pulses on its own duty cycle.
+        </span>
+        <span v-else-if="placementMode === 'sink'">
+          Sinks drain density at the rate from the slider — pair manually with a source by matching rates.
         </span>
       </p>
     </section>

@@ -2,7 +2,7 @@ import type { World } from '../world/World';
 import { offsetNeighbours, NEIGHBOUR_DIRS } from '../math/hex';
 import { HEX_PIXEL_SIZE } from '../config/parameters';
 import { WindField } from './WindField';
-import type { WindSource, WindBurst } from './sources';
+import type { WindSource, WindBurst, WindSink } from './sources';
 
 /**
  * Tunable inputs for one simulation step.
@@ -51,6 +51,20 @@ export interface AirFlowParams {
    * livens up otherwise-static convergent flow. Zero = fully deterministic.
    */
   turbulence: number;
+  /**
+   * Coefficient on the density-pressure force `f = -coeff * ∇density`. High
+   * density pushes velocity outward (toward lower density), which is what
+   * makes flow loop back from where it has piled up — circulation rather
+   * than equilibrium.
+   */
+  pressure: number;
+  /**
+   * Fraction of density lost when advecting *uphill* per unit of normalised
+   * height delta. Implemented as inflow density × exp(-dh * loss), so a
+   * cell receiving wind from a lower neighbour loses some density to the
+   * climb — analogue of orographic precipitation.
+   */
+  heightDensityLoss: number;
 }
 
 /**
@@ -138,6 +152,7 @@ export class AirFlowSimulation {
     dt: number,
     sources?: ReadonlyArray<WindSource>,
     bursts?: ReadonlyArray<WindBurst>,
+    sinks?: ReadonlyArray<WindSink>,
   ): void {
     if (dt <= 0) return;
     if (bursts && bursts.length) this.applyBursts(bursts);
@@ -146,6 +161,7 @@ export class AirFlowSimulation {
     for (let i = 0; i < subs; i++) {
       this.singleStep(world, params, subDt);
       if (sources && sources.length) this.applySources(sources, subDt);
+      if (sinks && sinks.length) this.applySinks(sinks, subDt);
     }
   }
 
@@ -188,6 +204,24 @@ export class AirFlowSimulation {
   }
 
   /**
+   * Drain density at each sink's cell at its configured rate. Linear loss
+   * over dt, clamped to zero — a sink can't make density negative. Velocity
+   * is left alone; sinks only consume the scalar parcel.
+   */
+  private applySinks(sinks: ReadonlyArray<WindSink>, dt: number): void {
+    const { density } = this.field;
+    const w = this.field.width;
+    const h = this.field.height;
+    for (let i = 0; i < sinks.length; i++) {
+      const s = sinks[i];
+      if (s.col < 0 || s.col >= w || s.row < 0 || s.row >= h) continue;
+      const idx = s.row * w + s.col;
+      const next = density[idx] - s.rate * dt;
+      density[idx] = next > 0 ? next : 0;
+    }
+  }
+
+  /**
    * Stamp a one-shot impulse onto each burst's cell: write velocity AND
    * density at that index. After this returns, the regular dynamics take over
    * and the parcel is on its own — no re-injection across sub-steps.
@@ -226,6 +260,8 @@ export class AirFlowSimulation {
     // factor breaks symmetry on otherwise-static convergent flows so the wind
     // wobbles and finds escape paths between sources.
     const turb = Math.max(0, params.turbulence);
+    const pressure = Math.max(0, params.pressure);
+    const heightLoss = Math.max(0, params.heightDensityLoss);
 
     // ----- Phase 1: apply forces, write to scratch buffer -----
     for (let row = 0; row < h; row++) {
@@ -249,20 +285,29 @@ export class AirFlowSimulation {
           fy += (Math.random() - 0.5) * 2 * k;
         }
 
-        // Local height gradient in pixel space. Sum (dh * neighbour_dir) over
-        // the 6-ring; the result points uphill with magnitude ~slope. We use
-        // smoothed heights to avoid spikes at cliffs.
+        // Local height gradient AND density gradient in pixel space. Both
+        // are sums of (delta * neighbour_dir) over the 6-ring; ∇h points
+        // uphill, ∇ρ points toward higher density. We compute them in one
+        // sweep to share the neighbour iteration. Smoothed heights avoid
+        // spikes at cliffs.
         let gx = 0;
         let gy = 0;
+        let dgx = 0;
+        let dgy = 0;
+        const myDens = density[idx];
         for (let i = 0; i < 6; i++) {
           const o = offs[i];
           const nc = col + o.dc;
           const nr = row + o.dr;
           if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-          const dh = sh[nr * w + nc] - myH;
+          const ni = nr * w + nc;
+          const dh = sh[ni] - myH;
+          const dd = density[ni] - myDens;
           const d = NEIGHBOUR_DIRS[i];
           gx += dh * d.x;
           gy += dh * d.y;
+          dgx += dd * d.x;
+          dgy += dd * d.y;
         }
 
         // Asymmetric terrain force: the *block-uphill* effect is the full
@@ -277,6 +322,15 @@ export class AirFlowSimulation {
         const tk = (coupling * dirFactor) / (1 + speed * overcome);
         fx -= gx * tk;
         fy -= gy * tk;
+
+        // Pressure force from density: `f = -pressure * ∇ρ`. Pushes velocity
+        // toward lower density, i.e. away from where the parcel has piled up.
+        // This is what drives circulation back to sinks instead of letting
+        // density just accumulate at a steady state.
+        if (pressure > 0) {
+          fx -= dgx * pressure;
+          fy -= dgy * pressure;
+        }
 
         // Integrate: damped velocity + force impulse over dt.
         let nvx = cvx * retain + fx * dt;
@@ -373,7 +427,15 @@ export class AirFlowSimulation {
           const alpha = Math.min(1, advRate * bestInflow * dt * invHex);
           this.nextVx[idx] = vx[idx] * (1 - alpha) + vx[bestNi] * alpha;
           this.nextVy[idx] = vy[idx] * (1 - alpha) + vy[bestNi] * alpha;
-          this.nextDensity[idx] = density[idx] * (1 - alpha) + density[bestNi] * alpha;
+          // Density inflow loses a fraction when crossing uphill — a parcel
+          // climbing a slope leaves a bit behind (analogue of orographic
+          // precipitation). Downhill or flat: full transfer.
+          let densityInflow = density[bestNi];
+          if (heightLoss > 0) {
+            const dh = sh[idx] - sh[bestNi];
+            if (dh > 0) densityInflow *= Math.exp(-dh * heightLoss);
+          }
+          this.nextDensity[idx] = density[idx] * (1 - alpha) + densityInflow * alpha;
         }
       }
 

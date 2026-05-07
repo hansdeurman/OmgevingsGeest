@@ -1,7 +1,7 @@
 import type { World } from '../world/World';
 import type { Camera } from './Camera';
 import type { WindField } from '../airflow/WindField';
-import type { WindSource } from '../airflow/sources';
+import type { WindSource, WindSink } from '../airflow/sources';
 
 /**
  * Per-frame state handed to the renderer. Only `world` and `camera` are
@@ -13,6 +13,7 @@ export interface RenderFrame {
   camera: Camera;
   windField?: WindField;
   windSources?: ReadonlyArray<WindSource>;
+  windSinks?: ReadonlyArray<WindSink>;
   /**
    * Reference density used by the density overlay to set alpha. Typically
    * matches the burst strength so a fresh parcel reads as fully opaque.
