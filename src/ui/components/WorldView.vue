@@ -84,6 +84,7 @@ function frame(now: number) {
         densityDamping: config.windDensityDamping,
         pressure: config.windPressure,
         heightDensityLoss: config.windHeightDensityLoss,
+        densityDiffusion: config.windDensityDiffusion,
         velocityDensityCoupling: config.windVelocityDensityCoupling,
         densityReference: config.burstDensity,
         turbulence: config.windTurbulence,

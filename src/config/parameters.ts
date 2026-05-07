@@ -83,6 +83,10 @@ export const parameterDefs: ParamMeta[] = [
   // applied as exp(-dh * loss) on the inflow term). Default ~1 = a parcel
   // crossing a 0.3-tall ridge keeps ~74% of its density.
   { key: 'windHeightDensityLoss', label: 'Height Loss', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1 },
+  // Direct density diffusion rate. Density relaxes toward the terrain-
+  // weighted neighbour average each second; high = dense air spreads to
+  // sparse cells fast even without velocity carrying it.
+  { key: 'windDensityDiffusion', label: 'ρ Diffusion', group: 'Wind', type: 'number', min: 0, max: 20, step: 0.1, default: 4 },
   // Random per-step forcing. Breaks symmetry on otherwise-static convergent
   // flows; the field stops looking frozen, wind wobbles and finds escape
   // paths between sources. Zero = fully deterministic.
@@ -142,6 +146,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windPressure: number;
   windVelocityDensityCoupling: number;
   windHeightDensityLoss: number;
+  windDensityDiffusion: number;
   windTurbulence: number;
   arrowStride: number;
   arrowScale: number;

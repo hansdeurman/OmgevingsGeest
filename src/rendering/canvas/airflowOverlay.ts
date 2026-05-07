@@ -45,13 +45,33 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * Fill each hex with a translucent white tint scaled by density. This is the
- * "parcel of air" — it travels with the velocity field and lets you see where
- * a burst has gone, separately from the velocity arrows themselves.
- *
- * `referenceDensity` is the value that maps to fully visible (alpha ≈ max).
- * Anything above that saturates; below it fades linearly. Pick this to match
- * the burst strength you're injecting.
+ * RGB tuple on the same blue → green → red ramp `windColor` uses, but
+ * returned as components so we can attach our own alpha for translucent
+ * fills. Saturates at t = 1.
+ */
+function rampRGB(t: number): [number, number, number] {
+  const tt = Math.max(0, Math.min(1, t));
+  let r: number;
+  let g: number;
+  let b: number;
+  if (tt < 0.5) {
+    const k = tt * 2;
+    r = lerp(60, 100, k);
+    g = lerp(140, 220, k);
+    b = lerp(255, 110, k);
+  } else {
+    const k = (tt - 0.5) * 2;
+    r = lerp(100, 240, k);
+    g = lerp(220, 80, k);
+    b = lerp(110, 60, k);
+  }
+  return [r | 0, g | 0, b | 0];
+}
+
+/**
+ * Fill each hex with a translucent tint coloured by density on the same
+ * ramp the arrows use, so a "parcel" reads as a coloured cloud underneath
+ * the arrows. Alpha uses sqrt(t) so even faint traces show up.
  */
 export function drawDensityOverlay(
   ctx: CanvasRenderingContext2D,
@@ -59,7 +79,7 @@ export function drawDensityOverlay(
   field: WindField,
   hexSize: number,
   referenceDensity: number,
-  maxAlpha = 0.55,
+  maxAlpha = 0.7,
 ): void {
   const ref = Math.max(1e-4, referenceDensity);
   // Anything below this is invisible anyway — skip the polygon work.
@@ -69,14 +89,17 @@ export function drawDensityOverlay(
       const idx = row * world.width + col;
       const d = field.density[idx];
       if (d <= cutoff) continue;
-      const a = Math.min(maxAlpha, (d / ref) * maxAlpha);
+      const t = Math.min(1, d / ref);
+      // sqrt-curve so low density still reads; full saturation at t = 1.
+      const a = Math.min(maxAlpha, Math.sqrt(t) * maxAlpha);
+      const [r, g, b] = rampRGB(t);
       const c = offsetToPixel(col, row, hexSize);
       const corners = hexCorners(c.x, c.y, hexSize);
       ctx.beginPath();
       ctx.moveTo(corners[0].x, corners[0].y);
       for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
       ctx.closePath();
-      ctx.fillStyle = `rgba(220, 235, 255, ${a.toFixed(3)})`;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
       ctx.fill();
     }
   }

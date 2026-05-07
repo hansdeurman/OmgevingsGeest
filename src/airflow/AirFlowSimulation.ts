@@ -66,6 +66,14 @@ export interface AirFlowParams {
    */
   heightDensityLoss: number;
   /**
+   * Direct density diffusion rate (per second). Independent of velocity.
+   * Density relaxes toward the terrain-weighted neighbour average so dense
+   * air migrates to sparse cells on its own; uphill neighbours contribute
+   * less (gated by the same `heightDensityLoss`). 0 = pure velocity-driven
+   * transport.
+   */
+  densityDiffusion: number;
+  /**
    * How aggressively velocity decays in cells that aren't carrying density.
    * The intuition: velocity is "the velocity of a parcel" — without a parcel,
    * there's nothing to be moving, so velocity bleeds off. 0 = independent
@@ -458,6 +466,43 @@ export class AirFlowSimulation {
     const dRetain = Math.exp(-Math.max(0, params.densityDamping) * dt);
     if (dRetain < 1) {
       for (let i = 0; i < density.length; i++) density[i] *= dRetain;
+    }
+
+    // ----- Phase 4b: direct density diffusion (terrain-gated) -----
+    // Independent of velocity. Each cell relaxes toward the *terrain-weighted*
+    // average of its neighbours: uphill neighbours contribute less (their
+    // density "isn't reachable"), so density pools in valleys instead of
+    // climbing walls. This is what makes dense air spread visibly toward
+    // sparse air on its own, without needing velocity to carry it.
+    const diffRate = Math.max(0, params.densityDiffusion);
+    if (diffRate > 0) {
+      this.nextDensity.set(density);
+      const alphaDiff = Math.min(1, diffRate * dt);
+      for (let row = 0; row < h; row++) {
+        const offs = offsetNeighbours(row);
+        for (let col = 0; col < w; col++) {
+          const idx = row * w + col;
+          const myH = sh[idx];
+          let weighted = 0;
+          let totalWeight = 0;
+          for (let i = 0; i < 6; i++) {
+            const o = offs[i];
+            const nc = col + o.dc;
+            const nr = row + o.dr;
+            if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
+            const ni = nr * w + nc;
+            const dh = sh[ni] - myH;
+            const weight = dh > 0 ? Math.exp(-dh * heightLoss) : 1;
+            weighted += density[ni] * weight;
+            totalWeight += weight;
+          }
+          if (totalWeight > 0) {
+            const target = weighted / totalWeight;
+            this.nextDensity[idx] = density[idx] * (1 - alphaDiff) + target * alphaDiff;
+          }
+        }
+      }
+      density.set(this.nextDensity);
     }
 
     // ----- Phase 5: density-coupled velocity decay -----
