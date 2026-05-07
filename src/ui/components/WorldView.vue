@@ -9,7 +9,9 @@ import type { World } from '../../world/World';
 import {
   AirFlowSimulation,
   addSource,
+  fireBurst,
   placingSource,
+  placementMode,
   windSources,
   windBursts,
   clearBursts,
@@ -153,7 +155,23 @@ onMounted(() => {
       const mag = Math.hypot(dx, dy);
       const cap = config.windMaxSpeed;
       const k = mag > cap ? cap / mag : 1;
-      addSource({ col: cell.col, row: cell.row, vx: dx * k, vy: dy * k });
+      const vx = dx * k;
+      const vy = dy * k;
+      // Branch on the *placement mode* chosen before the drag began. Bursts
+      // fire once and disappear; continuous sources persist. Drag-placed
+      // bursts deliberately do NOT clear the field — that's reserved for the
+      // directional Test Burst buttons, which are explicit isolation runs.
+      if (placementMode.value === 'burst') {
+        fireBurst({
+          col: cell.col,
+          row: cell.row,
+          vx,
+          vy,
+          density: config.burstDensity,
+        });
+      } else {
+        addSource({ col: cell.col, row: cell.row, vx, vy });
+      }
       // One-shot: leave placement mode after creating one source.
       placingSource.value = false;
       sourceDrag.value = null;

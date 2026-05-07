@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { config, parameterDefs, gridDimensions, type ParamMeta } from '../../config/parameters';
 import {
   placingSource,
+  placementMode,
   windSources,
   clearSources,
   fireBurst,
@@ -109,13 +110,38 @@ function clearField() {
         </span>
         <span v-if="placingSource" class="hint">drag on map to place</span>
       </div>
+      <!-- Mode is locked in BEFORE the drag begins; once a source/burst is
+           placed, its nature is fixed for that source. Disabled mid-drag so
+           the user can't change horses halfway. -->
+      <div class="srow mode" role="radiogroup" aria-label="Placement mode">
+        <label>
+          <input
+            type="radio"
+            v-model="placementMode"
+            value="continuous"
+            :disabled="placingSource"
+          />
+          Continuous
+        </label>
+        <label>
+          <input
+            type="radio"
+            v-model="placementMode"
+            value="burst"
+            :disabled="placingSource"
+          />
+          Burst
+        </label>
+      </div>
       <div class="srow buttons">
         <button
           type="button"
           :class="{ primary: !placingSource, danger: placingSource }"
           @click="togglePlacing"
         >
-          {{ placingSource ? 'Cancel' : 'Add Source' }}
+          {{ placingSource
+            ? 'Cancel'
+            : placementMode === 'burst' ? 'Add Burst' : 'Add Source' }}
         </button>
         <button
           type="button"
@@ -126,7 +152,13 @@ function clearField() {
           Clear
         </button>
       </div>
-      <p class="tip">Tip: hold Shift and drag on the map for the same effect.</p>
+      <p class="tip">
+        Tip: hold Shift and drag on the map for the same effect.
+        <span v-if="placementMode === 'burst'">
+          A drag-placed burst fires once and does not clear the field —
+          handy for stacking multiple impulses.
+        </span>
+      </p>
     </section>
   </aside>
 </template>
@@ -162,6 +194,23 @@ h3 {
   margin: 8px 0;
 }
 .burst-grid button { padding: 6px 0; }
+
+.srow.mode {
+  justify-content: flex-start;
+  gap: 14px;
+  color: #c2c2cc;
+}
+.srow.mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.srow.mode input[type="radio"] {
+  accent-color: #6a8cff;
+  margin: 0;
+}
+.srow.mode input[type="radio"]:disabled + ~ * { opacity: 0.5; }
 .count { color: #c2c2cc; }
 .hint { color: #6a8cff; font-style: italic; font-size: 11px; }
 .tip { margin: 6px 0 0; color: #6b6b78; font-size: 11px; line-height: 1.4; }

@@ -46,6 +46,15 @@ export const requestFieldClear = ref(false);
 /** UI state: when true, dragging on the canvas places a source instead of panning. */
 export const placingSource = ref(false);
 
+/**
+ * UI state: which kind of source is created when the user mouseups after a
+ * placement drag. Locked in *before* placement begins; the resulting source
+ * keeps that nature for its lifetime (continuous sources persist in
+ * `windSources`; bursts are one-shot via `windBursts`).
+ */
+export type PlacementMode = 'continuous' | 'burst';
+export const placementMode = ref<PlacementMode>('continuous');
+
 export function addSource(s: WindSource): void {
   windSources.push(s);
 }
