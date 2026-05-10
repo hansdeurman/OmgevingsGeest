@@ -139,11 +139,18 @@ onMounted(() => {
     const cx = Math.floor(width / 2);
     const cy = Math.floor(height / 2);
 
-    // Thin smooth wall.
+    // Thin smooth wall. Perpendicular cross-section uses a *super-gaussian*
+    // (exp(-(dx/σ)^p) with p = 6) instead of a plain gaussian so the profile
+    // is flat across the ±half-hex offset that alternating odd rows
+    // introduce in the hex grid — without this both odd-row cells would
+    // sit at ~0.63 height while the even-row cell sits at 1.0, which reads
+    // as a zigzag of bright and dim cells along the wall. Along the axis
+    // we use a flat plateau with gaussian taper at the ends.
     const wallCenterPx = offsetToPixel(cx + 10, cy, HEX_PIXEL_SIZE);
-    const wallSigmaPerp = HEX_PIXEL_SIZE * 0.9;       // thin cross-section
+    const wallSigmaPerp = HEX_PIXEL_SIZE * 1.5;       // perpendicular σ
+    const wallExpPerp = 6;                            // super-gaussian power
     const wallHalfLen = 4 * HEX_PIXEL_SIZE * 1.5;     // ~4 hexes top/bottom
-    const wallEndSigma = HEX_PIXEL_SIZE * 1.5;        // taper beyond half-len
+    const wallEndSigma = HEX_PIXEL_SIZE * 1.5;        // gaussian taper at ends
 
     // Conical mountain.
     const mtnCenterPx = offsetToPixel(cx - 10, cy, HEX_PIXEL_SIZE);
@@ -153,12 +160,15 @@ onMounted(() => {
       for (let c = 0; c < width; c++) {
         const pos = offsetToPixel(c, r, HEX_PIXEL_SIZE);
 
-        // Wall profile: gaussian perpendicular, flat-then-taper along axis.
+        // Wall profile: super-gaussian perpendicular (flat across the
+        // half-hex zigzag), flat plateau with gaussian taper along axis.
         const wdx = pos.x - wallCenterPx.x;
         const wdy = pos.y - wallCenterPx.y;
-        const wPerp = Math.exp(-(wdx * wdx) / (2 * wallSigmaPerp * wallSigmaPerp));
-        const wAlongDist = Math.max(0, Math.abs(wdy) - wallHalfLen);
-        const wAlong = Math.exp(-(wAlongDist * wAlongDist) / (2 * wallEndSigma * wallEndSigma));
+        const wPerp = Math.exp(-Math.pow(Math.abs(wdx) / wallSigmaPerp, wallExpPerp));
+        const wdyAbs = Math.abs(wdy);
+        const wAlong = wdyAbs <= wallHalfLen
+          ? 1
+          : Math.exp(-((wdyAbs - wallHalfLen) ** 2) / (2 * wallEndSigma * wallEndSigma));
         const wallH = wPerp * wAlong;
 
         // Mountain: isotropic gaussian.
