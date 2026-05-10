@@ -20,7 +20,7 @@ import {
   highlightedSinkIdx,
   requestFieldClear,
 } from '../../airflow';
-import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
+import { gridPixelBounds, pixelToOffset, offsetToPixel, hexCorners } from '../../math/hex';
 
 const hostRef = ref<HTMLDivElement>();
 
@@ -128,57 +128,72 @@ onMounted(() => {
   for (let i = 0; i < world.tiles.length; i++) world.tiles[i].height = 0;
 
   // Two test mountains the airflow has to deal with. Both are sampled in
-  // *pixel* space so the smooth profile doesn't pick up the hex-row zigzag
-  // — combined with the new triangle-based renderer, the surface reads as
-  // a continuous landscape rather than a stained-glass step function.
-  //   - Thin smooth wall, narrow gaussian cross-section, flat along its
-  //     length, taper at the ends. Right of centre.
-  //   - Conical mountain, isotropic gaussian peak. Left of centre.
+  // *pixel* space (a continuous height function) so the smooth profile
+  // doesn't pick up the hex-row zigzag.
+  //
+  // We sample the function not just at every cell's centre, but also at
+  // every cell's six corners. The renderer reads tile.cornerHeights
+  // directly, so the wall edge follows the function's actual edge in
+  // pixel space — the half-on / half-off cells around the wall axis end
+  // up with corner heights that combine to a clean straight visual edge,
+  // instead of inheriting a stair-stepped average from neighbour cells.
+  //   - Thin straight wall, hard plateau in pixel space, smooth taper.
+  //   - Conical mountain, isotropic gaussian peak.
   {
     const { width, height } = gridDimensions(config.hexCount);
     const cx = Math.floor(width / 2);
     const cy = Math.floor(height / 2);
 
-    // Thin smooth wall. Perpendicular cross-section uses a *super-gaussian*
-    // (exp(-(dx/σ)^p) with p = 6) instead of a plain gaussian so the profile
-    // is flat across the ±half-hex offset that alternating odd rows
-    // introduce in the hex grid — without this both odd-row cells would
-    // sit at ~0.63 height while the even-row cell sits at 1.0, which reads
-    // as a zigzag of bright and dim cells along the wall. Along the axis
-    // we use a flat plateau with gaussian taper at the ends.
     const wallCenterPx = offsetToPixel(cx + 10, cy, HEX_PIXEL_SIZE);
-    const wallSigmaPerp = HEX_PIXEL_SIZE * 1.5;       // perpendicular σ
-    const wallExpPerp = 6;                            // super-gaussian power
+    const wallHalfWidth = HEX_PIXEL_SIZE * 0.5;       // pixel-space half-width
+    const wallTaperPerp = HEX_PIXEL_SIZE * 0.5;       // perpendicular taper
     const wallHalfLen = 4 * HEX_PIXEL_SIZE * 1.5;     // ~4 hexes top/bottom
     const wallEndSigma = HEX_PIXEL_SIZE * 1.5;        // gaussian taper at ends
 
-    // Conical mountain.
     const mtnCenterPx = offsetToPixel(cx - 10, cy, HEX_PIXEL_SIZE);
     const mtnSigma = HEX_PIXEL_SIZE * 2.2;            // ~2.2 hex peak sigma
+
+    // Sample the wall + mountain combined height function at any pixel
+    // position. Plateau-with-taper for the wall: full height inside a thin
+    // axis-aligned rectangle, gaussian falloff perpendicular and at the
+    // ends. Sharp visual edge in pixel space; the renderer can then ask
+    // for the function value at any corner and get a clean wall edge.
+    function sampleHeight(px: number, py: number): number {
+      // Wall.
+      const wdx = px - wallCenterPx.x;
+      const wdy = py - wallCenterPx.y;
+      const wdxAbs = Math.abs(wdx);
+      const wdyAbs = Math.abs(wdy);
+      const wPerp = wdxAbs <= wallHalfWidth
+        ? 1
+        : Math.exp(-((wdxAbs - wallHalfWidth) ** 2) / (2 * wallTaperPerp * wallTaperPerp));
+      const wAlong = wdyAbs <= wallHalfLen
+        ? 1
+        : Math.exp(-((wdyAbs - wallHalfLen) ** 2) / (2 * wallEndSigma * wallEndSigma));
+      const wallH = wPerp * wAlong;
+      // Mountain.
+      const mdx = px - mtnCenterPx.x;
+      const mdy = py - mtnCenterPx.y;
+      const mtnH = Math.exp(-(mdx * mdx + mdy * mdy) / (2 * mtnSigma * mtnSigma));
+      return Math.max(wallH, mtnH);
+    }
 
     for (let r = 0; r < height; r++) {
       for (let c = 0; c < width; c++) {
         const pos = offsetToPixel(c, r, HEX_PIXEL_SIZE);
-
-        // Wall profile: super-gaussian perpendicular (flat across the
-        // half-hex zigzag), flat plateau with gaussian taper along axis.
-        const wdx = pos.x - wallCenterPx.x;
-        const wdy = pos.y - wallCenterPx.y;
-        const wPerp = Math.exp(-Math.pow(Math.abs(wdx) / wallSigmaPerp, wallExpPerp));
-        const wdyAbs = Math.abs(wdy);
-        const wAlong = wdyAbs <= wallHalfLen
-          ? 1
-          : Math.exp(-((wdyAbs - wallHalfLen) ** 2) / (2 * wallEndSigma * wallEndSigma));
-        const wallH = wPerp * wAlong;
-
-        // Mountain: isotropic gaussian.
-        const mdx = pos.x - mtnCenterPx.x;
-        const mdy = pos.y - mtnCenterPx.y;
-        const mtnH = Math.exp(-(mdx * mdx + mdy * mdy) / (2 * mtnSigma * mtnSigma));
-
         const idx = r * width + c;
-        const h = Math.max(world.tiles[idx].height, wallH, mtnH);
-        world.tiles[idx].height = h;
+        const tile = world.tiles[idx];
+        // Centre height drives the simulation (terrain force gradient).
+        const centreH = sampleHeight(pos.x, pos.y);
+        if (centreH > tile.height) tile.height = centreH;
+        // Corner heights drive the renderer for a sharp visual edge.
+        const corners = hexCorners(pos.x, pos.y, HEX_PIXEL_SIZE);
+        const ch = tile.cornerHeights ?? new Float32Array(6);
+        for (let i = 0; i < 6; i++) {
+          const sampled = sampleHeight(corners[i].x, corners[i].y);
+          if (sampled > ch[i]) ch[i] = sampled;
+        }
+        tile.cornerHeights = ch;
       }
     }
   }

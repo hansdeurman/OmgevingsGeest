@@ -11,45 +11,6 @@ import {
 } from './airflowOverlay';
 
 /**
- * Recursively subdivide a triangle into 4 smaller triangles per level and
- * fill each leaf with the shaded colour of the average of its 3 vertex
- * heights. With depth = 0 we draw a single flat-shaded triangle (the
- * legacy behaviour). At depth = 1 we get 4 sub-triangles per call, and
- * the perceived shading approaches a Gouraud gradient as depth grows.
- */
-function drawSubdivTri(
-  ctx: CanvasRenderingContext2D,
-  ax: number, ay: number, ah: number,
-  bx: number, by: number, bh: number,
-  cx: number, cy: number, ch: number,
-  depth: number,
-  shadeStrength: number,
-): void {
-  if (depth === 0) {
-    const triH = (ah + bh + ch) / 3;
-    const k = 1 - shadeStrength * 0.5 + triH * shadeStrength;
-    const rgb = shade(heightToRGB(triH), k);
-    ctx.fillStyle = rgbToCss(rgb);
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.lineTo(cx, cy);
-    ctx.closePath();
-    ctx.fill();
-    return;
-  }
-  // Edge midpoints (positions and interpolated heights).
-  const mAB_x = (ax + bx) * 0.5, mAB_y = (ay + by) * 0.5, mAB_h = (ah + bh) * 0.5;
-  const mBC_x = (bx + cx) * 0.5, mBC_y = (by + cy) * 0.5, mBC_h = (bh + ch) * 0.5;
-  const mCA_x = (cx + ax) * 0.5, mCA_y = (cy + ay) * 0.5, mCA_h = (ch + ah) * 0.5;
-  const d1 = depth - 1;
-  drawSubdivTri(ctx, ax, ay, ah,           mAB_x, mAB_y, mAB_h, mCA_x, mCA_y, mCA_h, d1, shadeStrength);
-  drawSubdivTri(ctx, mAB_x, mAB_y, mAB_h,  bx, by, bh,           mBC_x, mBC_y, mBC_h, d1, shadeStrength);
-  drawSubdivTri(ctx, mCA_x, mCA_y, mCA_h,  mBC_x, mBC_y, mBC_h,  cx, cy, ch,          d1, shadeStrength);
-  drawSubdivTri(ctx, mAB_x, mAB_y, mAB_h,  mBC_x, mBC_y, mBC_h,  mCA_x, mCA_y, mCA_h, d1, shadeStrength);
-}
-
-/**
  * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
  * and resets the device transform on resize so 1 logical pixel == 1 CSS px.
  */
@@ -119,7 +80,6 @@ export class CanvasRenderer implements Renderer {
 
     const showGrid = config.showGrid;
     const shadeStrength = config.shadeStrength;
-    const subdivDepth = Math.max(0, Math.min(3, config.surfaceSubdivision | 0));
 
     // Height labels: density-throttle when hexes are tiny on screen so the
     // text is always legible. With small hex sizes we can't fit a label per
@@ -169,38 +129,48 @@ export class CanvasRenderer implements Renderer {
 
       const tileH = tile.height;
 
-      // Read the six neighbour heights once. Out-of-bounds = mirror own.
-      const offs = offsetNeighbours(tile.row);
-      for (let i = 0; i < 6; i++) {
-        const nc = tile.col + offs[i].dc;
-        const nr = tile.row + offs[i].dr;
-        if (nc < 0 || nc >= world.width || nr < 0 || nr >= world.height) {
-          neighH[i] = tileH;
-        } else {
-          neighH[i] = world.tiles[nr * world.width + nc].height;
+      if (tile.cornerHeights) {
+        // Direct corner samples — the world generator (or the test setup)
+        // has explicit per-corner heights. The renderer trusts these and
+        // doesn't blend with neighbours, which keeps sharp pixel-space
+        // edges (like a thin wall) from getting smeared into a hex-cell
+        // staircase.
+        for (let i = 0; i < 6; i++) cornerH[i] = tile.cornerHeights[i];
+      } else {
+        // Fallback: average each corner with the two neighbour cells that
+        // share it (and our own height). Smooth but lossy at sharp edges.
+        const offs = offsetNeighbours(tile.row);
+        for (let i = 0; i < 6; i++) {
+          const nc = tile.col + offs[i].dc;
+          const nr = tile.row + offs[i].dr;
+          if (nc < 0 || nc >= world.width || nr < 0 || nr >= world.height) {
+            neighH[i] = tileH;
+          } else {
+            neighH[i] = world.tiles[nr * world.width + nc].height;
+          }
         }
-      }
-      // Corner heights: average of own height and the two sharing neighbours.
-      for (let i = 0; i < 6; i++) {
-        const [a, b] = cornerSharers[i];
-        cornerH[i] = (tileH + neighH[a] + neighH[b]) / 3;
+        for (let i = 0; i < 6; i++) {
+          const [a, b] = cornerSharers[i];
+          cornerH[i] = (tileH + neighH[a] + neighH[b]) / 3;
+        }
       }
 
       const corners = hexCorners(x, y, size);
       // Six main triangles, each fan-style from centre to two adjacent
-      // corners. Each is recursively subdivided into 4^subdivDepth flat-
-      // shaded sub-triangles to approximate Gouraud shading — without
-      // subdivision the per-triangle facets read as a tiled mosaic.
+      // corners. Each filled with the shaded colour of the average of
+      // its 3 vertex heights.
       for (let i = 0; i < 6; i++) {
         const j = (i + 1) % 6;
-        drawSubdivTri(
-          ctx,
-          x, y, tileH,
-          corners[i].x, corners[i].y, cornerH[i],
-          corners[j].x, corners[j].y, cornerH[j],
-          subdivDepth,
-          shadeStrength,
-        );
+        const triH = (tileH + cornerH[i] + cornerH[j]) / 3;
+        const k = 1 - shadeStrength * 0.5 + triH * shadeStrength;
+        const rgb = shade(heightToRGB(triH), k);
+        ctx.fillStyle = rgbToCss(rgb);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(corners[i].x, corners[i].y);
+        ctx.lineTo(corners[j].x, corners[j].y);
+        ctx.closePath();
+        ctx.fill();
       }
 
       if (showGrid) {
