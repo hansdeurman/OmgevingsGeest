@@ -367,11 +367,18 @@ export class AirFlowSimulation {
         // We split based on whether the velocity has an uphill component
         // (v · ∇h > 0). With v at rest the dot product is zero and we apply
         // the gentler downhill regime. Strong winds feel less of it (overcome
-        // term). All gated by densityFactor — empty cells have no air for
-        // the slope to push around.
+        // term).
+        //
+        // Strict-gated by *parcel strength* (|deviation from baseline| /
+        // baseline) rather than absolute density. The mountain only pushes
+        // a parcel that's actually on it — atmospheric air at exactly
+        // baseline feels nothing, so the wall doesn't generate ghost wind
+        // that propagates across the map.
+        const dDev = myDens - baseline;
+        const parcelStrength = Math.min(1, Math.abs(dDev) / baseline);
         const vDotGrad = cvx * gx + cvy * gy;
         const dirFactor = vDotGrad > 0 ? 1 : downhillRatio;
-        const tk = (coupling * dirFactor * densityFactor) / (1 + speed * overcome);
+        const tk = (coupling * dirFactor * parcelStrength) / (1 + speed * overcome);
         fx -= gx * tk;
         fy -= gy * tk;
 
@@ -487,9 +494,15 @@ export class AirFlowSimulation {
           // CFL-scaled total outgoing flux fraction.
           const alpha = Math.min(1, advRate * speed * dt * invHex);
 
-          const fluxVx = cvx * alpha;
-          const fluxVy = cvy * alpha;
+          // Velocity flux is gated by parcel strength: velocity only travels
+          // *with* a deviation from baseline. At baseline, force-generated
+          // velocity (e.g. from a mountain edge) doesn't propagate — it
+          // stays put and damps locally, instead of shooting across the
+          // map as a ghost wind.
           const dDev = density[idx] - baseline;
+          const parcelStrength = Math.min(1, Math.abs(dDev) / baseline);
+          const fluxVx = cvx * alpha * parcelStrength;
+          const fluxVy = cvy * alpha * parcelStrength;
           const fluxD = dDev * alpha;
 
           // A loses the full outgoing flux up front.
