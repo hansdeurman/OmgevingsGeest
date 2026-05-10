@@ -10,6 +10,8 @@ import {
   clearSinks,
   removeSource,
   removeSink,
+  highlightedSourceIdx,
+  highlightedSinkIdx,
   fireBurst,
   requestFieldClear,
 } from '../../airflow';
@@ -236,7 +238,12 @@ async function copySettings() {
            placement; changing the sliders above does not retro-edit them.
            This list shows what each one is actually doing right now. -->
       <ul v-if="windSources.length" class="src-list">
-        <li v-for="(s, i) in windSources" :key="i">
+        <li
+          v-for="(s, i) in windSources"
+          :key="i"
+          @mouseenter="highlightedSourceIdx = i"
+          @mouseleave="highlightedSourceIdx = -1"
+        >
           <span class="src-pos">({{ s.col }}, {{ s.row }})</span>
           <span class="src-vec">v={{ Math.hypot(s.vx, s.vy).toFixed(1) }}</span>
           <span class="src-dens">ρ={{ s.density.toFixed(1) }}</span>
@@ -253,7 +260,13 @@ async function copySettings() {
         </li>
       </ul>
       <ul v-if="windSinks.length" class="src-list">
-        <li v-for="(s, i) in windSinks" :key="`sink-${i}`" class="sink">
+        <li
+          v-for="(s, i) in windSinks"
+          :key="`sink-${i}`"
+          class="sink"
+          @mouseenter="highlightedSinkIdx = i"
+          @mouseleave="highlightedSinkIdx = -1"
+        >
           <span class="src-pos">({{ s.col }}, {{ s.row }})</span>
           <span class="src-dens">drain {{ s.rate.toFixed(1) }}/s</span>
           <button

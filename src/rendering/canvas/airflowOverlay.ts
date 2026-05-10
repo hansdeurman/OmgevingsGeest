@@ -185,6 +185,7 @@ export function drawWindSources(
   hexSize: number,
   zoom: number,
   maxSpeed: number,
+  highlightedIdx = -1,
 ): void {
   const lineWidth = 1.6 / zoom;
   const ringWidth = 2 / zoom;
@@ -193,10 +194,25 @@ export function drawWindSources(
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  for (const s of sources) {
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
     const c = offsetToPixel(s.col, s.row, hexSize);
     const mag = Math.hypot(s.vx, s.vy);
     const color = windColor(mag, maxSpeed);
+
+    // Hover halo: a soft glowing ring just outside the source so the user
+    // can find it on the map while pointing at its row in the panel.
+    if (i === highlightedIdx) {
+      ctx.save();
+      ctx.lineWidth = ringWidth * 2.5;
+      ctx.strokeStyle = 'rgba(255, 220, 120, 0.6)';
+      ctx.shadowColor = 'rgba(255, 220, 120, 0.9)';
+      ctx.shadowBlur = 12 / zoom;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, radius * 1.6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Outer ring marks the source location.
     ctx.lineWidth = ringWidth;
@@ -258,6 +274,7 @@ export function drawWindSinks(
   sinks: ReadonlyArray<WindSink>,
   hexSize: number,
   zoom: number,
+  highlightedIdx = -1,
 ): void {
   const ringWidth = 2 / zoom;
   const lineWidth = 1.6 / zoom;
@@ -266,8 +283,21 @@ export function drawWindSinks(
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  for (const s of sinks) {
+  for (let i = 0; i < sinks.length; i++) {
+    const s = sinks[i];
     const c = offsetToPixel(s.col, s.row, hexSize);
+
+    if (i === highlightedIdx) {
+      ctx.save();
+      ctx.lineWidth = ringWidth * 2.5;
+      ctx.strokeStyle = 'rgba(255, 220, 120, 0.6)';
+      ctx.shadowColor = 'rgba(255, 220, 120, 0.9)';
+      ctx.shadowBlur = 12 / zoom;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, radius * 1.6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     ctx.lineWidth = ringWidth;
     ctx.strokeStyle = '#ffffff';

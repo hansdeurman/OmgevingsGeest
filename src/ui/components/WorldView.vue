@@ -16,6 +16,8 @@ import {
   windSinks,
   windBursts,
   clearBursts,
+  highlightedSourceIdx,
+  highlightedSinkIdx,
   requestFieldClear,
 } from '../../airflow';
 import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
@@ -100,6 +102,8 @@ function frame(now: number) {
       windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
       windSources: config.showAirFlow ? windSources : undefined,
       windSinks: config.showAirFlow ? windSinks : undefined,
+      highlightedSourceIdx: highlightedSourceIdx.value,
+      highlightedSinkIdx: highlightedSinkIdx.value,
       densityReference: config.showDensity ? config.densityDisplayMax : undefined,
       sourcePreview: sourceDrag.value ?? undefined,
     });

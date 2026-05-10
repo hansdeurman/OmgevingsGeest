@@ -14,6 +14,9 @@ export interface RenderFrame {
   windField?: WindField;
   windSources?: ReadonlyArray<WindSource>;
   windSinks?: ReadonlyArray<WindSink>;
+  /** Index of the source / sink to draw with a highlight halo, or -1. */
+  highlightedSourceIdx?: number;
+  highlightedSinkIdx?: number;
   /**
    * Reference density used by the density overlay to set alpha. Typically
    * matches the burst strength so a fresh parcel reads as fully opaque.

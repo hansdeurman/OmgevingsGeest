@@ -10,6 +10,8 @@ export {
   windBursts,
   placingSource,
   placementMode,
+  highlightedSourceIdx,
+  highlightedSinkIdx,
   requestFieldClear,
   addSource,
   addSink,

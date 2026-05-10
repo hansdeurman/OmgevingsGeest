@@ -53,7 +53,17 @@ export class CanvasRenderer implements Renderer {
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
 
-    const { world, camera, windField, windSources, windSinks, densityReference, sourcePreview } = frame;
+    const {
+      world,
+      camera,
+      windField,
+      windSources,
+      windSinks,
+      densityReference,
+      sourcePreview,
+      highlightedSourceIdx,
+      highlightedSinkIdx,
+    } = frame;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
@@ -193,11 +203,18 @@ export class CanvasRenderer implements Renderer {
     }
 
     if (windSources && windSources.length) {
-      drawWindSources(ctx, windSources, size, camera.zoom, config.windMaxSpeed);
+      drawWindSources(
+        ctx,
+        windSources,
+        size,
+        camera.zoom,
+        config.windMaxSpeed,
+        highlightedSourceIdx ?? -1,
+      );
     }
 
     if (windSinks && windSinks.length) {
-      drawWindSinks(ctx, windSinks, size, camera.zoom);
+      drawWindSinks(ctx, windSinks, size, camera.zoom, highlightedSinkIdx ?? -1);
     }
 
     if (sourcePreview) {

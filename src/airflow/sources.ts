@@ -90,6 +90,14 @@ export type PlacementMode = 'continuous' | 'burst' | 'sink';
 export const placementMode = ref<PlacementMode>('continuous');
 
 /**
+ * Index of the source currently being hovered in the panel listing, or -1
+ * for none. The renderer reads this and draws a halo around the matching
+ * source so the user can find it on the map. Mirrored field for sinks.
+ */
+export const highlightedSourceIdx = ref(-1);
+export const highlightedSinkIdx = ref(-1);
+
+/**
  * Lightweight constructor: callers supply position + velocity, optionally
  * override the burst-cycle fields. Defaults yield an always-on continuous
  * source matching the legacy behaviour.
