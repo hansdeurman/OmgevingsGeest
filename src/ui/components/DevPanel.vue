@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { config, parameterDefs, gridDimensions, type ParamMeta } from '../../config/parameters';
 import {
   placingSource,
@@ -67,6 +67,44 @@ function fireDirectionalBurst(i: number) {
 function clearField() {
   requestFieldClear.value = true;
 }
+
+/**
+ * Snapshot the entire reactive config plus build identity into JSON and
+ * copy it to the clipboard. The build SHA is the *git commit* the running
+ * bundle was built from — same value the BuildBadge shows — so a saved
+ * snapshot is reproducible by checking out that commit and pasting back.
+ */
+const copyState = ref<'idle' | 'ok' | 'fail'>('idle');
+
+async function copySettings() {
+  const payload = {
+    buildSha: __BUILD_SHA__,
+    buildTime: __BUILD_TIME__,
+    savedAt: new Date().toISOString(),
+    config: { ...config },
+  };
+  const json = JSON.stringify(payload, null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    copyState.value = 'ok';
+  } catch {
+    // Last-ditch fallback when clipboard API is blocked (file://, etc.).
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = json;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      copyState.value = 'ok';
+    } catch {
+      copyState.value = 'fail';
+    }
+  }
+  setTimeout(() => { copyState.value = 'idle'; }, 1500);
+}
 </script>
 
 <template>
@@ -74,6 +112,15 @@ function clearField() {
     <header>
       <h2>Developer</h2>
       <p>Tweak. Watch. Repeat.</p>
+      <button
+        type="button"
+        class="save"
+        :class="{ ok: copyState === 'ok', fail: copyState === 'fail' }"
+        @click="copySettings"
+        :title="'Copy build SHA + all config to clipboard as JSON'"
+      >
+        {{ copyState === 'ok' ? 'Copied!' : copyState === 'fail' ? 'Copy failed' : 'Save Settings (JSON)' }}
+      </button>
     </header>
 
     <section v-for="[group, params] in groups" :key="group">
@@ -189,7 +236,27 @@ function clearField() {
 <style scoped>
 .dev { padding: 16px; font-size: 12px; }
 header h2 { margin: 0 0 4px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
-header p { margin: 0 0 16px; color: #6b6b78; }
+header p { margin: 0 0 8px; color: #6b6b78; }
+header .save {
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid #2a2a36;
+  color: #c2c2cc;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+header .save:hover { background: #1f1f28; color: #fff; }
+header .save.ok { background: #2a4a32; border-color: #5fbd7c; color: #c0f5cc; }
+header .save.fail { background: #4a2a2a; border-color: #cc5566; color: #ff8090; }
 section { margin-bottom: 18px; }
 h3 {
   margin: 0 0 8px;
