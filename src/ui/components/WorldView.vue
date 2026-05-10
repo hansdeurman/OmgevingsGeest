@@ -81,6 +81,7 @@ function frame(now: number) {
         overcomeFactor: config.windOvercomeFactor,
         maxSpeed: config.windMaxSpeed,
         advection: config.windAdvection,
+        pushSharpness: config.windPushSharpness,
         smoothing: config.windSmoothing,
         densityDamping: config.windDensityDamping,
         pressure: config.windPressure,

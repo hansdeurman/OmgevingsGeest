@@ -63,6 +63,9 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'windOvercomeFactor', label: 'Overcome', group: 'Wind', type: 'number', min: 0, max: 3, step: 0.01, default: 0.1 },
   { key: 'windMaxSpeed', label: 'Max Speed', group: 'Wind', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
   { key: 'windAdvection', label: 'Propagation', group: 'Wind', type: 'number', min: 0, max: 50, step: 0.5, default: 12 },
+  // Sharpness of the edge-flux push (1 = broad isotropic 60° fan; higher
+  // = tighter plume, all directions still treated equally).
+  { key: 'windPushSharpness', label: 'Push Sharpness', group: 'Wind', type: 'number', min: 1, max: 12, step: 0.1, default: 3 },
   // Smoothing is purely cosmetic (averages each cell with its 6 neighbours).
   // Default 0 — the diffusion was muddying the parcel/no-parcel distinction
   // and propagating velocity into mountains.
@@ -146,6 +149,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windOvercomeFactor: number;
   windMaxSpeed: number;
   windAdvection: number;
+  windPushSharpness: number;
   windSmoothing: number;
   windDensityDamping: number;
   windDensityBaseline: number;
