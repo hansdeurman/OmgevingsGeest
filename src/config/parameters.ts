@@ -42,7 +42,7 @@ export const parameterDefs: ParamMeta[] = [
   // Render
   { key: 'showGrid', label: 'Show Grid', group: 'Render', type: 'boolean', default: false },
   { key: 'showHeights', label: 'Show Heights', group: 'Render', type: 'boolean', default: false },
-  { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.45 },
+  { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.65 },
 
   // Wind — runs the airflow simulation and draws arrows over the terrain.
   { key: 'showAirFlow', label: 'Show Air Flow', group: 'Wind', type: 'boolean', default: true },

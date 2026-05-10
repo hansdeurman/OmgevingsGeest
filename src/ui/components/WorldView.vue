@@ -122,6 +122,39 @@ onMounted(() => {
   // propagate cleanly outward. Subsequent regenerates restore real terrain
   // and don't replant these sources.
   for (let i = 0; i < world.tiles.length; i++) world.tiles[i].height = 0;
+
+  // Two test mountains the airflow has to deal with:
+  //   - Thin tall wall, 1 hex wide, on the right side. Flat-top cliff.
+  //   - Thick conical peak on the left side. Smooth gaussian.
+  // Both well outside the source ring so the sources fire freely first
+  // before their parcels reach terrain.
+  {
+    const { width, height } = gridDimensions(config.hexCount);
+    const cx = Math.floor(width / 2);
+    const cy = Math.floor(height / 2);
+
+    // Thin wall: column at cx + 10, 9 hexes tall, height 1.
+    const wallCol = Math.min(width - 1, cx + 10);
+    for (let r = Math.max(0, cy - 4); r <= Math.min(height - 1, cy + 4); r++) {
+      world.tiles[r * width + wallCol].height = 1.0;
+    }
+
+    // Conical mountain: gaussian peak centred at (cx - 10, cy), σ ≈ 1.6.
+    const mtnCol = Math.max(0, cx - 10);
+    const mtnRow = cy;
+    const sigma = 1.6;
+    const radius = 5;
+    for (let r = Math.max(0, mtnRow - radius); r <= Math.min(height - 1, mtnRow + radius); r++) {
+      for (let c = Math.max(0, mtnCol - radius); c <= Math.min(width - 1, mtnCol + radius); c++) {
+        const dx = c - mtnCol;
+        const dy = r - mtnRow;
+        const h = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+        const idx = r * width + c;
+        if (h > world.tiles[idx].height) world.tiles[idx].height = h;
+      }
+    }
+  }
+
   airFlow = new AirFlowSimulation(world);
   airFlow.setBaseline(config.windDensityBaseline);
   {
