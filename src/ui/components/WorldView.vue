@@ -145,8 +145,13 @@ onMounted(() => {
     const cy = Math.floor(height / 2);
 
     const wallCenterPx = offsetToPixel(cx + 10, cy, HEX_PIXEL_SIZE);
-    const wallHalfWidth = HEX_PIXEL_SIZE * 0.5;       // pixel-space half-width
-    const wallTaperPerp = HEX_PIXEL_SIZE * 0.5;       // perpendicular taper
+    // Plateau half-width must comfortably exceed the half-hex pixel offset
+    // (≈ √3/2 · hexSize ≈ 3.46 px) so that *every* corner of every cell
+    // sitting inside the wall is also inside the plateau — otherwise the
+    // outer corners drop into the taper and the wall body shows the
+    // bright/dim alternating bands the user just spotted.
+    const wallHalfWidth = HEX_PIXEL_SIZE * 1.0;       // ~4 px each side of axis
+    const wallTaperPerp = HEX_PIXEL_SIZE * 0.5;       // perpendicular taper σ
     const wallHalfLen = 4 * HEX_PIXEL_SIZE * 1.5;     // ~4 hexes top/bottom
     const wallEndSigma = HEX_PIXEL_SIZE * 1.5;        // gaussian taper at ends
 
