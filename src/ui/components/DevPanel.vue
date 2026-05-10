@@ -229,6 +229,27 @@ async function copySettings() {
           Sinks drain density at the rate from the slider — pair manually with a source by matching rates.
         </span>
       </p>
+
+      <!-- Existing-source listing. Each source's settings are SNAPSHOTTED at
+           placement; changing the sliders above does not retro-edit them.
+           This list shows what each one is actually doing right now. -->
+      <ul v-if="windSources.length" class="src-list">
+        <li v-for="(s, i) in windSources" :key="i">
+          <span class="src-pos">({{ s.col }}, {{ s.row }})</span>
+          <span class="src-vec">v={{ Math.hypot(s.vx, s.vy).toFixed(1) }}</span>
+          <span class="src-dens">ρ={{ s.density.toFixed(1) }}</span>
+          <span class="src-cycle" v-if="Number.isFinite(s.duration) && Number.isFinite(s.period)">
+            {{ s.duration.toFixed(2) }}s/{{ s.period.toFixed(2) }}s
+          </span>
+          <span class="src-cycle" v-else>continuous</span>
+        </li>
+      </ul>
+      <ul v-if="windSinks.length" class="src-list">
+        <li v-for="(s, i) in windSinks" :key="`sink-${i}`" class="sink">
+          <span class="src-pos">({{ s.col }}, {{ s.row }})</span>
+          <span class="src-dens">drain {{ s.rate.toFixed(1) }}/s</span>
+        </li>
+      </ul>
     </section>
   </aside>
 </template>
@@ -301,6 +322,37 @@ h3 {
   margin: 0;
 }
 .srow.mode label:has(input:disabled) { opacity: 0.5; }
+
+.src-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #c2c2cc;
+  border-top: 1px solid #1f1f28;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.src-list li {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgba(106, 140, 255, 0.08);
+}
+.src-list li.sink {
+  background: rgba(204, 85, 102, 0.12);
+}
+.src-list .src-pos { color: #8a8a99; }
+.src-list .src-vec { color: #88ccff; }
+.src-list .src-dens { color: #ffaa66; }
+.src-list .src-cycle { color: #8a8a99; text-align: right; }
 .count { color: #c2c2cc; }
 .hint { color: #6a8cff; font-style: italic; font-size: 11px; }
 .tip { margin: 6px 0 0; color: #6b6b78; font-size: 11px; line-height: 1.4; }

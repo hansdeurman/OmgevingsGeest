@@ -66,6 +66,11 @@ export const parameterDefs: ParamMeta[] = [
   // Sharpness of the edge-flux push (1 = broad isotropic 60° fan; higher
   // = tighter plume, all directions still treated equally).
   { key: 'windPushSharpness', label: 'Push Sharpness', group: 'Wind', type: 'number', min: 1, max: 12, step: 0.1, default: 3 },
+  // Display-only: what density value saturates the colour ramp (red end of
+  // the arrows, edge of the density backdrop). Tuning this rescales how
+  // density looks but doesn't touch any source or any actual physics —
+  // sources keep the density they were placed with.
+  { key: 'windDensityVizMax', label: 'ρ Display Max', group: 'Wind', type: 'number', min: 0.5, max: 20, step: 0.1, default: 3 },
   // Smoothing is purely cosmetic (averages each cell with its 6 neighbours).
   // Default 0 — the diffusion was muddying the parcel/no-parcel distinction
   // and propagating velocity into mountains.
@@ -105,7 +110,10 @@ export const parameterDefs: ParamMeta[] = [
   // Burst tooling — directional test buttons + drag-placed periodic sources.
   { key: 'showDensity', label: 'Show Density', group: 'Burst', type: 'boolean', default: true },
   { key: 'burstSpeed', label: 'Burst Speed', group: 'Burst', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
-  { key: 'burstDensity', label: 'Burst Density', group: 'Burst', type: 'number', min: 0.1, max: 20, step: 0.1, default: 3 },
+  // Default density a NEW source/burst is given at placement. Existing
+  // sources keep the density they were placed with — changing this slider
+  // does not retro-edit anything.
+  { key: 'burstDensity', label: 'New Src Density', group: 'Burst', type: 'number', min: 0.1, max: 20, step: 0.1, default: 3 },
   // Burst-source duty cycle (snapshotted at placement). Duration is how long
   // each pulse stays "on"; period is the gap between pulse starts.
   { key: 'burstDuration', label: 'On Time', group: 'Burst', type: 'number', min: 0.05, max: 5, step: 0.05, default: 0.3 },
@@ -150,6 +158,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windMaxSpeed: number;
   windAdvection: number;
   windPushSharpness: number;
+  windDensityVizMax: number;
   windSmoothing: number;
   windDensityDamping: number;
   windDensityBaseline: number;

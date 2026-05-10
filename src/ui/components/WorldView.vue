@@ -100,7 +100,7 @@ function frame(now: number) {
       windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
       windSources: config.showAirFlow ? windSources : undefined,
       windSinks: config.showAirFlow ? windSinks : undefined,
-      densityReference: config.showDensity ? config.burstDensity : undefined,
+      densityReference: config.showDensity ? config.windDensityVizMax : undefined,
       sourcePreview: sourceDrag.value ?? undefined,
     });
   }

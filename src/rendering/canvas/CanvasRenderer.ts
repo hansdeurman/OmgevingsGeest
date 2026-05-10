@@ -184,9 +184,10 @@ export class CanvasRenderer implements Renderer {
         stride: config.arrowStride,
         arrowScale: config.arrowScale,
         maxSpeed: config.windMaxSpeed,
-        // Arrow colour is keyed to density. Default to burstDensity when the
-        // overlay backdrop is off so arrows stay correctly normalised.
-        densityReference: densityReference ?? config.burstDensity,
+        // Arrow colour is keyed to density. Falls back to the visualization
+        // ceiling slider when the density backdrop is off so arrow colour
+        // stays correctly normalised.
+        densityReference: densityReference ?? config.windDensityVizMax,
         zoom: camera.zoom,
       });
     }
