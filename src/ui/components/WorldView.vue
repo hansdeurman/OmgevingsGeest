@@ -123,34 +123,48 @@ onMounted(() => {
   // and don't replant these sources.
   for (let i = 0; i < world.tiles.length; i++) world.tiles[i].height = 0;
 
-  // Two test mountains the airflow has to deal with:
-  //   - Thin tall wall, 1 hex wide, on the right side. Flat-top cliff.
-  //   - Thick conical peak on the left side. Smooth gaussian.
-  // Both well outside the source ring so the sources fire freely first
-  // before their parcels reach terrain.
+  // Two test mountains the airflow has to deal with. Both are sampled in
+  // *pixel* space so the smooth profile doesn't pick up the hex-row zigzag
+  // — combined with the new triangle-based renderer, the surface reads as
+  // a continuous landscape rather than a stained-glass step function.
+  //   - Thin smooth wall, narrow gaussian cross-section, flat along its
+  //     length, taper at the ends. Right of centre.
+  //   - Conical mountain, isotropic gaussian peak. Left of centre.
   {
     const { width, height } = gridDimensions(config.hexCount);
     const cx = Math.floor(width / 2);
     const cy = Math.floor(height / 2);
 
-    // Thin wall: column at cx + 10, 9 hexes tall, height 1.
-    const wallCol = Math.min(width - 1, cx + 10);
-    for (let r = Math.max(0, cy - 4); r <= Math.min(height - 1, cy + 4); r++) {
-      world.tiles[r * width + wallCol].height = 1.0;
-    }
+    // Thin smooth wall.
+    const wallCenterPx = offsetToPixel(cx + 10, cy, HEX_PIXEL_SIZE);
+    const wallSigmaPerp = HEX_PIXEL_SIZE * 0.9;       // thin cross-section
+    const wallHalfLen = 4 * HEX_PIXEL_SIZE * 1.5;     // ~4 hexes top/bottom
+    const wallEndSigma = HEX_PIXEL_SIZE * 1.5;        // taper beyond half-len
 
-    // Conical mountain: gaussian peak centred at (cx - 10, cy), σ ≈ 1.6.
-    const mtnCol = Math.max(0, cx - 10);
-    const mtnRow = cy;
-    const sigma = 1.6;
-    const radius = 5;
-    for (let r = Math.max(0, mtnRow - radius); r <= Math.min(height - 1, mtnRow + radius); r++) {
-      for (let c = Math.max(0, mtnCol - radius); c <= Math.min(width - 1, mtnCol + radius); c++) {
-        const dx = c - mtnCol;
-        const dy = r - mtnRow;
-        const h = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+    // Conical mountain.
+    const mtnCenterPx = offsetToPixel(cx - 10, cy, HEX_PIXEL_SIZE);
+    const mtnSigma = HEX_PIXEL_SIZE * 2.2;            // ~2.2 hex peak sigma
+
+    for (let r = 0; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        const pos = offsetToPixel(c, r, HEX_PIXEL_SIZE);
+
+        // Wall profile: gaussian perpendicular, flat-then-taper along axis.
+        const wdx = pos.x - wallCenterPx.x;
+        const wdy = pos.y - wallCenterPx.y;
+        const wPerp = Math.exp(-(wdx * wdx) / (2 * wallSigmaPerp * wallSigmaPerp));
+        const wAlongDist = Math.max(0, Math.abs(wdy) - wallHalfLen);
+        const wAlong = Math.exp(-(wAlongDist * wAlongDist) / (2 * wallEndSigma * wallEndSigma));
+        const wallH = wPerp * wAlong;
+
+        // Mountain: isotropic gaussian.
+        const mdx = pos.x - mtnCenterPx.x;
+        const mdy = pos.y - mtnCenterPx.y;
+        const mtnH = Math.exp(-(mdx * mdx + mdy * mdy) / (2 * mtnSigma * mtnSigma));
+
         const idx = r * width + c;
-        if (h > world.tiles[idx].height) world.tiles[idx].height = h;
+        const h = Math.max(world.tiles[idx].height, wallH, mtnH);
+        world.tiles[idx].height = h;
       }
     }
   }

@@ -1,5 +1,5 @@
 import type { Renderer, RenderFrame } from '../Renderer';
-import { offsetToPixel, hexCorners, gridPixelBounds } from '../../math/hex';
+import { offsetToPixel, hexCorners, gridPixelBounds, offsetNeighbours } from '../../math/hex';
 import { heightToRGB, shade, rgbToCss } from '../palette';
 import { config, HEX_PIXEL_SIZE } from '../../config/parameters';
 import {
@@ -89,6 +89,26 @@ export class CanvasRenderer implements Renderer {
       ctx.lineWidth = 2 / camera.zoom;
     }
 
+    // Each hex is rendered as 6 triangles meeting at its centre. The colour
+    // of each triangle is taken from the average height of its 3 vertices
+    // (centre + two corners), where each corner's height is the mean of
+    // the 3 hexes that share it. Net effect: terrain reads as a smooth
+    // surface, not a stained-glass mosaic of constant-colour cells.
+    //
+    // Corner i of a pointy-top hex sits between this hex and TWO specific
+    // neighbours. Indices into NEIGHBOUR_DIRS / offsetNeighbours:
+    //   corner 0 (NE-ish): E + NE
+    //   corner 1 (SE-ish): E + SE
+    //   corner 2 (S):      SE + SW
+    //   corner 3 (SW-ish): SW + W
+    //   corner 4 (NW-ish): W  + NW
+    //   corner 5 (N):      NW + NE
+    const cornerSharers: ReadonlyArray<readonly [number, number]> = [
+      [0, 1], [0, 5], [5, 4], [4, 3], [3, 2], [2, 1],
+    ];
+    const neighH = new Float32Array(6);
+    const cornerH = new Float32Array(6);
+
     for (const tile of world.tiles) {
       const { x, y } = offsetToPixel(tile.col, tile.row, size);
       // Frustum cull in world space (cheap rejection for large grids).
@@ -97,28 +117,54 @@ export class CanvasRenderer implements Renderer {
       const sy = (y - bounds.y / 2) * camera.zoom + h / 2 + camera.y;
       if (sx < -margin || sy < -margin || sx > w + margin || sy > h + margin) continue;
 
-      // Shading: scale colour by 1 ± shadeStrength based on height. Cheap
-      // pseudo-relief without a real lighting model.
-      const k = 1 - shadeStrength * 0.5 + tile.height * shadeStrength;
-      const rgb = shade(heightToRGB(tile.height), k);
+      const tileH = tile.height;
+
+      // Read the six neighbour heights once. Out-of-bounds = mirror own.
+      const offs = offsetNeighbours(tile.row);
+      for (let i = 0; i < 6; i++) {
+        const nc = tile.col + offs[i].dc;
+        const nr = tile.row + offs[i].dr;
+        if (nc < 0 || nc >= world.width || nr < 0 || nr >= world.height) {
+          neighH[i] = tileH;
+        } else {
+          neighH[i] = world.tiles[nr * world.width + nc].height;
+        }
+      }
+      // Corner heights: average of own height and the two sharing neighbours.
+      for (let i = 0; i < 6; i++) {
+        const [a, b] = cornerSharers[i];
+        cornerH[i] = (tileH + neighH[a] + neighH[b]) / 3;
+      }
 
       const corners = hexCorners(x, y, size);
-      ctx.beginPath();
-      ctx.moveTo(corners[0].x, corners[0].y);
-      for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
-      ctx.closePath();
-
-      ctx.fillStyle = rgbToCss(rgb);
-      ctx.fill();
+      // Six triangles, each fan-style from centre to two adjacent corners.
+      // Triangle i uses corners[i] and corners[(i+1) % 6].
+      for (let i = 0; i < 6; i++) {
+        const j = (i + 1) % 6;
+        const triH = (tileH + cornerH[i] + cornerH[j]) / 3;
+        const k = 1 - shadeStrength * 0.5 + triH * shadeStrength;
+        const rgb = shade(heightToRGB(triH), k);
+        ctx.fillStyle = rgbToCss(rgb);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(corners[i].x, corners[i].y);
+        ctx.lineTo(corners[j].x, corners[j].y);
+        ctx.closePath();
+        ctx.fill();
+      }
 
       if (showGrid) {
         ctx.strokeStyle = 'rgba(0,0,0,0.25)';
         ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(corners[0].x, corners[0].y);
+        for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+        ctx.closePath();
         ctx.stroke();
       }
 
       if (showHeights && tile.col % stride === 0 && tile.row % stride === 0) {
-        const label = tile.height.toFixed(2);
+        const label = tileH.toFixed(2);
         ctx.strokeStyle = 'rgba(0,0,0,0.7)';
         ctx.strokeText(label, x, y);
         ctx.fillStyle = '#fff';
