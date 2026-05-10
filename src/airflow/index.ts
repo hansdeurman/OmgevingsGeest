@@ -15,6 +15,8 @@ export {
   addSink,
   clearSources,
   clearSinks,
+  removeSource,
+  removeSink,
   fireBurst,
   clearBursts,
 } from './sources';

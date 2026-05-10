@@ -187,7 +187,7 @@ export class CanvasRenderer implements Renderer {
         // Arrow colour is keyed to density. Falls back to the visualization
         // ceiling slider when the density backdrop is off so arrow colour
         // stays correctly normalised.
-        densityReference: densityReference ?? config.windDensityVizMax,
+        densityReference: densityReference ?? config.densityDisplayMax,
         zoom: camera.zoom,
       });
     }

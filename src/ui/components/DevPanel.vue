@@ -8,6 +8,8 @@ import {
   windSinks,
   clearSources,
   clearSinks,
+  removeSource,
+  removeSink,
   fireBurst,
   requestFieldClear,
 } from '../../airflow';
@@ -58,9 +60,9 @@ function fireDirectionalBurst(i: number) {
   fireBurst({
     col,
     row,
-    vx: d.x * config.burstSpeed,
-    vy: d.y * config.burstSpeed,
-    density: config.burstDensity,
+    vx: d.x * config.placeSpeed,
+    vy: d.y * config.placeSpeed,
+    density: config.placeDensity,
   });
 }
 
@@ -126,9 +128,9 @@ async function copySettings() {
     <section v-for="[group, params] in groups" :key="group">
       <h3>{{ group }}</h3>
       <ParameterControl v-for="p in params" :key="p.key" :meta="p" />
-      <!-- Direction grid lives inside the Burst group (kept separate from
-           generic ParameterControls because it isn't a single value). -->
-      <template v-if="group === 'Burst'">
+      <!-- Direction grid lives inside the Placement group (kept separate
+           from generic ParameterControls because it isn't a single value). -->
+      <template v-if="group === 'Placement'">
         <div class="burst-grid">
           <button
             v-for="d in burstDirections"
@@ -239,15 +241,27 @@ async function copySettings() {
           <span class="src-vec">v={{ Math.hypot(s.vx, s.vy).toFixed(1) }}</span>
           <span class="src-dens">ρ={{ s.density.toFixed(1) }}</span>
           <span class="src-cycle" v-if="Number.isFinite(s.duration) && Number.isFinite(s.period)">
-            {{ s.duration.toFixed(2) }}s/{{ s.period.toFixed(2) }}s
+            {{ s.duration.toFixed(2) }}/{{ s.period.toFixed(2) }}s
           </span>
           <span class="src-cycle" v-else>continuous</span>
+          <button
+            type="button"
+            class="src-remove"
+            :title="`Remove source at (${s.col}, ${s.row})`"
+            @click="removeSource(i)"
+          >×</button>
         </li>
       </ul>
       <ul v-if="windSinks.length" class="src-list">
         <li v-for="(s, i) in windSinks" :key="`sink-${i}`" class="sink">
           <span class="src-pos">({{ s.col }}, {{ s.row }})</span>
           <span class="src-dens">drain {{ s.rate.toFixed(1) }}/s</span>
+          <button
+            type="button"
+            class="src-remove"
+            :title="`Remove sink at (${s.col}, ${s.row})`"
+            @click="removeSink(i)"
+          >×</button>
         </li>
       </ul>
     </section>
@@ -340,19 +354,39 @@ h3 {
 }
 .src-list li {
   display: grid;
-  grid-template-columns: auto auto auto 1fr;
+  grid-template-columns: auto auto auto 1fr 18px;
   gap: 6px;
   padding: 2px 4px;
   border-radius: 3px;
   background: rgba(106, 140, 255, 0.08);
+  align-items: center;
 }
 .src-list li.sink {
+  grid-template-columns: auto 1fr 18px;
   background: rgba(204, 85, 102, 0.12);
 }
 .src-list .src-pos { color: #8a8a99; }
 .src-list .src-vec { color: #88ccff; }
 .src-list .src-dens { color: #ffaa66; }
 .src-list .src-cycle { color: #8a8a99; text-align: right; }
+.src-list .src-remove {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #c2c2cc;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.src-list .src-remove:hover {
+  background: rgba(204, 85, 102, 0.25);
+  color: #ff8090;
+  border-color: #cc5566;
+}
 .count { color: #c2c2cc; }
 .hint { color: #6a8cff; font-style: italic; font-size: 11px; }
 .tip { margin: 6px 0 0; color: #6b6b78; font-size: 11px; line-height: 1.4; }

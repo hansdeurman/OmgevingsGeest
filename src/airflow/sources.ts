@@ -119,12 +119,22 @@ export function clearSources(): void {
   windSources.splice(0, windSources.length);
 }
 
+/** Remove a single source by its index in `windSources`. */
+export function removeSource(index: number): void {
+  if (index >= 0 && index < windSources.length) windSources.splice(index, 1);
+}
+
 export function addSink(s: WindSink): void {
   windSinks.push(s);
 }
 
 export function clearSinks(): void {
   windSinks.splice(0, windSinks.length);
+}
+
+/** Remove a single sink by its index in `windSinks`. */
+export function removeSink(index: number): void {
+  if (index >= 0 && index < windSinks.length) windSinks.splice(index, 1);
 }
 
 export function fireBurst(b: WindBurst): void {

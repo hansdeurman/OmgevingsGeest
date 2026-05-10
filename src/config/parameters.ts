@@ -43,6 +43,12 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'showGrid', label: 'Show Grid', group: 'Render', type: 'boolean', default: false },
   { key: 'showHeights', label: 'Show Heights', group: 'Render', type: 'boolean', default: false },
   { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.65 },
+  { key: 'showDensity', label: 'Show Density', group: 'Render', type: 'boolean', default: true },
+  // Density value that saturates the colour ramp (red end of the arrows,
+  // edge of the density backdrop). Tuning this rescales how density looks
+  // but doesn't touch any source or any actual physics — sources keep the
+  // density they were placed with.
+  { key: 'densityDisplayMax', label: 'ρ Display Max', group: 'Render', type: 'number', min: 0.5, max: 20, step: 0.1, default: 3 },
 
   // Wind — runs the airflow simulation and draws arrows over the terrain.
   { key: 'showAirFlow', label: 'Show Air Flow', group: 'Wind', type: 'boolean', default: true },
@@ -66,11 +72,6 @@ export const parameterDefs: ParamMeta[] = [
   // Sharpness of the edge-flux push (1 = broad isotropic 60° fan; higher
   // = tighter plume, all directions still treated equally).
   { key: 'windPushSharpness', label: 'Push Sharpness', group: 'Wind', type: 'number', min: 1, max: 12, step: 0.1, default: 3 },
-  // Display-only: what density value saturates the colour ramp (red end of
-  // the arrows, edge of the density backdrop). Tuning this rescales how
-  // density looks but doesn't touch any source or any actual physics —
-  // sources keep the density they were placed with.
-  { key: 'windDensityVizMax', label: 'ρ Display Max', group: 'Wind', type: 'number', min: 0.5, max: 20, step: 0.1, default: 3 },
   // Smoothing is purely cosmetic (averages each cell with its 6 neighbours).
   // Default 0 — the diffusion was muddying the parcel/no-parcel distinction
   // and propagating velocity into mountains.
@@ -107,20 +108,19 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 1 },
   { key: 'arrowScale', label: 'Arrow Scale', group: 'Wind', type: 'number', min: 1, max: 30, step: 0.5, default: 8 },
 
-  // Burst tooling — directional test buttons + drag-placed periodic sources.
-  { key: 'showDensity', label: 'Show Density', group: 'Burst', type: 'boolean', default: true },
-  { key: 'burstSpeed', label: 'Burst Speed', group: 'Burst', type: 'number', min: 0.1, max: 30, step: 0.1, default: 8 },
-  // Default density a NEW source/burst is given at placement. Existing
-  // sources keep the density they were placed with — changing this slider
-  // does not retro-edit anything.
-  { key: 'burstDensity', label: 'New Src Density', group: 'Burst', type: 'number', min: 0.1, max: 20, step: 0.1, default: 3 },
-  // Burst-source duty cycle (snapshotted at placement). Duration is how long
-  // each pulse stays "on"; period is the gap between pulse starts.
-  { key: 'burstDuration', label: 'On Time', group: 'Burst', type: 'number', min: 0.05, max: 5, step: 0.05, default: 0.3 },
-  { key: 'burstPeriod', label: 'Period', group: 'Burst', type: 'number', min: 0.1, max: 10, step: 0.1, default: 2.0 },
+  // Placement defaults. Every value here is *snapshotted* into a source
+  // (or sink) at the moment it's dropped on the map and never changes for
+  // that entity afterwards. Tuning these sliders affects only the NEXT
+  // thing you place. Also drives the directional test-burst buttons.
+  { key: 'placeSpeed',  label: 'Speed',     group: 'Placement', type: 'number', min: 0.1,  max: 30, step: 0.1,  default: 8 },
+  { key: 'placeDensity', label: 'Density',  group: 'Placement', type: 'number', min: 0.1,  max: 20, step: 0.1,  default: 3 },
+  // Burst-mode duty cycle (ignored for continuous-mode placements).
+  // OnTime is how long each pulse stays "on"; Period is the cycle length.
+  { key: 'placeOnTime', label: 'On Time',   group: 'Placement', type: 'number', min: 0.05, max: 5,  step: 0.05, default: 0.3 },
+  { key: 'placePeriod', label: 'Period',    group: 'Placement', type: 'number', min: 0.1,  max: 10, step: 0.1,  default: 2.0 },
   // Sink drain rate (density units removed per second). Match to a paired
   // source's effective output if you want roughly conservative flow.
-  { key: 'sinkRate', label: 'Sink Rate', group: 'Burst', type: 'number', min: 0.1, max: 20, step: 0.1, default: 3 },
+  { key: 'sinkRate',    label: 'Sink Rate', group: 'Placement', type: 'number', min: 0.1,  max: 20, step: 0.1,  default: 3 },
 ];
 
 /** Derive the rectangular grid dimensions from a single hex-count knob. */
@@ -148,6 +148,8 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   showGrid: boolean;
   showHeights: boolean;
   shadeStrength: number;
+  showDensity: boolean;
+  densityDisplayMax: number;
   showAirFlow: boolean;
   windAmbientSpeed: number;
   windAmbientAngle: number;
@@ -158,7 +160,6 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windMaxSpeed: number;
   windAdvection: number;
   windPushSharpness: number;
-  windDensityVizMax: number;
   windSmoothing: number;
   windDensityDamping: number;
   windDensityBaseline: number;
@@ -169,11 +170,10 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windTurbulence: number;
   arrowStride: number;
   arrowScale: number;
-  showDensity: boolean;
-  burstSpeed: number;
-  burstDensity: number;
-  burstDuration: number;
-  burstPeriod: number;
+  placeSpeed: number;
+  placeDensity: number;
+  placeOnTime: number;
+  placePeriod: number;
   sinkRate: number;
 };
 

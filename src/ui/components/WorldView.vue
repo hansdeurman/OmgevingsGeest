@@ -100,7 +100,7 @@ function frame(now: number) {
       windField: config.showAirFlow && airFlow ? airFlow.field : undefined,
       windSources: config.showAirFlow ? windSources : undefined,
       windSinks: config.showAirFlow ? windSinks : undefined,
-      densityReference: config.showDensity ? config.windDensityVizMax : undefined,
+      densityReference: config.showDensity ? config.densityDisplayMax : undefined,
       sourcePreview: sourceDrag.value ?? undefined,
     });
   }
@@ -191,11 +191,11 @@ onMounted(() => {
       addSource({
         col: cell.col,
         row: cell.row,
-        vx: Math.cos(angle) * config.burstSpeed,
-        vy: Math.sin(angle) * config.burstSpeed,
-        density: config.burstDensity,
-        duration: config.burstDuration,
-        period: config.burstPeriod,
+        vx: Math.cos(angle) * config.placeSpeed,
+        vy: Math.sin(angle) * config.placeSpeed,
+        density: config.placeDensity,
+        duration: config.placeOnTime,
+        period: config.placePeriod,
       });
     }
   }
@@ -259,7 +259,7 @@ onMounted(() => {
       } else if (placementMode.value === 'burst') {
         const mag = Math.hypot(dx, dy);
         if (mag < 1e-3) { mode = 'idle'; sourceDrag.value = null; return; }
-        const speed = config.burstSpeed;
+        const speed = config.placeSpeed;
         const vx = (dx / mag) * speed;
         const vy = (dy / mag) * speed;
         addSource({
@@ -267,9 +267,9 @@ onMounted(() => {
           row: cell.row,
           vx,
           vy,
-          density: config.burstDensity,
-          duration: config.burstDuration,
-          period: config.burstPeriod,
+          density: config.placeDensity,
+          duration: config.placeOnTime,
+          period: config.placePeriod,
         });
       } else {
         const sx = dx * SOURCE_DRAG_SCALE;
@@ -287,7 +287,7 @@ onMounted(() => {
           row: cell.row,
           vx: sx * k,
           vy: sy * k,
-          density: config.burstDensity,
+          density: config.placeDensity,
         });
       }
       // One-shot: leave placement mode after creating one source.
