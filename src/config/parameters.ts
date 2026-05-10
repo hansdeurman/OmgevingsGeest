@@ -43,6 +43,10 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'showGrid', label: 'Show Grid', group: 'Render', type: 'boolean', default: false },
   { key: 'showHeights', label: 'Show Heights', group: 'Render', type: 'boolean', default: false },
   { key: 'shadeStrength', label: 'Shading', group: 'Render', type: 'number', min: 0, max: 1, step: 0.01, default: 0.65 },
+  // Recursive subdivision of each hex's 6 main triangles. 0 = flat-shaded
+  // (visible per-triangle facets), 1 = 4× sub-triangles per main, 2 = 16×.
+  // Higher = smoother surface at the cost of more polygons per frame.
+  { key: 'surfaceSubdivision', label: 'Surface Smooth', group: 'Render', type: 'int', min: 0, max: 3, step: 1, default: 1 },
   { key: 'showDensity', label: 'Show Density', group: 'Render', type: 'boolean', default: true },
   // Density value that saturates the colour ramp (red end of the arrows,
   // edge of the density backdrop). Tuning this rescales how density looks
@@ -148,6 +152,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   showGrid: boolean;
   showHeights: boolean;
   shadeStrength: number;
+  surfaceSubdivision: number;
   showDensity: boolean;
   densityDisplayMax: number;
   showAirFlow: boolean;
