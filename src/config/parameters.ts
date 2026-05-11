@@ -68,6 +68,10 @@ export const parameterDefs: ParamMeta[] = [
   // off slowly, with no decay at all when set to 0.
   { key: 'windDamping', label: 'Damping', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.005, default: 0.05 },
   { key: 'windTerrainCoupling', label: 'Terrain Coupling', group: 'Wind', type: 'number', min: 0, max: 200, step: 1, default: 60 },
+  // How many hexes ahead the height gradient walks in each direction.
+  // 1 = walls only block at point-blank range; higher gives them an
+  // upwind shadow so flow starts deflecting from afar.
+  { key: 'windTerrainHorizon', label: 'Terrain Horizon', group: 'Wind', type: 'int', min: 1, max: 12, step: 1, default: 5 },
   // Wall-glide. When wind hits terrain head-on, a force kicks in along the
   // wall's tangent toward lower density — flow slides up/down the wall
   // instead of just piling up. 0 = pure deceleration (legacy); higher =
@@ -176,6 +180,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windAmbientAngle: number;
   windDamping: number;
   windTerrainCoupling: number;
+  windTerrainHorizon: number;
   windTerrainDeflect: number;
   windDownhillRatio: number;
   windOvercomeFactor: number;

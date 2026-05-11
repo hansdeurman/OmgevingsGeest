@@ -19,6 +19,14 @@ export interface AirFlowParams {
   /** Strength of terrain pushback per unit of normalised height delta. */
   terrainCoupling: number;
   /**
+   * How many hexes ahead the gradient walks in each direction when
+   * sampling terrain. 1 = local-only (legacy: walls only block at
+   * point-blank range). Higher values let walls cast an upwind shadow
+   * so incoming flow starts deflecting from afar; far-ring contributions
+   * are uphill-only with a 1/(step+1) decay.
+   */
+  terrainHorizon: number;
+  /**
    * How aggressively the flow steers SIDEWAYS along a wall it's hitting.
    * When velocity has an uphill component, a force is applied along the
    * wall's tangent direction (toward lower density) so the parcel glides
@@ -306,10 +314,10 @@ export class AirFlowSimulation {
     const heightLoss = Math.max(0, params.heightDensityLoss);
     const vdCoupling = Math.max(0, params.velocityDensityCoupling);
     const baseline = Math.max(1e-3, params.baseline);
+    const terrainHorizon = Math.max(1, Math.floor(params.terrainHorizon));
 
     // ----- Phase 1: apply forces, write to scratch buffer -----
     for (let row = 0; row < h; row++) {
-      const offs = offsetNeighbours(row);
       for (let col = 0; col < w; col++) {
         const idx = row * w + col;
         const myH = sh[idx];
@@ -355,19 +363,39 @@ export class AirFlowSimulation {
         let gy = 0;
         let dgx = 0;
         let dgy = 0;
+        // Walk each of the 6 directions out to `horizon` hexes. The first
+        // step (immediate neighbour) contributes the full local height +
+        // density gradient. Further steps add only *uphill* height
+        // differences with a 1/(step+1) decay — anticipation: a wall N
+        // hexes away still pulls the local gradient toward itself, so
+        // parcels feel an upwind blocking shadow long before they crash
+        // into the wall. Without this the gradient is zero outside the
+        // wall's immediate neighbourhood and 13-hex-away flow sails in
+        // at full speed before meeting any resistance.
+        const horizon = terrainHorizon;
         for (let i = 0; i < 6; i++) {
-          const o = offs[i];
-          const nc = col + o.dc;
-          const nr = row + o.dr;
-          if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-          const ni = nr * w + nc;
-          const dh = sh[ni] - myH;
-          const dd = density[ni] - myDens;
           const d = NEIGHBOUR_DIRS[i];
-          gx += dh * d.x;
-          gy += dh * d.y;
-          dgx += dd * d.x;
-          dgy += dd * d.y;
+          let cc = col;
+          let rr = row;
+          for (let step = 0; step < horizon; step++) {
+            const op = offsetNeighbours(rr)[i];
+            cc += op.dc;
+            rr += op.dr;
+            if (cc < 0 || cc >= w || rr < 0 || rr >= h) break;
+            const ni = rr * w + cc;
+            const dh = sh[ni] - myH;
+            if (step === 0) {
+              const dd = density[ni] - myDens;
+              gx += dh * d.x;
+              gy += dh * d.y;
+              dgx += dd * d.x;
+              dgy += dd * d.y;
+            } else if (dh > 0) {
+              const weight = 1 / (step + 1);
+              gx += dh * d.x * weight;
+              gy += dh * d.y * weight;
+            }
+          }
         }
 
         // Asymmetric terrain force: the *block-uphill* effect is the full
