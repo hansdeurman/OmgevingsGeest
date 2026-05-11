@@ -94,10 +94,12 @@ export const parameterDefs: ParamMeta[] = [
   // Deviations from this level are what drive flow — you don't have a
   // "where does the air go" problem because the field is always full.
   { key: 'windDensityBaseline', label: 'ρ Baseline', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1 },
-  // Decay of density toward zero (legacy "density evaporates" mode). 0 is
-  // the default for the baseline-density model — total density should stay
-  // roughly conserved, modulated by sinks.
-  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0 },
+  // Per-second rate at which (density − baseline) relaxes toward zero.
+  // 0 = density is fully conserved and a continuous source's parcel will
+  // grow without bound. ~0.1 keeps the parcel size finite, tracking the
+  // source's strength. Conservative: the baseline level is preserved, only
+  // *deviations* decay.
+  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.1 },
   // Pressure: high-density cells push velocity outward toward low-density
   // cells. Keep this low for a peaceful, predictable flow — high values
   // cause source halos and radial counter-flow that fights the source's

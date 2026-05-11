@@ -585,12 +585,21 @@ export class AirFlowSimulation {
       density.set(this.nextDensity);
     }
 
-    // ----- Phase 4: density damping -----
-    // Mild first-order rate decay so a parcel slowly fades while it travels —
-    // matches the user-visible expectation that "amplitude gets slightly less".
-    const dRetain = Math.exp(-Math.max(0, params.densityDamping) * dt);
-    if (dRetain < 1) {
-      for (let i = 0; i < density.length; i++) density[i] *= dRetain;
+    // ----- Phase 4: density damping toward baseline -----
+    // First-order relaxation of (density − baseline) toward zero. Without
+    // this a continuous source's parcel grows without bound: source pumps
+    // density in, advection spreads it, but nothing ever drains it. With
+    // even mild damping the system reaches a steady state where source
+    // injection balances decay, so the parcel has a *finite* size that
+    // tracks source strength rather than expanding to cover the whole map.
+    // Conservative: we relax the deviation, leaving baseline cells exactly
+    // at baseline.
+    const dDamp = Math.max(0, params.densityDamping);
+    if (dDamp > 0) {
+      const r = Math.exp(-dDamp * dt);
+      for (let i = 0; i < density.length; i++) {
+        density[i] = baseline + (density[i] - baseline) * r;
+      }
     }
 
     // ----- Phase 4b: direct density diffusion (terrain-gated) -----
