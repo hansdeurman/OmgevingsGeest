@@ -19,6 +19,14 @@ export interface AirFlowParams {
   /** Strength of terrain pushback per unit of normalised height delta. */
   terrainCoupling: number;
   /**
+   * How aggressively the flow steers SIDEWAYS along a wall it's hitting.
+   * When velocity has an uphill component, a force is applied along the
+   * wall's tangent direction (toward lower density) so the parcel glides
+   * along the wall instead of just decelerating dead and piling up. Per
+   * second per unit of normal-component velocity. 0 disables.
+   */
+  terrainDeflect: number;
+  /**
    * Asymmetry: how strongly the *downhill pull* acts relative to the *uphill
    * block*. 0 = wind heading uphill is blocked but wind heading downhill is
    * never accelerated by terrain. 1 = symmetric (downhill pull as strong as
@@ -295,6 +303,7 @@ export class AirFlowSimulation {
     const retain = Math.exp(-Math.max(0, params.damping) * dt);
     const coupling = params.terrainCoupling;
     const downhillRatio = Math.max(0, Math.min(1, params.downhillRatio));
+    const deflect = Math.max(0, params.terrainDeflect);
     const overcome = params.overcomeFactor;
     const maxSpeed = params.maxSpeed;
     const maxSpeedSq = maxSpeed * maxSpeed;
@@ -389,6 +398,37 @@ export class AirFlowSimulation {
           const pk = pressure * densityFactor;
           fx -= dgx * pk;
           fy -= dgy * pk;
+        }
+
+        // Wall-glide: when velocity has an uphill component, actively
+        // redirect a fraction of the normal-component velocity along the
+        // wall's tangent direction. Picks the tangent that points toward
+        // *lower* density along the wall, so flow naturally spreads to
+        // wherever there's still room. Without this the perpendicular
+        // hits just decelerate dead and density piles up against the wall.
+        if (deflect > 0 && parcelStrength > 0 && vDotGrad > 0) {
+          const gMag2 = gx * gx + gy * gy;
+          if (gMag2 > 1e-9) {
+            const gMag = Math.sqrt(gMag2);
+            // Unit gradient (wall normal) and 90°-CCW rotation = tangent.
+            const gxN = gx / gMag;
+            const gyN = gy / gMag;
+            const tCCWx = -gyN;
+            const tCCWy = gxN;
+            // Pick the tangent direction whose density gradient is more
+            // negative (i.e. flowing toward lower density). The other
+            // option is just (-tCCWx, -tCCWy).
+            const dgDotTangent = dgx * tCCWx + dgy * tCCWy;
+            const tx = dgDotTangent <= 0 ? tCCWx : -tCCWx;
+            const ty = dgDotTangent <= 0 ? tCCWy : -tCCWy;
+            // Force magnitude scales with how much velocity is heading
+            // straight into the wall, the parcel strength, and the
+            // user-tunable rate.
+            const vNormal = vDotGrad / gMag;
+            const f = vNormal * deflect * parcelStrength;
+            fx += tx * f;
+            fy += ty * f;
+          }
         }
 
         // Integrate: damped velocity + force impulse over dt.

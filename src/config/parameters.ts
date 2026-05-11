@@ -60,6 +60,11 @@ export const parameterDefs: ParamMeta[] = [
   // off slowly, with no decay at all when set to 0.
   { key: 'windDamping', label: 'Damping', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.005, default: 0.05 },
   { key: 'windTerrainCoupling', label: 'Terrain Coupling', group: 'Wind', type: 'number', min: 0, max: 200, step: 1, default: 60 },
+  // Wall-glide. When wind hits terrain head-on, a force kicks in along the
+  // wall's tangent toward lower density — flow slides up/down the wall
+  // instead of just piling up. 0 = pure deceleration (legacy); higher =
+  // more aggressive lateral redirection.
+  { key: 'windTerrainDeflect', label: 'Wall Glide', group: 'Wind', type: 'number', min: 0, max: 30, step: 0.1, default: 6 },
   // Ratio of "pulled downhill" force to "blocked uphill" force. 0 = pure
   // uphill block; 1 = symmetric. Realistic values 0.2..0.5 — air slides
   // down but the block-up effect dominates.
@@ -158,6 +163,7 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   windAmbientAngle: number;
   windDamping: number;
   windTerrainCoupling: number;
+  windTerrainDeflect: number;
   windDownhillRatio: number;
   windOvercomeFactor: number;
   windMaxSpeed: number;
