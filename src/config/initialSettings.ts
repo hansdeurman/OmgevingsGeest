@@ -41,10 +41,10 @@ export const initialSettings: Record<string, number | boolean> = {
   windDensityBaseline: 1,
   windDensityDamping: 0.15,
   windPressure: 0.7,
-  windVelocityDensityCoupling: 2.5,
+  windVelocityDensityCoupling: 1.2,
   windHeightDensityLoss: 1,
-  windDensityDiffusion: 4,
-  windTurbulence: 2.95,
+  windDensityDiffusion: 8,
+  windTurbulence: 0.3,
   arrowStride: 1,
   arrowScale: 8,
   // Placement
