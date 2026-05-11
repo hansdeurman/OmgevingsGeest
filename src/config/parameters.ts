@@ -86,9 +86,11 @@ export const parameterDefs: ParamMeta[] = [
   // roughly conserved, modulated by sinks.
   { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0 },
   // Pressure: high-density cells push velocity outward toward low-density
-  // cells. This is what lets the system circulate (back to sinks) instead of
-  // equilibrating. Set to 0 for the older velocity-only behaviour.
-  { key: 'windPressure', label: 'Pressure', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1.5 },
+  // cells. Keep this low for a peaceful, predictable flow — high values
+  // cause source halos and radial counter-flow that fights the source's
+  // intended emit direction. Crank up if you want a more "soup-like"
+  // turbulent feel.
+  { key: 'windPressure', label: 'Pressure', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.3 },
   // Velocity follows the parcel: cells without density bleed off velocity at
   // this rate (per second, scaled linearly by 1 - density/reference). Zero
   // = velocity is independent of density.
@@ -102,9 +104,10 @@ export const parameterDefs: ParamMeta[] = [
   // sparse cells fast even without velocity carrying it.
   { key: 'windDensityDiffusion', label: 'ρ Diffusion', group: 'Wind', type: 'number', min: 0, max: 20, step: 0.1, default: 4 },
   // Random per-step forcing. Breaks symmetry on otherwise-static convergent
-  // flows; the field stops looking frozen, wind wobbles and finds escape
-  // paths between sources. Zero = fully deterministic.
-  { key: 'windTurbulence', label: 'Turbulence', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.5 },
+  // flows. Default is low (0.1) — enough to keep the field from being
+  // perfectly frozen, not enough to make it feel unpredictable. Crank up
+  // for a chaotic feel; set to 0 for fully deterministic playback.
+  { key: 'windTurbulence', label: 'Turbulence', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.1 },
   { key: 'arrowStride', label: 'Arrow Density', group: 'Wind', type: 'int', min: 1, max: 10, step: 1, default: 1 },
   { key: 'arrowScale', label: 'Arrow Scale', group: 'Wind', type: 'number', min: 1, max: 30, step: 0.5, default: 8 },
 
