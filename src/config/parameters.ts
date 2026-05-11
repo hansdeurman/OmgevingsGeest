@@ -96,16 +96,16 @@ export const parameterDefs: ParamMeta[] = [
   { key: 'windDensityBaseline', label: 'ρ Baseline', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 1 },
   // Per-second rate at which (density − baseline) relaxes toward zero.
   // 0 = density is fully conserved and a continuous source's parcel will
-  // grow without bound. ~0.1 keeps the parcel size finite, tracking the
-  // source's strength. Conservative: the baseline level is preserved, only
-  // *deviations* decay.
-  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.1 },
-  // Pressure: high-density cells push velocity outward toward low-density
-  // cells. Keep this low for a peaceful, predictable flow — high values
-  // cause source halos and radial counter-flow that fights the source's
-  // intended emit direction. Crank up if you want a more "soup-like"
-  // turbulent feel.
-  { key: 'windPressure', label: 'Pressure', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.3 },
+  // grow without bound. ~0.15 keeps the parcel size finite while leaving
+  // parcels visible long enough to follow. Conservative: only deviations
+  // decay; baseline is preserved.
+  { key: 'windDensityDamping', label: 'Density Damping', group: 'Wind', type: 'number', min: 0, max: 2, step: 0.005, default: 0.15 },
+  // Pressure: parcels push their own velocity outward along -∇density so
+  // high-density areas actively flow toward low-density areas. Default 0.7
+  // is enough to keep parcels from sitting still while still avoiding the
+  // radial counter-flow halos you get above ~1.5. Combine with a non-zero
+  // Density Damping so the system reaches a finite parcel size.
+  { key: 'windPressure', label: 'Pressure', group: 'Wind', type: 'number', min: 0, max: 5, step: 0.05, default: 0.7 },
   // Velocity follows the parcel: cells without density bleed off velocity at
   // this rate (per second, scaled linearly by 1 - density/reference). Zero
   // = velocity is independent of density.

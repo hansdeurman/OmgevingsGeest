@@ -343,12 +343,15 @@ export class AirFlowSimulation {
         let fx = ax * densityFactor;
         let fy = ay * densityFactor;
 
-        // White-noise turbulence forcing. Gated by parcelStrength so it
-        // only jitters where there's an actual parcel — atmospheric cells
-        // at baseline density stay calm instead of accumulating random
-        // velocity that nothing dissipates.
+        // Constant-amplitude white-noise turbulence on parcel cells. We do
+        // NOT scale by speed any more — the old `0.25 + speed` factor
+        // amplified noise on cells that already had some velocity, which
+        // drowned out the directional pressure force and made density
+        // unable to flow coherently from high to low. Now the kick is
+        // bounded, pressure has room to win on average over many steps,
+        // and parcels actually transport instead of jittering in place.
         if (turb > 0 && parcelStrength > 0) {
-          const k = turb * (0.25 + speed) * parcelStrength;
+          const k = turb * parcelStrength;
           fx += (Math.random() - 0.5) * 2 * k;
           fy += (Math.random() - 0.5) * 2 * k;
         }
