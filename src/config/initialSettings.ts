@@ -31,7 +31,7 @@ export const initialSettings: Record<string, number | boolean> = {
   windAmbientAngle: 0,
   windDamping: 0.05,
   windTerrainCoupling: 29,
-  windTerrainDeflect: 30,
+  windTerrainDeflect: 80,
   windDownhillRatio: 0.01,
   windOvercomeFactor: 0.1,
   windMaxSpeed: 8,

@@ -72,7 +72,7 @@ export const parameterDefs: ParamMeta[] = [
   // wall's tangent toward lower density — flow slides up/down the wall
   // instead of just piling up. 0 = pure deceleration (legacy); higher =
   // more aggressive lateral redirection.
-  { key: 'windTerrainDeflect', label: 'Wall Glide', group: 'Wind', type: 'number', min: 0, max: 30, step: 0.1, default: 6 },
+  { key: 'windTerrainDeflect', label: 'Wall Glide', group: 'Wind', type: 'number', min: 0, max: 200, step: 0.5, default: 30 },
   // Ratio of "pulled downhill" force to "blocked uphill" force. 0 = pure
   // uphill block; 1 = symmetric. Realistic values 0.2..0.5 — air slides
   // down but the block-up effect dominates.
