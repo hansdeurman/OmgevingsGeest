@@ -402,11 +402,16 @@ export class AirFlowSimulation {
         }
 
         // Wall-glide: when velocity has an uphill component, actively
-        // redirect a fraction of the normal-component velocity along the
-        // wall's tangent direction. Picks the tangent that points toward
-        // *lower* density along the wall, so flow naturally spreads to
-        // wherever there's still room. Without this the perpendicular
-        // hits just decelerate dead and density piles up against the wall.
+        // redirect a fraction of the climb rate along the wall's tangent
+        // direction. Picks the tangent that points toward *lower* density
+        // along the wall, so flow naturally spreads to wherever there's
+        // still room. Without this the perpendicular hits just decelerate
+        // dead and density piles up against the wall.
+        //
+        // Force magnitude = vDotGrad (= v · ∇h, the rate the parcel is
+        // climbing the local height field). That makes the glide vanish on
+        // flat terrain and grow linearly with the slope's steepness — a
+        // gentle bump nudges slightly, a sheer wall deflects hard.
         if (deflect > 0 && parcelStrength > 0 && vDotGrad > 0) {
           const gMag2 = gx * gx + gy * gy;
           if (gMag2 > 1e-9) {
@@ -422,11 +427,7 @@ export class AirFlowSimulation {
             const dgDotTangent = dgx * tCCWx + dgy * tCCWy;
             const tx = dgDotTangent <= 0 ? tCCWx : -tCCWx;
             const ty = dgDotTangent <= 0 ? tCCWy : -tCCWy;
-            // Force magnitude scales with how much velocity is heading
-            // straight into the wall, the parcel strength, and the
-            // user-tunable rate.
-            const vNormal = vDotGrad / gMag;
-            const f = vNormal * deflect * parcelStrength;
+            const f = vDotGrad * deflect * parcelStrength;
             fx += tx * f;
             fy += ty * f;
           }
