@@ -80,6 +80,7 @@ function clearField() {
  * snapshot is reproducible by checking out that commit and pasting back.
  */
 const copyState = ref<'idle' | 'ok' | 'fail'>('idle');
+const loadState = ref<'idle' | 'ok' | 'fail'>('idle');
 
 async function copySettings() {
   const payload = {
@@ -110,6 +111,44 @@ async function copySettings() {
   }
   setTimeout(() => { copyState.value = 'idle'; }, 1500);
 }
+
+/**
+ * Read a JSON snapshot from the clipboard (or prompt if the clipboard API
+ * isn't allowed) and apply every recognised key to the live config. Accepts
+ * both raw config objects and the wrapped { buildSha, ..., config } form
+ * that copySettings() produces.
+ */
+async function loadSettings() {
+  let text: string | null = null;
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    // Insecure context / permission denied — fall back to prompt.
+    text = window.prompt('Paste settings JSON:');
+  }
+  if (!text) {
+    loadState.value = 'fail';
+    setTimeout(() => { loadState.value = 'idle'; }, 1500);
+    return;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    const cfg = (parsed && typeof parsed === 'object' && parsed.config && typeof parsed.config === 'object')
+      ? parsed.config
+      : parsed;
+    let applied = 0;
+    for (const key of Object.keys(cfg)) {
+      if (key in config) {
+        (config as Record<string, unknown>)[key] = cfg[key];
+        applied++;
+      }
+    }
+    loadState.value = applied > 0 ? 'ok' : 'fail';
+  } catch {
+    loadState.value = 'fail';
+  }
+  setTimeout(() => { loadState.value = 'idle'; }, 1500);
+}
 </script>
 
 <template>
@@ -117,15 +156,26 @@ async function copySettings() {
     <header>
       <h2>Developer</h2>
       <p>Tweak. Watch. Repeat.</p>
-      <button
-        type="button"
-        class="save"
-        :class="{ ok: copyState === 'ok', fail: copyState === 'fail' }"
-        @click="copySettings"
-        :title="'Copy build SHA + all config to clipboard as JSON'"
-      >
-        {{ copyState === 'ok' ? 'Copied!' : copyState === 'fail' ? 'Copy failed' : 'Save Settings (JSON)' }}
-      </button>
+      <div class="save-row">
+        <button
+          type="button"
+          class="save"
+          :class="{ ok: copyState === 'ok', fail: copyState === 'fail' }"
+          @click="copySettings"
+          :title="'Copy build SHA + all config to clipboard as JSON'"
+        >
+          {{ copyState === 'ok' ? 'Copied!' : copyState === 'fail' ? 'Copy failed' : 'Save (JSON)' }}
+        </button>
+        <button
+          type="button"
+          class="save"
+          :class="{ ok: loadState === 'ok', fail: loadState === 'fail' }"
+          @click="loadSettings"
+          :title="'Read JSON from the clipboard and apply every recognised key to the live config'"
+        >
+          {{ loadState === 'ok' ? 'Applied!' : loadState === 'fail' ? 'Bad JSON' : 'Load (JSON)' }}
+        </button>
+      </div>
       <!-- Scenario picker. Switching re-applies terrain heights / corner
            heights and replaces any user-placed sources with the new
            scenario's starter set. -->
@@ -295,10 +345,15 @@ async function copySettings() {
 .dev { padding: 16px; font-size: 12px; }
 header h2 { margin: 0 0 4px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
 header p { margin: 0 0 8px; color: #6b6b78; }
+header .save-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 12px;
+}
 header .save {
   display: block;
   width: 100%;
-  margin: 0 0 16px;
   padding: 6px 10px;
   font: inherit;
   font-size: 11px;

@@ -327,23 +327,28 @@ export class AirFlowSimulation {
         const speed = Math.hypot(cvx, cvy);
         const myDens = density[idx];
 
-        // Density-gated forcing: forces require air to act on. An empty
-        // mountain cell has no density and therefore feels no terrain push,
-        // no pressure, no ambient — nothing to push around. Linear ramp:
-        // 0 (empty) .. 1 (≥ reference). Density that *did* end up at high
-        // ground feels proportional terrain force that drains it back to
-        // the valleys, exactly as the user described.
+        // Two height-gated factors:
+        //   densityFactor — 0 (empty) .. 1 (≥ baseline). Used for forces
+        //     that still make sense on atmospheric air (ambient wind).
+        //   parcelStrength — 0 (atmospheric) .. 1 (saturated parcel).
+        //     Used for forces that *only* act on actual parcels: terrain,
+        //     pressure, turbulence. With this, atmospheric cells stop
+        //     receiving random kicks and stop pressure-pushing from
+        //     neighbour density gradients.
+        const dDev = myDens - baseline;
         const densityFactor = Math.min(1, myDens / baseline);
+        const parcelStrength = Math.min(1, Math.abs(dDev) / baseline);
 
-        // Ambient (gated): no air, no breeze.
+        // Ambient (gated by densityFactor — still meaningful on atmospheric air).
         let fx = ax * densityFactor;
         let fy = ay * densityFactor;
 
-        // White-noise turbulence forcing. Amplitude grows with local speed so
-        // calm areas stay calm and busy areas chop. Skipped when turb = 0 or
-        // there is nothing to perturb.
-        if (turb > 0 && densityFactor > 0) {
-          const k = turb * (0.25 + speed) * densityFactor;
+        // White-noise turbulence forcing. Gated by parcelStrength so it
+        // only jitters where there's an actual parcel — atmospheric cells
+        // at baseline density stay calm instead of accumulating random
+        // velocity that nothing dissipates.
+        if (turb > 0 && parcelStrength > 0) {
+          const k = turb * (0.25 + speed) * parcelStrength;
           fx += (Math.random() - 0.5) * 2 * k;
           fy += (Math.random() - 0.5) * 2 * k;
         }
@@ -383,8 +388,6 @@ export class AirFlowSimulation {
         // a parcel that's actually on it — atmospheric air at exactly
         // baseline feels nothing, so the wall doesn't generate ghost wind
         // that propagates across the map.
-        const dDev = myDens - baseline;
-        const parcelStrength = Math.min(1, Math.abs(dDev) / baseline);
         const vDotGrad = cvx * gx + cvy * gy;
         const dirFactor = vDotGrad > 0 ? 1 : downhillRatio;
         const tk = (coupling * dirFactor * parcelStrength) / (1 + speed * overcome);
@@ -392,10 +395,14 @@ export class AirFlowSimulation {
         fy -= gy * tk;
 
         // Pressure force from density: `f = -pressure * ∇ρ`. Pushes velocity
-        // toward lower density. Also gated — only existing air pushes itself
-        // outward, not the void next to a parcel.
-        if (pressure > 0 && densityFactor > 0) {
-          const pk = pressure * densityFactor;
+        // toward lower density. Gated by parcelStrength — atmospheric cells
+        // at baseline density don't get pushed by neighbour density
+        // gradients, only actual parcels do. The parcel cells then spread
+        // outward via their own velocity; downstream cells receive density
+        // via advection, become parcel cells themselves, and pressure
+        // propagates the spread. Atmospheric air stays calm meanwhile.
+        if (pressure > 0 && parcelStrength > 0) {
+          const pk = pressure * parcelStrength;
           fx -= dgx * pk;
           fy -= dgy * pk;
         }
@@ -624,15 +631,17 @@ export class AirFlowSimulation {
     }
 
     // ----- Phase 5: density-coupled velocity decay -----
-    // Velocity follows the parcel: where there's no density passing through,
-    // there's nothing for the velocity field to be the velocity of. Cells
-    // below `densityReference` get extra exponential damping proportional
-    // to how empty they are. At density >= reference the gate is fully off.
+    // Velocity follows the parcel. Cells well above the parcel threshold
+    // (2 × baseline) keep their velocity; cells at baseline or below lose
+    // it proportionally. Smoothly ramped so a "thin parcel" decays gently
+    // and atmospheric cells decay strongly, while saturated parcels are
+    // fully preserved.
+    const parcelThreshold = baseline * 2;
     if (vdCoupling > 0) {
       for (let i = 0; i < density.length; i++) {
         const d = density[i];
-        if (d >= baseline) continue;
-        const lack = 1 - d / baseline; // 0 (full) .. 1 (empty)
+        if (d >= parcelThreshold) continue;
+        const lack = 1 - d / parcelThreshold; // 0 at threshold, 1 at empty
         const r = Math.exp(-vdCoupling * lack * dt);
         vx[i] *= r;
         vy[i] *= r;
