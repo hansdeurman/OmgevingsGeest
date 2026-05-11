@@ -401,35 +401,42 @@ export class AirFlowSimulation {
           fy -= dgy * pk;
         }
 
-        // Wall-glide: when velocity has an uphill component, actively
-        // redirect a fraction of the climb rate along the wall's tangent
-        // direction. Picks the tangent that points toward *lower* density
-        // along the wall, so flow naturally spreads to wherever there's
-        // still room. Without this the perpendicular hits just decelerate
-        // dead and density piles up against the wall.
-        //
-        // Force magnitude = vDotGrad (= v · ∇h, the rate the parcel is
-        // climbing the local height field). That makes the glide vanish on
-        // flat terrain and grow linearly with the slope's steepness — a
-        // gentle bump nudges slightly, a sheer wall deflects hard.
+        // Wall-glide: redirect flow that's actively climbing the local
+        // height field along the wall's tangent (toward whichever side
+        // has lower parcel density). The two gating conditions:
+        //   1. v must have a real uphill component — once the parcel has
+        //      crested the wall or is skimming tangentially, vDotGrad
+        //      drops to zero or negative and we stop nudging it.
+        //   2. magnitude scales with vDotGrad = v · ∇h, i.e. the rate
+        //      the parcel is climbing. Steep wall + head-on impact =
+        //      strong sideways push; gentle bump or grazing angle =
+        //      proportionally less.
+        // Downhill flow falls out of both checks naturally: nothing
+        // stops or disperses air running down the back side of a wall.
         if (deflect > 0 && parcelStrength > 0 && vDotGrad > 0) {
           const gMag2 = gx * gx + gy * gy;
           if (gMag2 > 1e-9) {
             const gMag = Math.sqrt(gMag2);
-            // Unit gradient (wall normal) and 90°-CCW rotation = tangent.
-            const gxN = gx / gMag;
-            const gyN = gy / gMag;
-            const tCCWx = -gyN;
-            const tCCWy = gxN;
-            // Pick the tangent direction whose density gradient is more
-            // negative (i.e. flowing toward lower density). The other
-            // option is just (-tCCWx, -tCCWy).
-            const dgDotTangent = dgx * tCCWx + dgy * tCCWy;
-            const tx = dgDotTangent <= 0 ? tCCWx : -tCCWx;
-            const ty = dgDotTangent <= 0 ? tCCWy : -tCCWy;
-            const f = vDotGrad * deflect * parcelStrength;
-            fx += tx * f;
-            fy += ty * f;
+            // Require flow to be meaningfully aimed up-slope, not just
+            // marginally positive (which a tangent-skimming parcel still
+            // is). cosθ = (v · ∇h) / (|v| · |∇h|); below ~0.1 means v is
+            // within ~6° of the wall tangent — let it flow.
+            const climbAlign = vDotGrad / (speed * gMag);
+            if (climbAlign > 0.1) {
+              // Unit gradient (wall normal) and 90°-CCW rotation = tangent.
+              const gxN = gx / gMag;
+              const gyN = gy / gMag;
+              const tCCWx = -gyN;
+              const tCCWy = gxN;
+              // Pick the tangent direction whose density gradient is more
+              // negative (toward lower density along the wall).
+              const dgDotTangent = dgx * tCCWx + dgy * tCCWy;
+              const tx = dgDotTangent <= 0 ? tCCWx : -tCCWx;
+              const ty = dgDotTangent <= 0 ? tCCWy : -tCCWy;
+              const f = vDotGrad * deflect * parcelStrength;
+              fx += tx * f;
+              fy += ty * f;
+            }
           }
         }
 
