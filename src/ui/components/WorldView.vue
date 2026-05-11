@@ -4,7 +4,7 @@ import { Camera } from '../../rendering/Camera';
 import { CanvasRenderer } from '../../rendering/canvas/CanvasRenderer';
 import type { Renderer } from '../../rendering/Renderer';
 import { buildWorld } from '../../generation/WorldGenerator';
-import { config, generationKeys, gridDimensions, HEX_PIXEL_SIZE } from '../../config/parameters';
+import { config, generationKeys, HEX_PIXEL_SIZE } from '../../config/parameters';
 import type { World } from '../../world/World';
 import {
   AirFlowSimulation,
@@ -20,7 +20,8 @@ import {
   highlightedSinkIdx,
   requestFieldClear,
 } from '../../airflow';
-import { gridPixelBounds, pixelToOffset, offsetToPixel, hexCorners } from '../../math/hex';
+import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
+import { applyScenario, currentScenarioId } from '../../scenarios';
 
 const hostRef = ref<HTMLDivElement>();
 
@@ -63,7 +64,12 @@ function regenerate() {
 }
 
 function frame(now: number) {
-  const dt = lastFrameTime ? Math.min(0.1, (now - lastFrameTime) / 1000) : 0;
+  // Frame dt is multiplied by Time Scale so the user can slow the whole
+  // simulation down (or speed it up) without altering the dynamics —
+  // every per-second rate (damping, advection, diffusion, etc.) scales
+  // uniformly because they all read this same dt.
+  const rawDt = lastFrameTime ? Math.min(0.1, (now - lastFrameTime) / 1000) : 0;
+  const dt = rawDt * Math.max(0, config.simTimeScale);
   lastFrameTime = now;
 
   if (renderer && world) {
@@ -119,121 +125,11 @@ onMounted(() => {
   renderer.resize(host.clientWidth, host.clientHeight);
   regenerate();
 
-  // First-mount test scenario: flatten the world and seed 12 outward-firing
-  // burst sources in a ring at radius 5 hexes from the centre, every 30°.
-  // Six of them sit on hex axes (the natural lattice directions), the other
-  // six fall between axes — exactly the directions where single-neighbour
-  // push used to lock up. With the new two-axis flux split they should all
-  // propagate cleanly outward. Subsequent regenerates restore real terrain
-  // and don't replant these sources.
-  for (let i = 0; i < world.tiles.length; i++) world.tiles[i].height = 0;
-
-  // Two test mountains the airflow has to deal with. Both are sampled in
-  // *pixel* space (a continuous height function) so the smooth profile
-  // doesn't pick up the hex-row zigzag.
-  //
-  // We sample the function not just at every cell's centre, but also at
-  // every cell's six corners. The renderer reads tile.cornerHeights
-  // directly, so the wall edge follows the function's actual edge in
-  // pixel space — the half-on / half-off cells around the wall axis end
-  // up with corner heights that combine to a clean straight visual edge,
-  // instead of inheriting a stair-stepped average from neighbour cells.
-  //   - Thin straight wall, hard plateau in pixel space, smooth taper.
-  //   - Conical mountain, isotropic gaussian peak.
-  {
-    const { width, height } = gridDimensions(config.hexCount);
-    const cx = Math.floor(width / 2);
-    const cy = Math.floor(height / 2);
-
-    const wallCenterPx = offsetToPixel(cx + 10, cy, HEX_PIXEL_SIZE);
-    // Plateau half-width must comfortably exceed the half-hex pixel offset
-    // (≈ √3/2 · hexSize ≈ 3.46 px) so that *every* corner of every cell
-    // sitting inside the wall is also inside the plateau — otherwise the
-    // outer corners drop into the taper and the wall body shows the
-    // bright/dim alternating bands the user just spotted.
-    const wallHalfWidth = HEX_PIXEL_SIZE * 1.0;       // ~4 px each side of axis
-    const wallTaperPerp = HEX_PIXEL_SIZE * 0.5;       // perpendicular taper σ
-    const wallHalfLen = 4 * HEX_PIXEL_SIZE * 1.5;     // ~4 hexes top/bottom
-    const wallEndSigma = HEX_PIXEL_SIZE * 1.5;        // gaussian taper at ends
-
-    const mtnCenterPx = offsetToPixel(cx - 10, cy, HEX_PIXEL_SIZE);
-    const mtnSigma = HEX_PIXEL_SIZE * 2.2;            // ~2.2 hex peak sigma
-
-    // Sample the wall + mountain combined height function at any pixel
-    // position. Plateau-with-taper for the wall: full height inside a thin
-    // axis-aligned rectangle, gaussian falloff perpendicular and at the
-    // ends. Sharp visual edge in pixel space; the renderer can then ask
-    // for the function value at any corner and get a clean wall edge.
-    function sampleHeight(px: number, py: number): number {
-      // Wall.
-      const wdx = px - wallCenterPx.x;
-      const wdy = py - wallCenterPx.y;
-      const wdxAbs = Math.abs(wdx);
-      const wdyAbs = Math.abs(wdy);
-      const wPerp = wdxAbs <= wallHalfWidth
-        ? 1
-        : Math.exp(-((wdxAbs - wallHalfWidth) ** 2) / (2 * wallTaperPerp * wallTaperPerp));
-      const wAlong = wdyAbs <= wallHalfLen
-        ? 1
-        : Math.exp(-((wdyAbs - wallHalfLen) ** 2) / (2 * wallEndSigma * wallEndSigma));
-      const wallH = wPerp * wAlong;
-      // Mountain.
-      const mdx = px - mtnCenterPx.x;
-      const mdy = py - mtnCenterPx.y;
-      const mtnH = Math.exp(-(mdx * mdx + mdy * mdy) / (2 * mtnSigma * mtnSigma));
-      return Math.max(wallH, mtnH);
-    }
-
-    for (let r = 0; r < height; r++) {
-      for (let c = 0; c < width; c++) {
-        const pos = offsetToPixel(c, r, HEX_PIXEL_SIZE);
-        const idx = r * width + c;
-        const tile = world.tiles[idx];
-        // Centre height drives the simulation (terrain force gradient).
-        const centreH = sampleHeight(pos.x, pos.y);
-        if (centreH > tile.height) tile.height = centreH;
-        // Corner heights drive the renderer for a sharp visual edge.
-        const corners = hexCorners(pos.x, pos.y, HEX_PIXEL_SIZE);
-        const ch = tile.cornerHeights ?? new Float32Array(6);
-        for (let i = 0; i < 6; i++) {
-          const sampled = sampleHeight(corners[i].x, corners[i].y);
-          if (sampled > ch[i]) ch[i] = sampled;
-        }
-        tile.cornerHeights = ch;
-      }
-    }
-  }
-
-  airFlow = new AirFlowSimulation(world);
-  airFlow.setBaseline(config.windDensityBaseline);
-  {
-    const { width, height } = gridDimensions(config.hexCount);
-    const cx = Math.floor(width / 2);
-    const cy = Math.floor(height / 2);
-    const centerPx = offsetToPixel(cx, cy, HEX_PIXEL_SIZE);
-    // Radius in pixel space corresponding to 5 hex hops along an axis.
-    const radiusPx = 5 * Math.sqrt(3) * HEX_PIXEL_SIZE;
-    const placed = new Set<number>();
-    for (let i = 0; i < 12; i++) {
-      const angle = (i * Math.PI) / 6; // 0°, 30°, 60°, …
-      const tx = centerPx.x + radiusPx * Math.cos(angle);
-      const ty = centerPx.y + radiusPx * Math.sin(angle);
-      const cell = pixelToOffset(tx, ty, HEX_PIXEL_SIZE);
-      if (cell.col < 0 || cell.col >= width || cell.row < 0 || cell.row >= height) continue;
-      const idx = cell.row * width + cell.col;
-      if (placed.has(idx)) continue;
-      placed.add(idx);
-      addSource({
-        col: cell.col,
-        row: cell.row,
-        vx: Math.cos(angle) * config.placeSpeed,
-        vy: Math.sin(angle) * config.placeSpeed,
-        density: config.placeDensity,
-        duration: config.placeOnTime,
-        period: config.placePeriod,
-      });
-    }
-  }
+  // Boot the page with the currently-selected test scenario. The dropdown
+  // in the dev panel can swap to another one at any time; switching runs
+  // applyScenario() which resets terrain + sources before painting the
+  // new setup.
+  if (airFlow) applyScenario(currentScenarioId.value, world, airFlow);
 
   resizeObs = new ResizeObserver(() => {
     renderer.resize(host.clientWidth, host.clientHeight);
@@ -365,6 +261,14 @@ watch(
 watch(
   () => config.windDensityBaseline,
   (v) => airFlow?.setBaseline(v),
+);
+
+// Scenario dropdown: re-apply when the user picks a different setup.
+watch(
+  () => currentScenarioId.value,
+  (id) => {
+    if (airFlow) applyScenario(id, world, airFlow);
+  },
 );
 </script>
 

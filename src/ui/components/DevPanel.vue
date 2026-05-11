@@ -16,6 +16,7 @@ import {
   requestFieldClear,
 } from '../../airflow';
 import { NEIGHBOUR_DIRS } from '../../math/hex';
+import { SCENARIOS, currentScenarioId } from '../../scenarios';
 import ParameterControl from './ParameterControl.vue';
 
 const groups = computed(() => {
@@ -125,6 +126,15 @@ async function copySettings() {
       >
         {{ copyState === 'ok' ? 'Copied!' : copyState === 'fail' ? 'Copy failed' : 'Save Settings (JSON)' }}
       </button>
+      <!-- Scenario picker. Switching re-applies terrain heights / corner
+           heights and replaces any user-placed sources with the new
+           scenario's starter set. -->
+      <label class="scenario">
+        <span class="scenario-label">Scenario</span>
+        <select v-model="currentScenarioId">
+          <option v-for="s in SCENARIOS" :key="s.id" :value="s.id">{{ s.name }}</option>
+        </select>
+      </label>
     </header>
 
     <section v-for="[group, params] in groups" :key="group">
@@ -305,6 +315,35 @@ header .save {
 header .save:hover { background: #1f1f28; color: #fff; }
 header .save.ok { background: #2a4a32; border-color: #5fbd7c; color: #c0f5cc; }
 header .save.fail { background: #4a2a2a; border-color: #cc5566; color: #ff8090; }
+
+header .scenario {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+header .scenario-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8a99;
+}
+header .scenario select {
+  width: 100%;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  background: #0e0e14;
+  color: #e6e6ea;
+  border: 1px solid #2a2a36;
+  border-radius: 4px;
+  cursor: pointer;
+}
+header .scenario select:focus {
+  outline: none;
+  border-color: #6a8cff;
+}
 section { margin-bottom: 18px; }
 h3 {
   margin: 0 0 8px;

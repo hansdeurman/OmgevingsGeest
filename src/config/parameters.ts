@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { initialSettings } from './initialSettings';
 
 export type ParamType = 'number' | 'int' | 'boolean';
 
@@ -27,6 +28,13 @@ export const HEX_PIXEL_SIZE = 4;
 const GRID_ASPECT = 0.75;
 
 export const parameterDefs: ParamMeta[] = [
+  // Simulation
+  // Time scale: frame dt is multiplied by this before being fed to the
+  // simulator. 1 = real-time, 0.5 = half speed, 0 = paused, >1 = faster.
+  // Slows or accelerates the *whole* simulation without changing the
+  // steady-state behaviour — same dynamics, just stretched in time.
+  { key: 'simTimeScale', label: 'Time Scale', group: 'Simulation', type: 'number', min: 0, max: 3, step: 0.05, default: 1 },
+
   // World
   { key: 'seed', label: 'Seed', group: 'World', type: 'int', min: 0, max: 99999, step: 1, default: 1337, affectsGeneration: true },
   { key: 'hexCount', label: 'Hex Count', group: 'World', type: 'int', min: 20, max: 400, step: 1, default: 40, affectsGeneration: true },
@@ -138,13 +146,19 @@ export function gridDimensions(hexCount: number): { width: number; height: numbe
 
 type Defaults = Record<string, number | boolean>;
 const defaults: Defaults = {};
-for (const p of parameterDefs) defaults[p.key] = p.default;
+for (const p of parameterDefs) {
+  // `initialSettings` is the canonical starting preset. Any param missing
+  // from that map keeps its metadata default — handy when adding a new
+  // slider that doesn't have a saved value yet.
+  defaults[p.key] = initialSettings[p.key] ?? p.default;
+}
 
 /**
  * Reactive global config. Read it from anywhere; the dev UI mutates it in place.
  */
 export const config = reactive(defaults) as Record<string, number | boolean> & {
   // Convenience typing for known keys.
+  simTimeScale: number;
   seed: number;
   hexCount: number;
   noiseScale: number;
