@@ -5,6 +5,7 @@ on:
     branches:
       - claude/hexagon-environment-game-8JtoN
       - claude/fix-airflow-simulation-L8CHE
+      - claude/fix-neutral-flow-angle-k3kWp
       - main
   workflow_dispatch:
 
