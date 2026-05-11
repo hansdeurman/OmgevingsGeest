@@ -36,7 +36,6 @@ export const initialSettings: Record<string, number | boolean> = {
   windOvercomeFactor: 0.1,
   windMaxSpeed: 8,
   windAdvection: 27.5,
-  windPushSharpness: 3,
   windSmoothing: 0,
   windDensityBaseline: 1,
   windDensityDamping: 0.15,

@@ -48,15 +48,6 @@ export interface AirFlowParams {
    */
   advection: number;
   /**
-   * Sharpness of the edge-flux distribution. Each cell pushes flux through
-   * its 6 hex edges with weight ∝ (v·edge_normal)^sharpness for outflowing
-   * edges. 1 = pure first-order upwind (broad 60° fan in any direction,
-   * fully isotropic). Higher values concentrate flux around the dominant
-   * axis (tighter plume, mild axis bias). 4–6 reads as a focused beam
-   * without straight-line vs zigzag asymmetry.
-   */
-  pushSharpness: number;
-  /**
    * Linear drag rate on the scalar density field (per second). Mirrors
    * `damping` for velocity but acts on density only. Keep low — too much and
    * a parcel evaporates before you can watch it travel.
@@ -494,33 +485,34 @@ export class AirFlowSimulation {
       vy.set(this.nextVy);
     }
 
-    // ----- Phase 3: edge-flux advection (conservative push, isotropic) -----
-    // For every cell with non-zero velocity we look at the *six hex edges*
-    // and compute the outflow component through each: dot_i = v · n_i where
-    // n_i is the outward normal of edge i (= NEIGHBOUR_DIRS[i], because the
-    // line from this centre to the i-th neighbour's centre is perpendicular
-    // to the shared edge). Edges with positive dot are outflows; we split
-    // the cell's outgoing flux among them weighted by dot^sharpness.
+    // ----- Phase 3: two-edge barycentric upwind advection -----
+    // For each cell with non-zero velocity v, find the 60° sector that
+    // contains v (bracketed by two of the six NEIGHBOUR_DIRS, call them
+    // n_A and n_B — they are 60° apart so n_A · n_B = ½) and decompose v
+    // exactly in that basis: v = α·n_A + β·n_B with α, β ≥ 0. Solving
+    //   v·n_A = α + β/2,  v·n_B = α/2 + β
+    // gives α = (4/3)(v·n_A) − (2/3)(v·n_B) and β symmetrically.
     //
-    // sharpness = 1 gives the textbook first-order upwind donor-cell
-    // scheme: every velocity direction gets the same 60°-wide fan, which
-    // kills lattice anisotropy completely. Higher sharpness concentrates
-    // the flux around the dominant edges — a tighter plume that still
-    // doesn't favour the six hex axes over the in-between angles, because
-    // both axis and between-axis velocities use the *same* formula. Axis
-    // velocity puts ⅔+ on the main edge and small flank shares on its two
-    // 60° neighbours; between-axis splits ~50/50 between the two flanking
-    // axes. No more "straight line vs zigzag" asymmetry.
+    // Flux is sent through *just those two* edges, split α : β. The
+    // outflow CFL fraction is scaled by (α+β) rather than |v|, so the
+    // parcel's centre of mass advances at exactly v·dt per step in any
+    // direction — no hex-axis bias. (The earlier dot^sharpness scheme
+    // distributed flux to up to 3 edges with weights that gave a faster,
+    // tighter beam along the 6 hex axes than between them — visible as
+    // the source-burst shape changing dramatically with ambient angle.)
     const advRate = Math.max(0, params.advection);
-    const sharpness = Math.max(0.1, params.pushSharpness);
     if (advRate > 0) {
       this.nextVx.set(vx);
       this.nextVy.set(vy);
       this.nextDensity.set(density);
       const invHex = 1 / HEX_PIXEL_SIZE;
 
-      // Per-cell scratch for the 6 edge weights; reused each iteration.
-      const edgeW = new Float64Array(6);
+      // Sorted-by-angle index of NEIGHBOUR_DIRS in screen y-down:
+      // E(0°), SE(60°), SW(120°), W(180°), NW(240°), NE(300°)
+      // → NEIGHBOUR_DIRS indices [0, 5, 4, 3, 2, 1].
+      const ANGULAR_ORDER = [0, 5, 4, 3, 2, 1] as const;
+      const SECTOR = Math.PI / 3;
+      const TWO_PI = Math.PI * 2;
 
       for (let row = 0; row < h; row++) {
         const offs = offsetNeighbours(row);
@@ -531,18 +523,27 @@ export class AirFlowSimulation {
           const speed = Math.hypot(cvx, cvy);
           if (speed < 1e-5) continue;
 
-          let totalW = 0;
-          for (let i = 0; i < 6; i++) {
-            const d = NEIGHBOUR_DIRS[i];
-            const dot = cvx * d.x + cvy * d.y;
-            const ew = dot > 0 ? Math.pow(dot, sharpness) : 0;
-            edgeW[i] = ew;
-            totalW += ew;
-          }
-          if (totalW < 1e-12) continue;
+          let ang = Math.atan2(cvy, cvx);
+          if (ang < 0) ang += TWO_PI;
+          const sector = Math.floor(ang / SECTOR) % 6;
+          const idxA = ANGULAR_ORDER[sector];
+          const idxB = ANGULAR_ORDER[(sector + 1) % 6];
+          const nA = NEIGHBOUR_DIRS[idxA];
+          const nB = NEIGHBOUR_DIRS[idxB];
+          const dotA = cvx * nA.x + cvy * nA.y;
+          const dotB = cvx * nB.x + cvy * nB.y;
+          let a = (4 / 3) * dotA - (2 / 3) * dotB;
+          let b = (4 / 3) * dotB - (2 / 3) * dotA;
+          if (a < 0) a = 0;
+          if (b < 0) b = 0;
+          const ab = a + b;
+          if (ab < 1e-12) continue;
 
-          // CFL-scaled total outgoing flux fraction.
-          const alpha = Math.min(1, advRate * speed * dt * invHex);
+          // CFL-scaled outflow fraction. Using (α+β) instead of |v| means
+          // an off-axis cell ships ~15% more of its content per step than
+          // an on-axis one — exactly the correction needed for the COM
+          // to advance at v·dt regardless of direction.
+          const alpha = Math.min(1, advRate * ab * dt * invHex);
 
           // Velocity flux is gated by parcel strength: velocity only travels
           // *with* a deviation from baseline. At baseline, force-generated
@@ -555,30 +556,41 @@ export class AirFlowSimulation {
           const fluxVy = cvy * alpha * parcelStrength;
           const fluxD = dDev * alpha;
 
-          // A loses the full outgoing flux up front.
           this.nextVx[idx] -= fluxVx;
           this.nextVy[idx] -= fluxVy;
           this.nextDensity[idx] -= fluxD;
 
-          // Distribute weighted by edge outflow.
-          const inv = 1 / totalW;
-          for (let i = 0; i < 6; i++) {
-            const ew = edgeW[i];
-            if (ew <= 0) continue;
-            const wt = ew * inv;
-            const o = offs[i];
-            const nc = col + o.dc;
-            const nr = row + o.dr;
-            if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
-            const ni = nr * w + nc;
-            this.nextVx[ni] += fluxVx * wt;
-            this.nextVy[ni] += fluxVy * wt;
+          const wA = a / ab;
+          const wB = b / ab;
+
+          const oA = offs[idxA];
+          const ncA = col + oA.dc;
+          const nrA = row + oA.dr;
+          if (ncA >= 0 && ncA < w && nrA >= 0 && nrA < h) {
+            const ni = nrA * w + ncA;
+            this.nextVx[ni] += fluxVx * wA;
+            this.nextVy[ni] += fluxVy * wA;
             let arriveFactor = 1;
             if (heightLoss > 0) {
               const dh = sh[ni] - sh[idx];
               if (dh > 0) arriveFactor = Math.exp(-dh * heightLoss);
             }
-            this.nextDensity[ni] += fluxD * wt * arriveFactor;
+            this.nextDensity[ni] += fluxD * wA * arriveFactor;
+          }
+
+          const oB = offs[idxB];
+          const ncB = col + oB.dc;
+          const nrB = row + oB.dr;
+          if (ncB >= 0 && ncB < w && nrB >= 0 && nrB < h) {
+            const ni = nrB * w + ncB;
+            this.nextVx[ni] += fluxVx * wB;
+            this.nextVy[ni] += fluxVy * wB;
+            let arriveFactor = 1;
+            if (heightLoss > 0) {
+              const dh = sh[ni] - sh[idx];
+              if (dh > 0) arriveFactor = Math.exp(-dh * heightLoss);
+            }
+            this.nextDensity[ni] += fluxD * wB * arriveFactor;
           }
         }
       }
