@@ -29,7 +29,7 @@ export const initialSettings: Record<string, number | boolean> = {
   showAirFlow: true,
   windAmbientSpeed: 0,
   windAmbientAngle: 0,
-  windDamping: 0.02,
+  windDamping: 0.05,
   windTerrainCoupling: 29,
   windTerrainHorizon: 5,
   windTerrainDeflect: 80,
@@ -44,7 +44,7 @@ export const initialSettings: Record<string, number | boolean> = {
   windVelocityDensityCoupling: 6,
   windHeightDensityLoss: 1,
   windDensityDiffusion: 2,
-  windTurbulence: 0.1,
+  windTurbulence: 0,
   arrowStride: 1,
   arrowScale: 8,
   // Placement
