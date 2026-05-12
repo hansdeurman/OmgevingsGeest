@@ -290,9 +290,50 @@ function applyLWallLabyrinth(world: World, airFlow: AirFlowSimulation): void {
   });
 }
 
+/** ---------- Scenario: Empty Field ---------- */
+
+/**
+ * No terrain. Three periodic burst sources spaced 120° around the map
+ * centre, each firing in its own direction so the flow has to be driven
+ * purely by the sources and ambient dynamics — handy for spotting
+ * terrain-free behaviour (anisotropy, dispersion, V↔ρ coupling).
+ */
+function applyEmptyField(world: World, airFlow: AirFlowSimulation): void {
+  clearWorld(world, airFlow);
+  airFlow.setBaseline(config.windDensityBaseline);
+
+  const { width, height } = gridDimensions(config.hexCount);
+  const cx = Math.floor(width / 2);
+  const cy = Math.floor(height / 2);
+  const centerPx = offsetToPixel(cx, cy, HEX_PIXEL_SIZE);
+  const radiusPx = 10 * Math.sqrt(3) * HEX_PIXEL_SIZE;
+
+  // Each source sits 120° around the centre and fires outward (i.e. its
+  // emission direction matches its position angle). Different angles
+  // produce different incoming-edge alignments so we can spot any
+  // residual hex-axis bias from a single picture.
+  for (let i = 0; i < 3; i++) {
+    const angle = (i * 2 * Math.PI) / 3;
+    const tx = centerPx.x + radiusPx * Math.cos(angle);
+    const ty = centerPx.y + radiusPx * Math.sin(angle);
+    const cell = pixelToOffset(tx, ty, HEX_PIXEL_SIZE);
+    if (cell.col < 0 || cell.col >= world.width || cell.row < 0 || cell.row >= world.height) continue;
+    addSource({
+      col: cell.col,
+      row: cell.row,
+      vx: Math.cos(angle) * config.placeSpeed,
+      vy: Math.sin(angle) * config.placeSpeed,
+      density: config.placeDensity,
+      duration: config.placeOnTime,
+      period: config.placePeriod,
+    });
+  }
+}
+
 /** ---------- Registry ---------- */
 
 export const SCENARIOS: ReadonlyArray<TestScenario> = [
+  { id: 'emptyField', name: 'Empty Field', apply: applyEmptyField },
   { id: 'wallAndPeak', name: 'Wall vs Conical Peak', apply: applyWallAndPeak },
   { id: 'lWallLabyrinth', name: 'L-Wall Labyrinth', apply: applyLWallLabyrinth },
 ];
