@@ -688,17 +688,21 @@ export class AirFlowSimulation {
     }
 
     // ----- Phase 5: density-coupled velocity decay -----
-    // Velocity follows the parcel. Cells well above the parcel threshold
-    // (2 × baseline) keep their velocity; cells at baseline or below lose
-    // it proportionally. Smoothly ramped so a "thin parcel" decays gently
-    // and atmospheric cells decay strongly, while saturated parcels are
-    // fully preserved.
-    const parcelThreshold = baseline * 2;
+    // Velocity is a property of a parcel — no parcel substance, no
+    // momentum to carry. Lack ramps from 1 at baseline (atmospheric:
+    // velocity decays at full vdCoupling rate) to 0 at 2× baseline
+    // (saturated parcel: velocity fully preserved). Below baseline
+    // (sinks, depleted cells) `lack` is clamped to 1 so they also
+    // shed any residual velocity. Without this, force-injected
+    // velocity at the boundary of a parcel persists in nominally
+    // atmospheric cells and creates ghost flow patterns that look
+    // like flow is curving for no reason.
     if (vdCoupling > 0) {
       for (let i = 0; i < density.length; i++) {
         const d = density[i];
-        if (d >= parcelThreshold) continue;
-        const lack = 1 - d / parcelThreshold; // 0 at threshold, 1 at empty
+        const above = (d - baseline) / baseline;
+        if (above >= 1) continue; // saturated parcel, keep velocity
+        const lack = above <= 0 ? 1 : 1 - above;
         const r = Math.exp(-vdCoupling * lack * dt);
         vx[i] *= r;
         vy[i] *= r;
