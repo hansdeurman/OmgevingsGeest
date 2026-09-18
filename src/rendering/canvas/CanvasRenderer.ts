@@ -9,6 +9,7 @@ import {
   drawSourcePreview,
   drawDensityOverlay,
 } from './airflowOverlay';
+import { drawAvatar, drawAimGuide, drawProjectiles } from './avatarOverlay';
 
 /**
  * 2D canvas renderer. Owns the canvas element. Resolution-aware: tracks DPR
@@ -63,6 +64,9 @@ export class CanvasRenderer implements Renderer {
       sourcePreview,
       highlightedSourceIdx,
       highlightedSinkIdx,
+      avatar,
+      projectiles,
+      swipeAim,
     } = frame;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -229,6 +233,16 @@ export class CanvasRenderer implements Renderer {
 
     if (sourcePreview) {
       drawSourcePreview(ctx, sourcePreview.start, sourcePreview.end, size, camera.zoom);
+    }
+
+    // Avatar layer sits on top of everything: the aim guide first so its
+    // spokes pass *under* the avatar disc, then the shots, then the avatar.
+    if (avatar) {
+      if (swipeAim) drawAimGuide(ctx, avatar.col, avatar.row, swipeAim, size, camera.zoom);
+      if (projectiles && projectiles.length) {
+        drawProjectiles(ctx, projectiles, size, camera.zoom);
+      }
+      drawAvatar(ctx, avatar.col, avatar.row, size, camera.zoom);
     }
 
     ctx.restore();

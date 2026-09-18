@@ -140,6 +140,16 @@ export const parameterDefs: ParamMeta[] = [
   // Sink drain rate (density units removed per second). Match to a paired
   // source's effective output if you want roughly conservative flow.
   { key: 'sinkRate',    label: 'Sink Rate', group: 'Placement', type: 'number', min: 0.1,  max: 20, step: 0.1,  default: 3 },
+
+  // Avatar — swipe-to-fire test rig. Speed and range are in *hexes* (and
+  // hexes per second) so they read the same way the map does.
+  { key: 'avatarShotSpeed', label: 'Shot Speed', group: 'Avatar', type: 'number', min: 1, max: 60, step: 0.5, default: 14 },
+  { key: 'avatarShotRange', label: 'Shot Range', group: 'Avatar', type: 'number', min: 1, max: 60, step: 0.5, default: 16 },
+  // Minimum drag length (screen px) before a swipe counts as a shot.
+  // Below it, the gesture is treated as a tap and moves the avatar instead.
+  { key: 'avatarSwipeDeadzone', label: 'Swipe Deadzone', group: 'Avatar', type: 'int', min: 2, max: 80, step: 1, default: 16 },
+  // Show the twelve-spoke direction guide while swiping.
+  { key: 'avatarShowGuide', label: 'Aim Guide', group: 'Avatar', type: 'boolean', default: true },
 ];
 
 /** Derive the rectangular grid dimensions from a single hex-count knob. */
@@ -201,6 +211,10 @@ export const config = reactive(defaults) as Record<string, number | boolean> & {
   placeOnTime: number;
   placePeriod: number;
   sinkRate: number;
+  avatarShotSpeed: number;
+  avatarShotRange: number;
+  avatarSwipeDeadzone: number;
+  avatarShowGuide: boolean;
 };
 
 export const generationKeys = parameterDefs

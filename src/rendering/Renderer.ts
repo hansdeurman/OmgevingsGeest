@@ -2,6 +2,8 @@ import type { World } from '../world/World';
 import type { Camera } from './Camera';
 import type { WindField } from '../airflow/WindField';
 import type { WindSource, WindSink } from '../airflow/sources';
+import type { Projectile } from '../game/avatar';
+import type { SwipeAim } from './canvas/avatarOverlay';
 
 /**
  * Per-frame state handed to the renderer. Only `world` and `camera` are
@@ -32,6 +34,16 @@ export interface RenderFrame {
     start: { x: number; y: number };
     end: { x: number; y: number };
   };
+  /** Player stand-in the projectile test rig fires from. */
+  avatar?: { col: number; row: number };
+  /** Shots currently in flight. */
+  projectiles?: ReadonlyArray<Projectile>;
+  /**
+   * Live swipe feedback. Present only while a firing drag is in progress;
+   * the renderer draws the twelve-way guide around the avatar and
+   * highlights whichever direction the drag currently snaps to.
+   */
+  swipeAim?: SwipeAim;
 }
 
 /**

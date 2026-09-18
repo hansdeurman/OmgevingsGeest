@@ -22,6 +22,18 @@ import {
 } from '../../airflow';
 import { gridPixelBounds, pixelToOffset, offsetToPixel } from '../../math/hex';
 import { applyScenario, currentScenarioId } from '../../scenarios';
+import {
+  avatar,
+  avatarMode,
+  centreAvatar,
+  placeAvatar,
+  projectiles,
+  fireProjectile,
+  stepProjectiles,
+  clearProjectiles,
+  snapFireDir,
+} from '../../game/avatar';
+import type { SwipeAim } from '../../rendering/canvas/avatarOverlay';
 
 const hostRef = ref<HTMLDivElement>();
 
@@ -38,6 +50,14 @@ let resizeObs: ResizeObserver | null = null;
 const sourceDrag = ref<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(
   null,
 );
+
+/**
+ * In-progress firing swipe. Tracked in *screen* pixels: the deadzone is a
+ * feel threshold the user experiences on screen, so it shouldn't change
+ * meaning when they zoom. The camera has no rotation, so a screen-space
+ * direction is also the world-space direction.
+ */
+const swipeAim = ref<SwipeAim | null>(null);
 
 /** Convert client (CSS) pixels to world-space pixels (the same coords that
  *  offsetToPixel produces). Mirrors the transform applied in CanvasRenderer. */
@@ -61,6 +81,10 @@ function regenerate() {
   world = buildWorld(config);
   airFlow = new AirFlowSimulation(world);
   airFlow.setBaseline(config.windDensityBaseline);
+  // A rebuilt grid may be a different size, so re-park the avatar and drop
+  // any shots that were flying over the old map.
+  centreAvatar(world.width, world.height);
+  clearProjectiles();
 }
 
 function frame(now: number) {
@@ -103,6 +127,10 @@ function frame(now: number) {
       // Bursts are one-shot — drain them after the step has stamped them in.
       if (windBursts.length) clearBursts();
     }
+    if (dt > 0 && projectiles.length) {
+      const b = gridPixelBounds(world.width, world.height, HEX_PIXEL_SIZE);
+      stepProjectiles(dt, b.x, b.y);
+    }
     renderer.render({
       world,
       camera,
@@ -113,6 +141,9 @@ function frame(now: number) {
       highlightedSinkIdx: highlightedSinkIdx.value,
       densityReference: config.showDensity ? config.densityDisplayMax : undefined,
       sourcePreview: sourceDrag.value ?? undefined,
+      avatar,
+      projectiles,
+      swipeAim: config.avatarShowGuide ? (swipeAim.value ?? undefined) : undefined,
     });
   }
   raf = requestAnimationFrame(frame);
@@ -136,21 +167,50 @@ onMounted(() => {
   });
   resizeObs.observe(host);
 
-  // Pointer state. We disambiguate two drag modes on mousedown:
-  //   - placeSource: when placingSource is on, OR shift is held.
-  //   - pan: otherwise.
-  let mode: 'idle' | 'pan' | 'source' = 'idle';
+  // Pointer state. Pointer events (rather than mouse events) so a finger
+  // swipe on a touch screen goes down exactly the same path as a mouse
+  // drag — which is the whole point of a "does this feel good" test rig.
+  //
+  // Drag modes, decided on pointerdown:
+  //   - pan:    middle button, or ctrl/⌘ held. Always available.
+  //   - source: placingSource is on, OR shift is held.
+  //   - swipe:  avatar mode is on (the default) — fires a projectile.
+  //   - pan:    fallback when avatar mode is off.
+  let mode: 'idle' | 'pan' | 'source' | 'swipe' = 'idle';
   let panLastX = 0;
   let panLastY = 0;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let activePointer: number | null = null;
 
-  host.addEventListener('mousedown', (e) => {
-    if (placingSource.value || e.shiftKey) {
+  /** Re-evaluate the snapped direction for the current drag vector. */
+  function updateSwipe(clientX: number, clientY: number) {
+    const dx = clientX - swipeStartX;
+    const dy = clientY - swipeStartY;
+    const past = Math.hypot(dx, dy) >= config.avatarSwipeDeadzone;
+    swipeAim.value = { dx, dy, dirIndex: past ? snapFireDir(dx, dy) : -1 };
+  }
+
+  host.addEventListener('pointerdown', (e) => {
+    // One gesture at a time: ignore extra fingers mid-drag.
+    if (activePointer !== null) return;
+    activePointer = e.pointerId;
+    host.setPointerCapture(e.pointerId);
+
+    const wantsPan = e.button === 1 || e.ctrlKey || e.metaKey;
+    if (!wantsPan && (placingSource.value || e.shiftKey)) {
       mode = 'source';
       const w = clientToWorld(host, e.clientX, e.clientY);
       // Snap source position to the centre of the picked hex.
       const cell = pixelToOffset(w.x, w.y, HEX_PIXEL_SIZE);
       const snapped = offsetToPixel(cell.col, cell.row, HEX_PIXEL_SIZE);
       sourceDrag.value = { start: snapped, end: w };
+      e.preventDefault();
+    } else if (!wantsPan && avatarMode.value) {
+      mode = 'swipe';
+      swipeStartX = e.clientX;
+      swipeStartY = e.clientY;
+      updateSwipe(e.clientX, e.clientY);
       e.preventDefault();
     } else {
       mode = 'pan';
@@ -159,7 +219,8 @@ onMounted(() => {
     }
   });
 
-  window.addEventListener('mousemove', (e) => {
+  host.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== activePointer) return;
     if (mode === 'pan') {
       camera.panBy(e.clientX - panLastX, e.clientY - panLastY);
       panLastX = e.clientX;
@@ -169,10 +230,47 @@ onMounted(() => {
         start: sourceDrag.value.start,
         end: clientToWorld(host, e.clientX, e.clientY),
       };
+    } else if (mode === 'swipe') {
+      updateSwipe(e.clientX, e.clientY);
     }
   });
 
-  window.addEventListener('mouseup', (e) => {
+  host.addEventListener('pointercancel', (e) => {
+    if (e.pointerId !== activePointer) return;
+    activePointer = null;
+    mode = 'idle';
+    sourceDrag.value = null;
+    swipeAim.value = null;
+  });
+
+  host.addEventListener('pointerup', (e) => {
+    if (e.pointerId !== activePointer) return;
+    activePointer = null;
+
+    if (mode === 'swipe') {
+      const dx = e.clientX - swipeStartX;
+      const dy = e.clientY - swipeStartY;
+      if (Math.hypot(dx, dy) >= config.avatarSwipeDeadzone) {
+        // Past the deadzone: fire along the snapped direction, from the
+        // avatar's hex centre. Swipe length sets direction only — power is
+        // fixed so the gesture stays a pure aiming control.
+        const dir = snapFireDir(dx, dy);
+        const origin = offsetToPixel(avatar.col, avatar.row, HEX_PIXEL_SIZE);
+        fireProjectile(dir, origin.x, origin.y, config.avatarShotSpeed, config.avatarShotRange);
+      } else {
+        // Tap: reposition the avatar so shots can be tried from anywhere.
+        const w = clientToWorld(host, e.clientX, e.clientY);
+        const cell = pixelToOffset(w.x, w.y, HEX_PIXEL_SIZE);
+        if (cell.col >= 0 && cell.col < world.width && cell.row >= 0 && cell.row < world.height) {
+          placeAvatar(cell.col, cell.row);
+        }
+      }
+      swipeAim.value = null;
+      mode = 'idle';
+      e.preventDefault();
+      return;
+    }
+
     if (mode === 'source' && sourceDrag.value) {
       const { start, end } = sourceDrag.value;
       const cell = pixelToOffset(start.x, start.y, HEX_PIXEL_SIZE);
@@ -268,12 +366,17 @@ watch(
   () => currentScenarioId.value,
   (id) => {
     if (airFlow) applyScenario(id, world, airFlow);
+    clearProjectiles();
   },
 );
 </script>
 
 <template>
-  <div ref="hostRef" class="host" :class="{ placing: placingSource }"></div>
+  <div
+    ref="hostRef"
+    class="host"
+    :class="{ placing: placingSource, aiming: avatarMode && !placingSource }"
+  ></div>
 </template>
 
 <style scoped>
@@ -281,8 +384,12 @@ watch(
   width: 100%;
   height: 100%;
   cursor: grab;
+  /* Pointer events only reach us if the browser doesn't claim the gesture
+     for scrolling/zooming first — required for touch swipes to work. */
+  touch-action: none;
 }
 .host:active { cursor: grabbing; }
+.host.aiming { cursor: pointer; }
 .host.placing { cursor: crosshair; }
 .host.placing:active { cursor: crosshair; }
 </style>

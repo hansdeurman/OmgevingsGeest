@@ -17,6 +17,7 @@ import {
 } from '../../airflow';
 import { NEIGHBOUR_DIRS } from '../../math/hex';
 import { SCENARIOS, currentScenarioId } from '../../scenarios';
+import { avatarMode, projectiles, clearProjectiles, FIRE_DIRS } from '../../game/avatar';
 import ParameterControl from './ParameterControl.vue';
 
 const groups = computed(() => {
@@ -211,6 +212,47 @@ async function loadSettings() {
         <p class="tip">
           Fires a one-frame impulse from the map centre along one of the six 60° hex axes.
           Watch the parcel travel: amplitude decays, density follows, a sliver disperses sideways.
+        </p>
+      </template>
+
+      <!-- Swipe-to-fire controls live in the Avatar group. -->
+      <template v-if="group === 'Avatar'">
+        <div class="srow mode">
+          <label>
+            <input type="checkbox" v-model="avatarMode" />
+            Swipe to fire
+          </label>
+          <span class="count">{{ projectiles.length }} in flight</span>
+        </div>
+        <div class="srow buttons">
+          <button
+            type="button"
+            class="ghost"
+            :disabled="!projectiles.length"
+            @click="clearProjectiles"
+          >
+            Clear shots
+          </button>
+        </div>
+        <!-- The twelve legal directions, laid out as a clock face so the
+             two families are visible: solid = straight at a neighbouring
+             hex centre, outlined = parallel to a hex edge. -->
+        <div class="dir-legend">
+          <span
+            v-for="d in FIRE_DIRS"
+            :key="d.label"
+            class="dir-chip"
+            :class="{ edge: !d.throughEdge }"
+            :title="d.throughEdge
+              ? `${d.label} — straight at the neighbouring hex (through an edge)`
+              : `${d.label} — parallel to a hex edge`"
+          >{{ d.label }}</span>
+        </div>
+        <p class="tip">
+          Drag anywhere on the map and release to fire; the swipe snaps to one of
+          twelve directions, 30° apart. Solid chips point at a neighbouring hex,
+          outlined ones run along an edge. A tap (shorter than the deadzone) moves
+          the avatar instead. Pan with middle-drag or ctrl/⌘-drag.
         </p>
       </template>
     </section>
@@ -426,6 +468,28 @@ h3 {
   margin: 8px 0;
 }
 .burst-grid button { padding: 6px 0; }
+
+.dir-legend {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin: 8px 0 0;
+}
+.dir-chip {
+  padding: 3px 0;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  border-radius: 3px;
+  background: #8fd0ff;
+  border: 1px solid #8fd0ff;
+  color: #0a0a10;
+}
+.dir-chip.edge {
+  background: transparent;
+  border-color: #ffd9a0;
+  color: #ffd9a0;
+}
 
 .srow.mode {
   justify-content: flex-start;
