@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fillPoolHoles, markFalls, paintPoolRims, paintSplash } from '../pools';
+import { fallLips, fillPoolHoles, markFalls, paintPoolRims, paintSplash, shadePoolFoot, tidyPool } from '../pools';
 import { getPixel, paintRaster } from '../raster';
 
 const W = 12;
@@ -31,18 +31,74 @@ describe('fillPoolHoles', () => {
   });
 });
 
-describe('markFalls', () => {
-  it('marks the stretch of pool nearest each outlet, however far away the outlet lies', () => {
-    for (const x of [10.5, 40.5]) {
-      const falls = markFalls(squarePool(), W, W, [{ x, y: 5.5 }], 1.5);
-      const marked = [...falls.keys()].filter((i) => falls[i]);
-      expect(falls[5 * W + 8]).toBe(1);
-      expect(marked.every((i) => i % W >= 7 && Math.abs(Math.floor(i / W) - 5) <= 1)).toBe(true);
-    }
+describe('tidyPool', () => {
+  it('drops raised specks too small to read as a lake, back to the floor', () => {
+    const pool = squarePool();
+    const heights = raise(pool);
+    pool[1 * W + 10] = 1;
+    heights[1 * W + 10] = 5;
+    tidyPool(pool, heights, W, W, 1, 4);
+    expect(pool[1 * W + 10]).toBe(0);
+    expect(heights[1 * W + 10]).toBe(0);
+    expect(pool[5 * W + 5]).toBe(1);
   });
 
-  it('marks nothing without a pool', () => {
-    expect(markFalls(new Uint8Array(W * W), W, W, [{ x: 1, y: 1 }], 2).some(Boolean)).toBe(false);
+  it('smooths a ragged edge: a one-pixel spike goes, a one-pixel notch fills at the water level', () => {
+    const pool = squarePool();
+    const heights = raise(pool);
+    pool[5 * W + 9] = 1; // spike out of the right edge
+    heights[5 * W + 9] = 5;
+    pool[3 * W + 5] = 0; // notch into the top edge
+    heights[3 * W + 5] = 0;
+    tidyPool(pool, heights, W, W, 1, 4);
+    expect(pool[5 * W + 9]).toBe(0);
+    expect(heights[5 * W + 9]).toBe(0);
+    expect(pool[3 * W + 5]).toBe(1);
+    expect(heights[3 * W + 5]).toBe(5);
+  });
+});
+
+describe('fallLips', () => {
+  it('finds the pool pixel nearest each outlet', () => {
+    expect(fallLips(squarePool(), W, [{ x: 5.5, y: 30 }])).toEqual([{ x: 5.5, y: 8.5 }]);
+  });
+
+  it('finds none without a pool', () => {
+    expect(fallLips(new Uint8Array(W * W), W, [{ x: 1, y: 1 }])).toEqual([]);
+  });
+});
+
+describe('shadePoolFoot', () => {
+  const grey = () => paintRaster(W, W, () => [100, 100, 100]);
+
+  it('darkens the ground right in front of (below) a pool, fading with distance', () => {
+    const g = grey();
+    shadePoolFoot(g, squarePool(), 3);
+    const near = getPixel(g, 5, 9)[0];
+    const far = getPixel(g, 5, 11)[0];
+    expect(near).toBeLessThan(far);
+    expect(far).toBeLessThanOrEqual(100);
+  });
+
+  it('leaves the pool, the ground behind it and the ground beside it alone', () => {
+    const g = grey();
+    shadePoolFoot(g, squarePool(), 3);
+    expect(getPixel(g, 5, 5)[0]).toBe(100);
+    expect(getPixel(g, 5, 1)[0]).toBe(100);
+    expect(getPixel(g, 0, 5)[0]).toBe(100);
+  });
+});
+
+describe('markFalls', () => {
+  it('marks the pool pixels around each lip, and nothing far from it or outside the pool', () => {
+    const falls = markFalls(squarePool(), W, W, [{ x: 8.5, y: 5.5 }], 1.5);
+    const marked = [...falls.keys()].filter((i) => falls[i]);
+    expect(falls[5 * W + 8]).toBe(1);
+    expect(marked.every((i) => inSquare(i) && i % W >= 7 && Math.abs(Math.floor(i / W) - 5) <= 1)).toBe(true);
+  });
+
+  it('marks nothing without lips', () => {
+    expect(markFalls(squarePool(), W, W, [], 2).some(Boolean)).toBe(false);
   });
 });
 

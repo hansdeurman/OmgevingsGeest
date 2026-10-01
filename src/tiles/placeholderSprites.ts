@@ -186,7 +186,17 @@ export function createPlaceholderSprites(s: number, res = 3): SpriteSet {
       blob(ctx, cw * 0.5, ch * 0.5, ch * 0.48, base);
     });
 
+  const fall = (w: number, h: number): Sprite =>
+    sprite(w * s, h * s, res, (ctx, cw, ch) => {
+      const g = ctx.createLinearGradient(0, 0, 0, ch);
+      g.addColorStop(0, '#5aa6dc');
+      g.addColorStop(1, '#e8f4ff');
+      ctx.fillStyle = g;
+      ctx.fillRect(cw * 0.2, 0, cw * 0.6, ch);
+    });
+
   return {
+    fall: [fall(0.6, 0.8)],
     peak: [mountain(1.6, 1.5, [140, 128, 116], 0.35), mountain(1.4, 1.3, [128, 120, 110], 0.25)],
     crag: [mountain(1.3, 1.2, [150, 138, 124], 0)],
     hill: [mound(1.2, 0.6, [150, 160, 110])],

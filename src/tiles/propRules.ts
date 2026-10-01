@@ -3,7 +3,7 @@ import type { MountainStyle } from './relief';
 import type { Amounts, Cover, Layer } from './levels';
 
 /** Upright sprites standing on the ground. Each kind has several variants. */
-export const PROP_KINDS = ['tree', 'bush', 'tuft', 'flower', 'reed', 'pebble', 'boulder', 'hill', 'crag', 'peak'] as const;
+export const PROP_KINDS = ['tree', 'bush', 'tuft', 'flower', 'reed', 'pebble', 'boulder', 'hill', 'crag', 'peak', 'fall'] as const;
 export type PropKind = (typeof PROP_KINDS)[number];
 
 /**

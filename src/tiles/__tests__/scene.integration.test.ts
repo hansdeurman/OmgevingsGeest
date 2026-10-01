@@ -154,4 +154,12 @@ describe('buildScene (highlands, sprite mountains)', () => {
     for (const p of peaks) expect(elevationAt(hg, p.col, p.row)).toBeGreaterThanOrEqual(6.5);
   });
 
+  it('puts one waterfall at the high lake\'s lip, on the floor and as tall as the drop', () => {
+    const falls = scene.bands.flatMap((b) => b.props).filter((p) => p.kind === 'fall');
+    expect(falls).toHaveLength(1);
+    const lake = Math.max(...lakeTiles.map((t) => t.lift));
+    expect(falls[0].height).toBeGreaterThan(lake * 0.8);
+    expect(falls[0].height).toBeLessThan(lake * 2);
+    expect(coverAt(hg, falls[0].col, falls[0].row)!.water).toBeGreaterThanOrEqual(1);
+  });
 });

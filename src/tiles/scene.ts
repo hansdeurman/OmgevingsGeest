@@ -1,7 +1,7 @@
 import type { Pixel } from '../math/hex';
 import { shade, type RGB } from '../rendering/palette';
 import { forEachCell, inGrid, type CoverGrid } from './coverGrid';
-import { offsetNeighbours } from '../math/hex';
+import { offsetNeighbours, pixelToOffset } from '../math/hex';
 import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, type IsoView } from './geometry';
 import { composeTerrain } from './groundComposer';
 import type { Cover } from './levels';
@@ -21,6 +21,8 @@ export interface SceneOptions {
   relief: ReliefOptions;
   /** Texture for steep mountain faces (seen from the front); flat colour if absent. */
   cliff?: Raster;
+  /** Painted cliff under raised water, stretched from the rim to the floor. */
+  poolFace?: Raster;
   rules?: readonly PropRule[];
 }
 
@@ -128,13 +130,33 @@ function tileDraw(grid: CoverGrid, ground: Raster, heights: Float32Array, cover:
   };
 }
 
+const bandIndex = (bands: SceneBand[], fy: number) => Math.min(bands.length - 1, Math.max(0, Math.floor(Math.floor(fy) / BAND_ROWS)));
+
+/** Share of a waterfall sprite's height from its rim down to the bottom of its splash. */
+const FALL_DROP_SHARE = 0.85;
+
+/**
+ * A waterfall sprite at each raised lake's lip, standing on the floor just in
+ * front of it and fitted to the drop, so its rim meets the water surface.
+ */
+function fallProps(lips: Pixel[], heights: Float32Array, frame: GridFrame, view: IsoView, size: number) {
+  return lips.map((lip, i) => {
+    const foot = lip.y + 0.5;
+    const iso = toIso({ x: lip.x, y: foot }, view);
+    const hex = pixelToOffset(lip.x - frame.ox, lip.y - frame.oy, size);
+    const height = heightAt(heights, frame, Math.floor(lip.x), Math.floor(lip.y)) / FALL_DROP_SHARE;
+    const prop: PropInstance = { kind: 'fall', variant: i, x: iso.x, y: iso.y, col: hex.col, row: hex.row, height };
+    return { foot, prop };
+  });
+}
+
 export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: SceneOptions): Scene {
   const { hexSize: size, seed, view } = opts;
   const frame = gridFrame(grid.cols, grid.rows, size);
   const terrain = createTerrainSampler(grid, size, opts.blend, seed);
-  const { ground, heights, rows: rowOf, falls } = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief);
+  const { ground, heights, rows: rowOf, falls, pool, lips } = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief);
   const bandOf = rowOf.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
-  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, opts.cliff, falls).map((slice) => ({ slice, props: [] }));
+  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, { wall: opts.cliff, pool: opts.poolFace, pools: pool, falls }).map((slice) => ({ slice, props: [] }));
 
   const tiles: TileDraw[] = [];
   forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
@@ -143,9 +165,9 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
     const fx = p.x + frame.ox;
     const fy = p.y + frame.oy;
     const iso = toIso({ x: fx, y: fy }, view);
-    const band = Math.min(bands.length - 1, Math.max(0, Math.floor(Math.floor(fy) / BAND_ROWS)));
-    bands[band].props.push({ ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) });
+    bands[bandIndex(bands, fy)].props.push({ ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) });
   }
+  for (const f of fallProps(lips, heights, frame, view, size)) bands[bandIndex(bands, f.foot)].props.push(f.prop);
   for (const b of bands) b.props.sort((a, c) => a.y - c.y);
 
   return { frame, view, hexSize: size, ground, heights, tiles, bands };

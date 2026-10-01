@@ -65,21 +65,117 @@ export function fillPoolHoles(pool: Uint8Array, heights: Float32Array, W: number
   }
 }
 
+/** Pool pixels within `r` of pixel (x, y) (box), and the highest of their heights. */
+function poolAround(pool: Uint8Array, heights: Float32Array, W: number, H: number, x: number, y: number, r: number) {
+  let count = 0;
+  let top = 0;
+  for (let ny = Math.max(0, y - r); ny <= Math.min(H - 1, y + r); ny++) {
+    for (let nx = Math.max(0, x - r); nx <= Math.min(W - 1, x + r); nx++) {
+      const j = ny * W + nx;
+      if (!pool[j]) continue;
+      count++;
+      top = Math.max(top, heights[j]);
+    }
+  }
+  return { count, top };
+}
+
+/** Connected pool regions (4-neighbours), as lists of pixel indices. */
+function poolRegions(pool: Uint8Array, W: number, H: number): number[][] {
+  const seen = new Uint8Array(pool.length);
+  const regions: number[][] = [];
+  pool.forEach((p, start) => {
+    if (!p || seen[start]) return;
+    const region = [start];
+    seen[start] = 1;
+    for (let q = 0; q < region.length; q++) {
+      for (const j of neighbours4(region[q], W, H)) {
+        if (pool[j] && !seen[j]) {
+          seen[j] = 1;
+          region.push(j);
+        }
+      }
+    }
+    regions.push(region);
+  });
+  return regions;
+}
+
 /**
- * Mark where each pool pours out: the pool pixels within `width` px of the
- * pool pixel nearest to each outlet point.
+ * Smooth a pool's ragged edge with a majority vote over a (2r+1)² box (new
+ * pixels take the water level around them), then drop regions smaller than
+ * `minArea` pixels back to the floor: specks and spikes would show as thin
+ * slivers of cliff.
  */
-export function markFalls(pool: Uint8Array, W: number, H: number, outlets: readonly Pixel[], width: number): Uint8Array {
+export function tidyPool(pool: Uint8Array, heights: Float32Array, W: number, H: number, r: number, minArea: number): void {
+  const half = ((2 * r + 1) ** 2) / 2;
+  const before = pool.slice();
+  const levels = heights.slice();
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      const { count, top } = poolAround(before, levels, W, H, x, y, r);
+      const keep = count > half;
+      if (keep && !before[i]) heights[i] = Math.max(heights[i], top);
+      if (!keep && before[i]) heights[i] = 0;
+      pool[i] = keep ? 1 : 0;
+    }
+  }
+  for (const region of poolRegions(pool, W, H)) {
+    if (region.length >= minArea) continue;
+    for (const i of region) {
+      pool[i] = 0;
+      heights[i] = 0;
+    }
+  }
+}
+
+const pixelCentre =(i: number, W: number): Pixel => ({ x: (i % W) + 0.5, y: Math.floor(i / W) + 0.5 });
+const poolCells = (pool: Uint8Array) => [...pool.keys()].filter((i) => pool[i]);
+
+/** Where each pool pours out: the centre of its pixel nearest to each outlet point. */
+export function fallLips(pool: Uint8Array, W: number, outlets: readonly Pixel[]): Pixel[] {
+  const cells = poolCells(pool);
+  if (!cells.length) return [];
+  const dist = (i: number, p: Pixel) => Math.hypot(pixelCentre(i, W).x - p.x, pixelCentre(i, W).y - p.y);
+  return outlets.map((p) => pixelCentre(cells.reduce((m, i) => (dist(i, p) < dist(m, p) ? i : m)), W));
+}
+
+/** The pool pixels within `width` px of each lip: they pour over as a waterfall. */
+export function markFalls(pool: Uint8Array, W: number, H: number, lips: readonly Pixel[], width: number): Uint8Array {
   const falls = new Uint8Array(W * H);
-  const centre = (i: number): Pixel => ({ x: (i % W) + 0.5, y: Math.floor(i / W) + 0.5 });
-  const dist = (i: number, p: Pixel) => Math.hypot(centre(i).x - p.x, centre(i).y - p.y);
-  const cells = [...pool.keys()].filter((i) => pool[i]);
-  if (!cells.length) return falls;
-  for (const p of outlets) {
-    const lip = centre(cells.reduce((m, i) => (dist(i, p) < dist(m, p) ? i : m)));
-    for (const i of cells) if (dist(i, lip) <= width) falls[i] = 1;
+  for (const lip of lips) {
+    for (const i of poolCells(pool)) {
+      const c = pixelCentre(i, W);
+      if (Math.hypot(c.x - lip.x, c.y - lip.y) <= width) falls[i] = 1;
+    }
   }
   return falls;
+}
+
+/** Strongest darkening of the ground at the foot of a pool's cliff. */
+const FOOT_SHADOW = 0.6;
+
+/**
+ * Shadow on the ground at the foot of a raised pool: ground pixels up to
+ * `reach` px in front of (below) a pool pixel darken, most right at the wall.
+ */
+export function shadePoolFoot(ground: Raster, pool: Uint8Array, reach: number): void {
+  const { width: W, height: H } = ground;
+  for (let x = 0; x < W; x++) {
+    let since = Infinity; // rows since the last pool pixel in this column
+    for (let y = 0; y < H; y++) {
+      const i = y * W + x;
+      if (pool[i]) {
+        since = 0;
+        continue;
+      }
+      since++;
+      if (since > reach) continue;
+      const [r, g, b, a] = getPixel(ground, x, y);
+      if (a) setPixel(ground, x, y, shade([r, g, b], 1 - (1 - FOOT_SHADOW) * smoothstep(reach + 1, 1, since)), a);
+    }
+  }
 }
 
 /**

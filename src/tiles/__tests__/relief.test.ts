@@ -51,7 +51,7 @@ describe('sprite style', () => {
     expect(waterHeight(0, SPRITES)).toBe(0);
     expect(waterHeight(5, SPRITES)).toBeGreaterThan(0);
     expect(waterHeight(7, SPRITES)).toBeGreaterThan(waterHeight(5, SPRITES));
-    expect(waterHeight(MAX_ELEVATION, SPRITES)).toBeLessThan(SPRITES.height);
+    expect(waterHeight(MAX_ELEVATION, SPRITES)).toBeLessThanOrEqual(SPRITES.height);
   });
 
   it('matches the relief functions in relief style', () => {
@@ -146,10 +146,25 @@ describe('sliceTerrain', () => {
     const falls = new Uint8Array(W * H);
     falls[(H - 1) * W + 3] = 1;
     const dry = sliceTerrain(red, heights, rows, squash)[1];
-    const wet = sliceTerrain(red, heights, rows, squash, undefined, falls)[1];
+    const wet = sliceTerrain(red, heights, rows, squash, { falls })[1];
     const y = Math.ceil(H * squash) - 1 - wet.top;
     expect(getPixel(dry.raster, 3, y)[0]).toBeGreaterThan(getPixel(dry.raster, 3, y)[2]);
     expect(getPixel(wet.raster, 3, y)[2]).toBeGreaterThan(getPixel(wet.raster, 3, y)[0]);
+  });
+
+  it('stretches the pool face over a raised pool\'s drop: its top at the rim, its bottom at the floor', () => {
+    const face = createRaster(1, 2);
+    setPixel(face, 0, 0, [250, 0, 0]);
+    setPixel(face, 0, 1, [0, 0, 250]);
+    const heights = new Float32Array(W * H);
+    const pools = new Uint8Array(W * H);
+    heights[(H - 1) * W + 3] = 4;
+    pools[(H - 1) * W + 3] = 1;
+    const front = sliceTerrain(ground, heights, rows, squash, { pool: face, pools })[1];
+    const rim = Math.floor((H - 1) * squash - 4) - front.top;
+    const floor = Math.ceil(H * squash) - 1 - front.top;
+    expect(getPixel(front.raster, 3, rim + 1)[0]).toBe(250);
+    expect(getPixel(front.raster, 3, floor)[2]).toBe(250);
   });
 
   it('extends a raised front edge down to the floor', () => {

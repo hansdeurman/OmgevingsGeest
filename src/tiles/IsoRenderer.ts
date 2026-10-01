@@ -139,8 +139,10 @@ export class IsoRenderer {
   private drawProp(ctx: CanvasRenderingContext2D, p: PropInstance): void {
     const variants = this.sprites[p.kind];
     const s = variants[p.variant % variants.length];
-    if (s.shadow) drawShadow(ctx, p, s.shadow);
-    ctx.drawImage(s.image, p.x - s.width / 2, p.y - s.height, s.width, s.height);
+    const k = p.height ? p.height / s.height : 1;
+    const [w, h] = [s.width * k, s.height * k];
+    if (s.shadow) drawShadow(ctx, p, s.shadow * k);
+    ctx.drawImage(s.image, p.x - w / 2, p.y - h, w, h);
   }
 
   private outline(ctx: CanvasRenderingContext2D, points: Pixel[]): void {

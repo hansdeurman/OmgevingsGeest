@@ -55,6 +55,12 @@ export async function loadWalls(files = WALL_FILES): Promise<WallImages> {
   return Object.fromEntries(entries);
 }
 
+/** The painted cliff under raised water; it repeats about every 2.2 hex radii and is stretched to each drop. */
+export async function loadPoolFace(hexSize: number, file = 'cliff-1.webp'): Promise<Raster> {
+  const width = Math.round(2.2 * hexSize);
+  return loadRaster(`${import.meta.env.BASE_URL}tiles/${file}`, width, Math.round(width * 0.7));
+}
+
 /** The rock wall as a raster for steep mountain faces; it repeats about every 2.6 hex radii. */
 export async function loadCliff(hexSize: number, file = WALL_FILES.rock): Promise<Raster> {
   const width = Math.round(2.6 * hexSize);

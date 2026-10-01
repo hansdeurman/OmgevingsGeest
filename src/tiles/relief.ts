@@ -44,9 +44,6 @@ export function lakeHeight(e: number, o: ReliefOptions): number {
   return o.height * curve(e) * (1 - RIDGE_AMP * 0.5 * mountainness(e));
 }
 
-/** Share of the relief height a pool at the top elevation rises to, in sprite style. */
-const POOL = 0.55;
-
 /** Height of land in the chosen style. */
 export function landHeight(e: number, ridge: number, o: ReliefOptions): number {
   return o.style === 'sprites' ? 0 : terrainHeight(e, ridge, o);
@@ -54,7 +51,7 @@ export function landHeight(e: number, ridge: number, o: ReliefOptions): number {
 
 /** Height of a water surface at elevation `e` in the chosen style. */
 export function waterHeight(e: number, o: ReliefOptions): number {
-  return o.style === 'sprites' ? o.height * POOL * curve(e) : lakeHeight(e, o);
+  return o.style === 'sprites' ? o.height * curve(e) : lakeHeight(e, o);
 }
 
 /** Sharp-crested ridge noise in [0, 1]; crests are thin, valleys broad. */
@@ -122,13 +119,24 @@ export interface Slice {
   raster: Raster;
 }
 
+/** What steep faces show: rock `wall` (tiled), a raised pool's `pool` face (stretched over the drop), or a waterfall. */
+export interface CliffFaces {
+  wall?: Raster;
+  /** Painted cliff for raised water, from its rim (top row) to the floor (bottom row). */
+  pool?: Raster;
+  /** 1 where a pixel is raised water, so its drop shows `pool`. */
+  pools?: Uint8Array;
+  /** 1 where water pours over the edge. */
+  falls?: Uint8Array;
+}
+
 /**
  * Project the top-down ground into the squashed view with heights, one
  * slice per group (`groups` assigns each ground pixel a group, -1 = off the
  * map) so the renderer can interleave props between slices.
  * Every ground pixel paints a vertical span from its raised position down to
  * where the next pixel toward the viewer starts; steep spans become cliff
- * faces textured with `wall`, or a waterfall where `falls` marks the pixel.
+ * faces (see CliffFaces).
  * Later (nearer) pixels paint over earlier ones.
  */
 export function sliceTerrain(
@@ -136,8 +144,7 @@ export function sliceTerrain(
   heights: Float32Array,
   groups: Int16Array,
   squash: number,
-  wall?: Raster,
-  falls?: Uint8Array,
+  { wall, pool, pools, falls }: CliffFaces = {},
 ): Slice[] {
   const { width: W, height: H } = ground;
   const span = (x: number, y: number): [number, number] => {
@@ -174,6 +181,7 @@ export function sliceTerrain(
       const t0 = Math.floor(t);
       const cliff = b - t > 2.5;
       const falling = falls?.[y * W + x] === 1;
+      const pooled = pools?.[y * W + x] === 1;
       const [cr, cg, cb] = getPixel(ground, x, y);
       const slice = slices[g];
       for (let py = t0; py < Math.ceil(b); py++) {
@@ -181,6 +189,8 @@ export function sliceTerrain(
         let c: RGB = [cr, cg, cb];
         if (cliff && k >= 1 && falling) {
           c = waterfallColor(x, py, k);
+        } else if (cliff && k >= 1 && pooled && pool) {
+          c = sampleRaster(pool, x, ((py - t) / (b - t)) * pool.height);
         } else if (cliff && k >= 1) {
           const snowy = cr + cg + cb > 3 * 215;
           c = shade(c, snowy ? 0.88 : 0.78);

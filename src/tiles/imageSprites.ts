@@ -14,6 +14,7 @@ export const SPRITE_COUNTS: Partial<Record<PropKind, number>> = {
   crag: 1,
   hill: 1,
   boulder: 1,
+  fall: 2,
 };
 
 /** In-game height of a kind's median variant, in hex radii. */
@@ -28,6 +29,7 @@ export const SPRITE_HEIGHTS: Record<PropKind, number> = {
   hill: 0.65,
   crag: 1.2,
   peak: 1.55,
+  fall: 0.8,
 };
 
 /** Generated art carries no shadow; the renderer adds one this wide (share of sprite width). */

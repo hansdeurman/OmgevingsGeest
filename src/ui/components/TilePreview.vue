@@ -5,7 +5,7 @@ import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
-import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadWalls } from '../../tiles/imageTextures';
+import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadPoolFace, loadWalls } from '../../tiles/imageTextures';
 import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
@@ -33,6 +33,7 @@ const placeholderSprites = createPlaceholderSprites(HEX);
 let artSprites: Partial<SpriteSet> = {};
 let artWalls: WallImages = {};
 let artCliff: Raster | undefined;
+let artPoolFace: Raster | undefined;
 const renderer = new IsoRenderer(placeholderSprites);
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
@@ -51,6 +52,7 @@ function rebuild(): void {
     view: { squash: SQUASH, thickness: THICKNESS },
     relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value },
     cliff: useArt.value ? artCliff : undefined,
+    poolFace: useArt.value ? artPoolFace : undefined,
   });
   draw();
 }
@@ -87,12 +89,13 @@ function draw(): void {
 
 onMounted(() => {
   rebuild();
-  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX)])
-    .then(([textures, sprites, walls, cliff]) => {
+  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX)])
+    .then(([textures, sprites, walls, cliff, poolFace]) => {
       art = textures;
       artSprites = sprites;
       artWalls = walls;
       artCliff = cliff;
+      artPoolFace = poolFace;
       rebuild();
     })
     .catch((e) => console.error('Tile art failed to load', e));

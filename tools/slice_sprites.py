@@ -18,7 +18,9 @@ from scipy import ndimage
 MAX_SIDE = 256          # largest sprite of a sheet; others keep their relative size
 SEPARATOR_RUN = 80      # white runs at least this long are cell separators
 KEY_SOFT = (50, 130)    # colour distance from magenta: fully clear .. fully opaque
-SPILL_EDGE = 10         # pixels from the edge in which magenta spill is removed
+SPILL_EDGE = 10
+LINE_SHARE = 0.6        # fallback: a row/column this white is a separator line
+LINE_PAD = 3            # pixels trimmed next to a separator line         # pixels from the edge in which magenta spill is removed
 
 
 def separator_mask(rgb: np.ndarray) -> np.ndarray:
@@ -35,6 +37,18 @@ def cells(rgb: np.ndarray, rows: int) -> list:
     found = [s for s in ndimage.find_objects(labels) if s and (s[0].stop - s[0].start) * (s[1].stop - s[1].start) > 0.01 * h * w]
     centre = lambda s: ((s[0].start + s[0].stop) / 2, (s[1].start + s[1].stop) / 2)
     return sorted(found, key=lambda s: (int(centre(s)[0] * rows / h), centre(s)[1]))
+
+
+def line_cells(rgb: np.ndarray) -> list:
+    """Fallback for objects touching the separators: cut along rows and columns that are mostly white."""
+    white = rgb.min(axis=2) > 200
+
+    def spans(share: np.ndarray) -> list:
+        inside = share < LINE_SHARE
+        edges = np.flatnonzero(np.diff(np.r_[0, inside.astype(int), 0]))
+        return [slice(a + LINE_PAD, b - LINE_PAD) for a, b in zip(edges[::2], edges[1::2]) if b - a > 4 * LINE_PAD]
+
+    return [(r, c) for r in spans(white.mean(axis=1)) for c in spans(white.mean(axis=0))]
 
 
 def local_key(cell: np.ndarray, key: np.ndarray) -> np.ndarray:
@@ -78,6 +92,8 @@ def crop_to_content(rgba: np.ndarray, pad: int = 2) -> np.ndarray:
 def main(sheet: str, out_dir: str, rows: int, names: list) -> None:
     rgb = np.asarray(Image.open(sheet).convert('RGB')).astype(float)
     found = cells(rgb, rows)
+    if len(found) != len(names):
+        found = line_cells(rgb)
     if len(found) != len(names):
         sys.exit(f'{sheet}: found {len(found)} cells but got {len(names)} names')
     sprites = {n: Image.fromarray(crop_to_content(despill(key_out(rgb[s]))), 'RGBA') for s, n in zip(found, names) if n != '-'}

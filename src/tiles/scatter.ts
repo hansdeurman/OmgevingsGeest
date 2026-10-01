@@ -14,6 +14,8 @@ export interface PropInstance {
   /** The hex it stands on. */
   col: number;
   row: number;
+  /** Drawn height in scene pixels, overriding the sprite's own (e.g. a waterfall fitted to its drop). */
+  height?: number;
 }
 
 const CANDIDATES = 40;

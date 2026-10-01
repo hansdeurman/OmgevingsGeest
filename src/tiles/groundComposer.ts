@@ -9,7 +9,7 @@ import type { GroundTextures } from './placeholderTextures';
 import { createRaster, sampleVariants, setPixel, type Raster } from './raster';
 import type { Pixel } from '../math/hex';
 import { lakeOutlets } from './hydrology';
-import { fillPoolHoles, markFalls, paintPoolRims, paintSplash } from './pools';
+import { fallLips, fillPoolHoles, markFalls, paintPoolRims, paintSplash, shadePoolFoot, tidyPool } from './pools';
 import {
   MOUNTAIN_FROM,
   RELIEF_BLEND,
@@ -37,6 +37,10 @@ export interface Terrain {
   rows: Int16Array;
   /** 1 where water pours over a lake's outlet edge: its drop is drawn as a waterfall. */
   falls: Uint8Array;
+  /** 1 where the ground is raised water (a high lake). */
+  pool: Uint8Array;
+  /** Per raised lake, the pool pixel it pours out over (frame pixels). */
+  lips: Pixel[];
 }
 
 /** Width of the waterfall along a pool's rim, in hex radii. */
@@ -45,6 +49,11 @@ const FALL_WIDTH = 0.5;
 const RIM_WIDTH = 0.06;
 /** Reach of the foam at a waterfall's foot, in hex radii. */
 const SPLASH_RADIUS = 0.3;
+/** Radius of the smoothing of a raised lake's edge, and the side of the smallest lake kept, in hex radii. */
+const POOL_SMOOTH = 0.08;
+const POOL_MIN = 0.5;
+/** Depth of the shadow on the ground in front of a raised lake, in hex radii. */
+const FOOT_SHADOW = 0.25;
 
 /**
  * Where each raised lake pours out: the midpoint of the edge between its
@@ -126,8 +135,11 @@ export function composeTerrain(
     }
   }
   fillPoolHoles(pool, heights, W, H);
+  // Relief land has its own height under a pool's edge; flat sprite land would show ragged slivers of cliff.
+  if (relief.style === 'sprites') tidyPool(pool, heights, W, H, Math.max(1, Math.round(size * POOL_SMOOTH)), (size * POOL_MIN) ** 2);
   const outlets = outletPoints(grid, size).map((p) => ({ x: p.x + frame.ox, y: p.y + frame.oy }));
-  const falls = markFalls(pool, W, H, outlets, FALL_WIDTH * size);
+  const lips = fallLips(pool, W, outlets);
+  const falls = markFalls(pool, W, H, lips, FALL_WIDTH * size);
   if (relief.style !== 'sprites') {
     // Sprite style keeps land flat and pool edges crisp: nothing to smooth or shade.
     blurHeights(heights, W, H, Math.max(1, Math.round(size * 0.08)));
@@ -135,5 +147,6 @@ export function composeTerrain(
   }
   paintPoolRims(ground, heights, pool, falls, Math.max(1, Math.round(size * RIM_WIDTH)));
   paintSplash(ground, pool, falls, Math.round(size * SPLASH_RADIUS));
-  return { ground, heights, rows, falls };
+  shadePoolFoot(ground, pool, Math.round(size * FOOT_SHADOW));
+  return { ground, heights, rows, falls, pool, lips };
 }
