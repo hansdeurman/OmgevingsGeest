@@ -3,7 +3,8 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { DEMO_MAPS, demoMap, type MapLabel } from '../../tiles/demoMaps';
 import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform } from '../../tiles/IsoRenderer';
-import { createPlaceholderSprites } from '../../tiles/placeholderSprites';
+import { loadSprites } from '../../tiles/imageSprites';
+import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
 import { TEXTURE_FILES, loadGroundTextures } from '../../tiles/imageTextures';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, type Scene } from '../../tiles/scene';
@@ -21,7 +22,9 @@ const useArt = ref(true);
 
 const placeholders = createPlaceholderTextures(128);
 let art: Partial<GroundTextures> = {};
-const renderer = new IsoRenderer(createPlaceholderSprites(HEX));
+const placeholderSprites = createPlaceholderSprites(HEX);
+let artSprites: Partial<SpriteSet> = {};
+const renderer = new IsoRenderer(placeholderSprites);
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
 let resizeObs: ResizeObserver | null = null;
@@ -30,6 +33,7 @@ function rebuild(): void {
   const map = demoMap(mapId.value, seed.value);
   labels = map.labels;
   const textures = useArt.value ? { ...placeholders, ...art } : placeholders;
+  renderer.sprites = useArt.value ? { ...placeholderSprites, ...artSprites } : placeholderSprites;
   scene = buildScene(map.grid, textures, { hexSize: HEX, seed: seed.value, blend: blend.value, view: VIEW });
   draw();
 }
@@ -66,9 +70,10 @@ function draw(): void {
 
 onMounted(() => {
   rebuild();
-  loadGroundTextures(TEXTURE_FILES)
-    .then((loaded) => {
-      art = loaded;
+  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX)])
+    .then(([textures, sprites]) => {
+      art = textures;
+      artSprites = sprites;
       rebuild();
     })
     .catch((e) => console.error('Tile art failed to load', e));

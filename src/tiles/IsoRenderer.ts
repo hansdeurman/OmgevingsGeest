@@ -38,12 +38,20 @@ function fillPolygon(ctx: CanvasRenderingContext2D, points: Pixel[], color: stri
   ctx.stroke(); // hides hairline gaps between neighbouring faces
 }
 
+/** Soft contact shadow, nudged right and down because light comes from the top-left. */
+function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number): void {
+  ctx.fillStyle = 'rgba(30, 40, 20, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(foot.x + radius * 0.2, foot.y, radius, radius * 0.38, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /** Draws a Scene: slab sides, squashed ground, then sprites back to front. */
 export class IsoRenderer {
   private readonly groundCanvas = document.createElement('canvas');
   private groundOf: Raster | null = null;
 
-  constructor(private readonly sprites: SpriteSet) {}
+  constructor(public sprites: SpriteSet) {}
 
   draw(ctx: CanvasRenderingContext2D, scene: Scene, t: ViewTransform, opts: { grid?: boolean } = {}): void {
     ctx.save();
@@ -56,6 +64,7 @@ export class IsoRenderer {
     for (const p of scene.props) {
       const variants = this.sprites[p.kind];
       const s = variants[p.variant % variants.length];
+      if (s.shadow) drawShadow(ctx, p, s.shadow);
       ctx.drawImage(s.image, p.x - s.width / 2, p.y - s.height, s.width, s.height);
     }
     ctx.restore();

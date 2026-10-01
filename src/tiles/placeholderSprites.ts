@@ -6,6 +6,8 @@ export interface Sprite {
   image: CanvasImageSource;
   width: number;
   height: number;
+  /** Radius of a contact shadow the renderer draws under the foot; omit if the art has its own. */
+  shadow?: number;
 }
 
 /** Sprite variants per prop kind. Real art can replace this record one kind at a time. */
