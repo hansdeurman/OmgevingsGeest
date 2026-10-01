@@ -126,9 +126,10 @@ function highlands(seed: number): DemoMap {
       const angle = Math.atan2(dy, dx);
       const off = Math.atan2(Math.sin(angle - notch), Math.cos(angle - notch)); // angular distance to the notch
       const notchDip = Math.exp(-(off * off) / 0.12);
-      const backBoost = Math.max(0, -Math.sin(angle)) * 1.5;
-      const ring = Math.exp(-(((d - RING) / 0.14) ** 2)) * (3.6 + backBoost - 2.4 * notchDip);
-      const floor = d < RING ? 4.2 : Math.min(3.2, (land - 0.3) * 6);
+      const backBoost = Math.max(0, -Math.sin(angle)) * 1.2;
+      const ring = Math.exp(-(((d - RING) / 0.14) ** 2)) * (2.8 + backBoost - 2.2 * notchDip);
+      const lowland = Math.min(3.2, (land - 0.3) * 6);
+      const floor = lowland + (5 - lowland) * smoothstep(RING + 0.14, RING - 0.04, d); // the basin is a raised plateau
       const e = clamp(floor + ring + (noise(5, nx * 4, ny * 4) - 0.5) * 1.2, 0, MAX_ELEVATION);
       elevation.push(e);
       cover.push({

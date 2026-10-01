@@ -73,7 +73,7 @@ describe('highlands', () => {
       });
       expect(Math.min(...rim)).toBeGreaterThanOrEqual(surface - 1e-6);
       expect(Math.min(...rim)).toBeLessThan(surface + 0.75);
-      expect(Math.max(...rim)).toBeGreaterThan(surface + 1.5);
+      expect(Math.max(...rim)).toBeGreaterThan(surface + 0.75);
     });
 
     it(`keeps forests below the tree line (seed ${seed})`, () => {

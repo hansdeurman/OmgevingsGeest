@@ -1,19 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_ELEVATION } from '../levels';
-import { MOUNTAIN_FROM, lakeHeight, shadeSlopes, sliceTerrain, terrainHeight, type Slice } from '../relief';
+import { MOUNTAIN_FROM, blurHeights, lakeHeight, shadeSlopes, sliceTerrain, terrainHeight, type Slice } from '../relief';
 import { getPixel, paintRaster, setPixel, createRaster, type Raster } from '../raster';
 
-const OPTS = { mountain: 100, hill: 2 };
+const OPTS = { height: 40 };
 
 describe('terrainHeight', () => {
   it('keeps the floor almost flat below the mountains', () => {
     expect(terrainHeight(0, 0.5, OPTS)).toBe(0);
-    expect(terrainHeight(2, 0.5, OPTS)).toBe(4);
-    expect(terrainHeight(MOUNTAIN_FROM - 1, 1, OPTS)).toBeLessThan(10);
+    expect(terrainHeight(2, 0.5, OPTS)).toBeLessThanOrEqual(0.15 * OPTS.height);
+    expect(terrainHeight(MOUNTAIN_FROM - 1, 1, OPTS)).toBeLessThanOrEqual(0.25 * OPTS.height);
   });
 
-  it('rises steeply once the land becomes mountain', () => {
-    expect(terrainHeight(MAX_ELEVATION, 0.5, OPTS)).toBeGreaterThan(80);
+  it('reaches the full relief height at the highest elevation, and never far beyond it', () => {
+    expect(terrainHeight(MAX_ELEVATION, 0.5, OPTS)).toBeCloseTo(OPTS.height, 6);
+    expect(terrainHeight(MAX_ELEVATION, 1, OPTS)).toBeLessThanOrEqual(1.2 * OPTS.height);
     let prev = -1;
     for (let e = 0; e <= MAX_ELEVATION; e += 0.5) {
       const h = terrainHeight(e, 0.5, OPTS);
@@ -26,6 +27,24 @@ describe('terrainHeight', () => {
     for (let e = 0; e <= MAX_ELEVATION; e++) {
       for (const ridge of [0, 0.5, 1]) expect(lakeHeight(e, OPTS)).toBeLessThanOrEqual(terrainHeight(e, ridge, OPTS));
     }
+  });
+});
+
+describe('blurHeights', () => {
+  const W = 20;
+  it('leaves an even surface untouched', () => {
+    const h = new Float32Array(W * W).fill(7);
+    blurHeights(h, W, W, 3);
+    expect(h.every((v) => Math.abs(v - 7) < 1e-5)).toBe(true);
+  });
+
+  it('turns a sudden step into a gentle ramp', () => {
+    const h = Float32Array.from({ length: W * W }, (_, i) => (i % W < W / 2 ? 0 : 1));
+    blurHeights(h, W, W, 3);
+    const row = Array.from({ length: W }, (_, x) => h[10 * W + x]);
+    for (let x = 1; x < W; x++) expect(row[x] - row[x - 1]).toBeLessThan(0.3);
+    expect(row[0]).toBeCloseTo(0, 6);
+    expect(row[W - 1]).toBeCloseTo(1, 6);
   });
 });
 
@@ -74,7 +93,7 @@ describe('sliceTerrain', () => {
 
   it('lays flat ground out at its squashed position, one slice per hex row', () => {
     const slices = sliceTerrain(ground, new Float32Array(W * H), rows, squash);
-    expect(slices.map((s) => s.row)).toEqual([0, 1]);
+    expect(slices.map((s) => s.index)).toEqual([0, 1]);
     const img = composite(slices, H * squash);
     expect(getPixel(img, 2, 4)[0]).toBe(180); // the front-most ground row covering screen row 4
     expect(getPixel(img, 2, 0)[3]).toBe(255);

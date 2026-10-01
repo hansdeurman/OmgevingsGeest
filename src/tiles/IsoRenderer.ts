@@ -21,11 +21,11 @@ const PROP_HEADROOM = 1.2;
 const LIP = 2.5;
 /** A wall texture repeats horizontally about every this many hex radii. */
 const WALL_REPEAT = 2.6;
-/** Darkening per face, [lower-left, lower-right]: light comes from the top-left. */
-const FACE_SHADE = [0.1, 0.32];
+/** Darkening per face: light comes from the top-left. */
+const FACE_SHADE = { left: 0.1, right: 0.32 } as const;
 
 export function fitTransform(scene: Scene, width: number, height: number, margin = 24): ViewTransform {
-  const top = Math.min(0, ...scene.rows.map((r) => r.slice.top)) - scene.hexSize * PROP_HEADROOM;
+  const top = Math.min(0, ...scene.bands.map((b) => b.slice.top)) - scene.hexSize * PROP_HEADROOM;
   const w = scene.frame.width;
   const h = scene.frame.height * scene.view.squash + scene.view.thickness - top;
   const scale = Math.min((width - 2 * margin) / w, (height - 2 * margin) / h);
@@ -62,9 +62,9 @@ function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number):
 }
 
 /**
- * Draws a Scene row by row, back to front: the slab faces at the map's edge,
- * the row's terrain slice (relief included), then the row's sprites. Nearer
- * terrain is drawn later and so hides what lies behind it.
+ * Draws a Scene: the slab faces under the map first, then band by band, back
+ * to front, each band's terrain slice followed by the props standing in it.
+ * Nearer terrain is drawn later and so hides what lies behind it.
  */
 export class IsoRenderer {
   private readonly slices = new WeakMap<Scene, HTMLCanvasElement[]>();
@@ -82,19 +82,21 @@ export class IsoRenderer {
     ctx.scale(t.scale, t.scale);
     ctx.lineWidth = 0.6;
     ctx.imageSmoothingQuality = 'high';
-    scene.rows.forEach((row, r) => {
-      for (const tile of row.tiles) tile.faces.forEach((face, i) => this.drawFace(ctx, scene.hexSize, face, FACE_SHADE[i]));
-      ctx.drawImage(slices[r], 0, row.slice.top);
-      if (opts.grid) for (const tile of row.tiles) this.outline(ctx, tile.top);
-      for (const p of row.props) this.drawProp(ctx, p);
+    for (const tile of scene.tiles) {
+      for (const face of tile.faces) this.drawFace(ctx, scene.hexSize, face, FACE_SHADE[face.side]);
+    }
+    scene.bands.forEach((band, b) => {
+      ctx.drawImage(slices[b], 0, band.slice.top);
+      for (const p of band.props) this.drawProp(ctx, p);
     });
+    if (opts.grid) for (const tile of scene.tiles) this.outline(ctx, tile.top);
     ctx.restore();
   }
 
   private sliceCanvases(scene: Scene): HTMLCanvasElement[] {
     let canvases = this.slices.get(scene);
     if (!canvases) {
-      canvases = scene.rows.map((r) => rasterCanvas(r.slice.raster));
+      canvases = scene.bands.map((b) => rasterCanvas(b.slice.raster));
       this.slices.set(scene, canvases);
     }
     return canvases;

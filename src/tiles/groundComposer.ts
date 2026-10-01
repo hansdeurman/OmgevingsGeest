@@ -7,12 +7,14 @@ import { shadeGround } from './groundShader';
 import { MAX_ELEVATION, zeroAmounts } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { createRaster, sampleVariants, setPixel, type Raster } from './raster';
-import { MOUNTAIN_FROM, RELIEF_BLEND, lakeHeight, ridgeNoise, shadeSlopes, terrainHeight, type ReliefOptions } from './relief';
+import { MOUNTAIN_FROM, RELIEF_BLEND, blurHeights, lakeHeight, ridgeNoise, shadeSlopes, terrainHeight, type ReliefOptions } from './relief';
 
 /** Size of the patches in which one texture variant dominates, in hex radii. */
 const VARIANT_PATCH = 2.5;
 /** Water amount above which a point shows open water (matches the shader's waterline). */
 const OPEN_WATER = 0.4;
+/** Relief is shallow (one hex row at most), so slopes are lit a bit more strongly than real. */
+const SLOPE_SHADING = 1.8;
 
 /** The map's ground as seen from above, plus what the 3D view needs per pixel. */
 export interface Terrain {
@@ -82,6 +84,7 @@ export function composeTerrain(
           : terrainHeight(e, e > MOUNTAIN_FROM - 0.5 ? ridgeNoise(lx, ly, size, seed) : 0.5, relief);
     }
   }
-  shadeSlopes(ground, heights);
+  blurHeights(heights, W, H, Math.max(1, Math.round(size * 0.08)));
+  shadeSlopes(ground, heights, SLOPE_SHADING);
   return { ground, heights, rows };
 }

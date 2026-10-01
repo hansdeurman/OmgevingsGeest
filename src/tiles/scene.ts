@@ -1,6 +1,7 @@
 import type { Pixel } from '../math/hex';
 import { shade, type RGB } from '../rendering/palette';
-import { forEachCell, type CoverGrid } from './coverGrid';
+import { forEachCell, inGrid, type CoverGrid } from './coverGrid';
+import { offsetNeighbours } from '../math/hex';
 import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, type IsoView } from './geometry';
 import { composeTerrain } from './groundComposer';
 import type { Cover } from './levels';
@@ -30,6 +31,7 @@ export type WallKind = 'none' | 'earth' | 'rock';
 export const ROCK_WALL_FROM = 4;
 
 export interface SideFace {
+  side: 'left' | 'right';
   points: Pixel[];
   /** Colour of the ground at the top edge: the lip, and the fallback fill. */
   color: RGB;
@@ -44,22 +46,26 @@ export interface TileDraw {
   lift: number;
   /** Outline at the centre's height, in iso pixels. */
   top: Pixel[];
-  /** The slab's front faces under the floor; only the map's front edge shows them. */
+  /** Slab faces under the floor, only where no hex in front covers them (the map's front edge). */
   faces: SideFace[];
 }
 
-export interface SceneRow {
-  tiles: TileDraw[];
-  /** This row's terrain, already projected with relief. */
+/** Ground pixel rows per drawing band: props are ordered against the terrain at this depth resolution. */
+export const BAND_ROWS = 6;
+
+/** A thin horizontal strip of the map, drawn back to front. */
+export interface SceneBand {
+  /** The strip's terrain, already projected with relief. */
   slice: Slice;
-  /** Props standing on this row, iso pixels (bottom-centre anchor), back to front. */
+  /** Props whose foot lies in this strip, iso pixels (bottom-centre anchor), back to front. */
   props: PropInstance[];
 }
 
 /**
- * Everything needed to draw a map. Rows go back to front: the renderer draws
- * a row's slab faces, its terrain slice, then its props, so nearer terrain and
- * mountains hide what lies behind them. Pure data, testable without a canvas.
+ * Everything needed to draw a map: the slab faces under the map, then bands
+ * back to front, each its terrain followed by the props standing in it, so
+ * nearer slopes hide what lies behind them and trees stand on their hill.
+ * Pure data, testable without a canvas.
  */
 export interface Scene {
   frame: GridFrame;
@@ -69,8 +75,13 @@ export interface Scene {
   ground: Raster;
   /** Height above the floor per ground pixel, in screen pixels. */
   heights: Float32Array;
-  rows: SceneRow[];
+  /** Per hex, row-major. */
+  tiles: TileDraw[];
+  bands: SceneBand[];
 }
+
+export const tileAt = (scene: Scene, col: number, row: number): TileDraw | undefined =>
+  scene.tiles.find((t) => t.col === col && t.row === row);
 
 function wallKind(cover: Cover, elevation: number): WallKind {
   if (elevation === 0 && cover.water >= 2) return 'none';
@@ -92,7 +103,13 @@ function heightAt(heights: Float32Array, frame: GridFrame, x: number, y: number)
   return heights[py * frame.width + px];
 }
 
-function tileDraw(ground: Raster, heights: Float32Array, cover: Cover, col: number, row: number, elevation: number, opts: SceneOptions, frame: GridFrame): TileDraw {
+/** Whether the neighbour in front of a lower edge (SW = 4, SE = 5 in offsetNeighbours order) is missing. */
+function exposed(grid: CoverGrid, col: number, row: number, dir: 4 | 5): boolean {
+  const d = offsetNeighbours(row)[dir];
+  return !inGrid(grid, col + d.dc, row + d.dr);
+}
+
+function tileDraw(grid: CoverGrid, ground: Raster, heights: Float32Array, cover: Cover, col: number, row: number, elevation: number, opts: SceneOptions, frame: GridFrame): TileDraw {
   const { hexSize: size, view } = opts;
   const centre = frameCentre(col, row, size, frame);
   const lift = heightAt(heights, frame, centre.x, centre.y);
@@ -105,8 +122,8 @@ function tileDraw(ground: Raster, heights: Float32Array, cover: Cover, col: numb
     lift,
     top: isoTop(centre, size, view, lift),
     faces: [
-      { points: left, color: lipColour(ground, centre, size, -0.4, 0.78), wall },
-      { points: right, color: lipColour(ground, centre, size, 0.4, 0.6), wall },
+      ...(exposed(grid, col, row, 4) ? [{ side: 'left' as const, points: left, color: lipColour(ground, centre, size, -0.4, 0.78), wall }] : []),
+      ...(exposed(grid, col, row, 5) ? [{ side: 'right' as const, points: right, color: lipColour(ground, centre, size, 0.4, 0.6), wall }] : []),
     ],
   };
 }
@@ -116,20 +133,20 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const frame = gridFrame(grid.cols, grid.rows, size);
   const terrain = createTerrainSampler(grid, size, opts.blend, seed);
   const { ground, heights, rows: rowOf } = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief);
-  const slices = sliceTerrain(ground, heights, rowOf, view.squash, opts.cliff);
+  const bandOf = rowOf.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
+  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, opts.cliff).map((slice) => ({ slice, props: [] }));
 
-  const rows: SceneRow[] = slices.map((slice) => ({ tiles: [], slice, props: [] }));
-  forEachCell(grid, (cover, col, row, elevation) =>
-    rows[row].tiles.push(tileDraw(ground, heights, cover, col, row, elevation, opts, frame)),
-  );
+  const tiles: TileDraw[] = [];
+  forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
 
   for (const p of scatterProps(grid, terrain, opts.rules ?? PROP_RULES, size, seed)) {
     const fx = p.x + frame.ox;
     const fy = p.y + frame.oy;
     const iso = toIso({ x: fx, y: fy }, view);
-    rows[p.row].props.push({ ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) });
+    const band = Math.min(bands.length - 1, Math.max(0, Math.floor(Math.floor(fy) / BAND_ROWS)));
+    bands[band].props.push({ ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) });
   }
-  for (const r of rows) r.props.sort((a, b) => a.y - b.y);
+  for (const b of bands) b.props.sort((a, c) => a.y - c.y);
 
-  return { frame, view, hexSize: size, ground, heights, rows };
+  return { frame, view, hexSize: size, ground, heights, tiles, bands };
 }

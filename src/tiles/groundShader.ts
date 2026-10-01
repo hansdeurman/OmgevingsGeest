@@ -20,7 +20,7 @@ const WATERLINE = 0.43;
 
 /** Altitude band over which ground turns to bare rock, and then to snow. */
 export const ROCK_LINE = [0.45, 0.6] as const;
-export const SNOW_LINE = [0.78, 0.9] as const;
+export const SNOW_LINE = [0.88, 0.97] as const;
 /** Lower band where ground without grass is rock instead of sand: beaches stay near the sea. */
 export const BARE_ROCK_LINE = [0.22, 0.36] as const;
 

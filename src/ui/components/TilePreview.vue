@@ -8,7 +8,7 @@ import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholde
 import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadWalls } from '../../tiles/imageTextures';
 import type { Raster } from '../../tiles/raster';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
-import { buildScene, type Scene } from '../../tiles/scene';
+import { buildScene, tileAt, type Scene } from '../../tiles/scene';
 
 const HEX = 40;
 const SQUASH = 0.65;
@@ -21,9 +21,9 @@ const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
 const useArt = ref(true);
-/** Height of the highest mountains, in pixels. */
-const mountain = ref(90);
-const HILL = 2;
+/** Height of the highest ground, as a percentage of one hex row's offset. */
+const relief = ref(100);
+const HEX_ROW = 1.5 * HEX * SQUASH;
 
 const placeholders = createPlaceholderTextures(128);
 let art: Partial<GroundTextures> = {};
@@ -47,7 +47,7 @@ function rebuild(): void {
     seed: seed.value,
     blend: blend.value,
     view: { squash: SQUASH, thickness: THICKNESS },
-    relief: { mountain: mountain.value, hill: HILL },
+    relief: { height: (relief.value / 100) * HEX_ROW },
     cliff: useArt.value ? artCliff : undefined,
   });
   draw();
@@ -61,7 +61,7 @@ function drawLabels(ctx: CanvasRenderingContext2D, s: Scene, t: ViewTransform): 
   ctx.fillStyle = '#fff';
   for (const l of labels) {
     const c = frameCentre(l.col, l.row, HEX, s.frame);
-    const p = projectToScreen(s, t, { x: c.x, y: c.y - HEX * 1.05 }, s.rows[l.row].tiles[l.col].lift);
+    const p = projectToScreen(s, t, { x: c.x, y: c.y - HEX * 1.05 }, tileAt(s, l.col, l.row)?.lift ?? 0);
     ctx.strokeText(l.text, p.x, p.y);
     ctx.fillText(l.text, p.x, p.y);
   }
@@ -99,7 +99,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => resizeObs?.disconnect());
 
-watch([mapId, seed, blend, useArt, mountain], rebuild);
+watch([mapId, seed, blend, useArt, relief], rebuild);
 watch(showGrid, draw);
 </script>
 
@@ -123,8 +123,8 @@ watch(showGrid, draw);
         <input v-model.number="blend" type="range" min="0.3" max="1" step="0.05" />
       </label>
       <label>
-        Mountain height {{ mountain }}px
-        <input v-model.lazy.number="mountain" type="range" min="0" max="180" step="10" />
+        Relief {{ relief }}%
+        <input v-model.lazy.number="relief" type="range" min="0" max="150" step="10" />
       </label>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
       <label class="check"><input v-model="useArt" type="checkbox" /> Generated art</label>
