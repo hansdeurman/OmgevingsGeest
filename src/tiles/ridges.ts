@@ -1,8 +1,9 @@
-import { offsetNeighbours, offsetToPixel } from '../math/hex';
+import { offsetNeighbours, offsetToPixel, type Pixel } from '../math/hex';
 import { hash2 } from '../math/noise';
 import type { CoverGrid } from './coverGrid';
 import type { PropKind } from './propRules';
 import type { PropInstance } from './scatter';
+import { TARN_FROM } from './tarns';
 
 /**
  * Mountains as chains: a mountain sprite on every high, dry cell, and one on
@@ -19,32 +20,47 @@ const JITTER = 0.12;
 
 const kindFor = (e: number): PropKind => (e < 5.5 ? 'hill' : e < 6.5 ? 'crag' : 'peak');
 
-/** Ridge sprites in grid-local pixels; `blocked` cells (rivers) stay free. */
+/** How far a mountain beside a high lake stands toward it: close enough to lean on the rim, not over the water. */
+const LEAN = 0.4;
+
+/**
+ * Ridge sprites in grid-local pixels: one per high dry (or damp) cell, one on
+ * every edge between two of them, one in the middle of every three of them
+ * (so no bare floor shows between peaks), and one leaning against every high
+ * lake beside them, so the lake sits in the range instead of in a valley.
+ * `blocked` cells (rivers) stay free.
+ */
 export function ridgeProps(grid: CoverGrid, size: number, seed: number, blocked: ReadonlySet<number> = new Set()): PropInstance[] {
   const { cols, rows } = grid;
-  const high = (c: number, r: number) => {
-    if (c < 0 || r < 0 || c >= cols || r >= rows) return false;
-    const i = r * cols + c;
-    return grid.elevation[i] >= RIDGE_FROM && grid.cells[i].water === 0 && !blocked.has(i);
-  };
+  const index = (c: number, r: number) => (c < 0 || r < 0 || c >= cols || r >= rows ? -1 : r * cols + c);
+  const isHigh = (i: number) => i >= 0 && grid.elevation[i] >= RIDGE_FROM;
+  const mountain = (i: number) => isHigh(i) && grid.cells[i].water <= 1 && !blocked.has(i);
+  const lake = (i: number) => i >= 0 && grid.elevation[i] >= TARN_FROM && grid.cells[i].water >= 2;
+  const neighbours = (i: number) => offsetNeighbours(Math.floor(i / cols)).map((d) => index((i % cols) + d.dc, Math.floor(i / cols) + d.dr));
+  const centre = (i: number) => offsetToPixel(i % cols, Math.floor(i / cols), size);
+  const e = (...cells: number[]) => Math.min(...cells.map((i) => grid.elevation[i]));
+
   const props: PropInstance[] = [];
-  const place = (kind: PropKind, x: number, y: number, col: number, row: number, a: number, b: number) => {
+  const place = (kind: PropKind, p: Pixel, owner: number, a: number, b: number) => {
     const jx = (hash2(a, b, seed) - 0.5) * 2 * JITTER * size;
     const jy = (hash2(b, a, seed) - 0.5) * 2 * JITTER * size;
-    props.push({ kind, variant: Math.floor(hash2(a, b, seed + 1) * 1000), x: x + jx, y: y + jy, col, row });
+    props.push({ kind, variant: Math.floor(hash2(a, b, seed + 1) * 1000), x: p.x + jx, y: p.y + jy, col: owner % cols, row: Math.floor(owner / cols) });
   };
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (!high(c, r)) continue;
-      const i = r * cols + c;
-      const p = offsetToPixel(c, r, size);
-      place(kindFor(grid.elevation[i]), p.x, p.y, c, r, i, i);
-      for (const d of offsetNeighbours(r)) {
-        const [nc, nr] = [c + d.dc, r + d.dr];
-        const j = nr * cols + nc;
-        if (j <= i || !high(nc, nr)) continue; // each link once
-        const q = offsetToPixel(nc, nr, size);
-        place(kindFor(Math.min(grid.elevation[i], grid.elevation[j])), (p.x + q.x) / 2, (p.y + q.y) / 2, c, r, i, j);
+  for (let i = 0; i < cols * rows; i++) {
+    if (!mountain(i)) continue;
+    const p = centre(i);
+    const around = neighbours(i);
+    place(kindFor(e(i)), p, i, i, i);
+    for (const j of around) {
+      const q = j >= 0 ? centre(j) : p;
+      if (j > i && mountain(j)) place(kindFor(e(i, j)), { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, i, i, j); // each link once
+      if (lake(j)) place(kindFor(e(i) - 1), { x: p.x + (q.x - p.x) * LEAN, y: p.y + (q.y - p.y) * LEAN }, i, i, j + cols * rows);
+    }
+    for (const j of around) {
+      for (const k of around) {
+        if (!(i < j && j < k && mountain(j) && mountain(k) && neighbours(j).includes(k))) continue; // each triangle once
+        const [q, r] = [centre(j), centre(k)];
+        place(kindFor(e(i, j, k)), { x: (p.x + q.x + r.x) / 3, y: (p.y + q.y + r.y) / 3 }, i, j, k);
       }
     }
   }

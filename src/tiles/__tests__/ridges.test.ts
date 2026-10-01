@@ -4,9 +4,12 @@ import { createCoverGrid } from '../coverGrid';
 import { ridgeProps } from '../ridges';
 
 const SIZE = 10;
-/** One row of cells with these elevations; 'w' marks a wet cell at elevation 7. */
-const row = (...cells: (number | 'w')[]) =>
-  createCoverGrid(cells.length, 1, (col) => (cells[col] === 'w' ? { water: 1, elevation: 7 } : { elevation: cells[col] as number }));
+/** One row of cells with these elevations; 'd' marks a damp cell and 'L' a lake cell, both at elevation 7. */
+const row = (...cells: (number | 'd' | 'L')[]) =>
+  createCoverGrid(cells.length, 1, (col) => {
+    const c = cells[col];
+    return c === 'd' ? { water: 1, elevation: 7 } : c === 'L' ? { water: 3, elevation: 7 } : { elevation: c };
+  });
 
 describe('ridgeProps', () => {
   it('puts a mountain on every high cell and joins neighbouring ones into a chain', () => {
@@ -24,9 +27,26 @@ describe('ridgeProps', () => {
     expect(props.every((p) => p.col !== 1)).toBe(true);
   });
 
-  it('keeps wet and blocked cells free (a river or lake runs there)', () => {
-    expect(ridgeProps(row(7, 'w', 7), SIZE, 1)).toHaveLength(2);
+  it('keeps lakes and blocked cells (rivers) free, but lets mountains stand on damp ground', () => {
     expect(ridgeProps(row(7, 7, 7), SIZE, 1, new Set([1]))).toHaveLength(2);
+    expect(ridgeProps(row(7, 'd', 7), SIZE, 1)).toHaveLength(5);
+    expect(ridgeProps(row(1, 'L', 1), SIZE, 1)).toHaveLength(0);
+  });
+
+  it('lets mountains lean against a high lake\'s rim, so the lake sits in the range instead of in a valley', () => {
+    const props = ridgeProps(row(7, 'L'), SIZE, 1);
+    const [m, lake] = [offsetToPixel(0, 0, SIZE), offsetToPixel(1, 0, SIZE)];
+    const leaning = props.filter((p) => p.x > m.x + SIZE * 0.3);
+    expect(leaning).toHaveLength(1);
+    expect(leaning[0].x).toBeLessThan((m.x + lake.x) / 2); // on the mountain's side of the shared edge
+  });
+
+  it('fills the middle between three high cells, so no bare floor shows between peaks', () => {
+    const tri = createCoverGrid(2, 2, () => ({ elevation: 7 })); // (0,0), (1,0) and (0,1) are mutual neighbours
+    const props = ridgeProps(tri, SIZE, 1);
+    const centres = [0, 1, 2, 3].map((i) => offsetToPixel(i % 2, Math.floor(i / 2), SIZE));
+    const centroid = { x: (centres[0].x + centres[1].x + centres[2].x) / 3, y: (centres[0].y + centres[1].y + centres[2].y) / 3 };
+    expect(props.some((p) => Math.hypot(p.x - centroid.x, p.y - centroid.y) < SIZE * 0.3)).toBe(true);
   });
 
   it('grows from hills to crags to snowy peaks with height; a link takes the lower side', () => {
