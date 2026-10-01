@@ -1,5 +1,5 @@
 import type { Pixel } from '../math/hex';
-import { shade, type RGB } from '../rendering/palette';
+import { mix, shade, type RGB } from '../rendering/palette';
 import { forEachCell, inGrid, type CoverGrid } from './coverGrid';
 import { offsetNeighbours, pixelToOffset } from '../math/hex';
 import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, type IsoView } from './geometry';
@@ -8,7 +8,10 @@ import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { PROP_RULES, type PropRule } from './propRules';
 import { ridgeProps } from './ridges';
-import { getPixel, type Raster } from './raster';
+import { tarnGroups, type Surface } from './tarns';
+import { valueNoise2D } from '../math/noise';
+import { smoothstep } from '../math/scalar';
+import { createRaster, getPixel, setPixel, type Raster } from './raster';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
 import { scatterProps, type PropInstance } from './scatter';
 import { createTerrainSampler } from './terrainSampler';
@@ -143,6 +146,34 @@ function cascadeProp(c: Cascade, variant: number, frame: GridFrame, view: IsoVie
   return { kind: 'fall', variant, x: iso.x, y: iso.y, col: hex.col, row: hex.row, height: c.height };
 }
 
+/** A mountain lake's water, as painted in its sprites: lighter in the shallows, deep blue in the middle. */
+const LAKE_SHALLOW: RGB = [66, 118, 148];
+const LAKE_DEEP: RGB = [36, 82, 114];
+/** Distance from the shore over which the water deepens, as a share of the lake's surface height. */
+const LAKE_SHELF = 0.6;
+
+/**
+ * Colour a lake's water surface and place it in scene pixels: squashed by
+ * the view and lifted to the rims. Deeper away from the shore, with soft
+ * ripples of light.
+ */
+function paintSurface(s: Surface, frame: GridFrame, view: IsoView) {
+  const raster = createRaster(s.width, s.height);
+  const shelf = LAKE_SHELF * s.lift;
+  for (let y = 0; y < s.height; y++) {
+    for (let x = 0; x < s.width; x++) {
+      const i = y * s.width + x;
+      if (!s.alpha[i]) continue;
+      const [gx, gy] = [s.x0 + x + frame.ox, s.y0 + y + frame.oy];
+      const ripple = valueNoise2D(gx * 0.08, gy * 0.22, 41) - 0.5;
+      const c = shade(mix(LAKE_SHALLOW, LAKE_DEEP, smoothstep(0, shelf, s.inset[i])), 1 + 0.16 * ripple);
+      setPixel(raster, x, y, c, Math.round(s.alpha[i] * 255));
+    }
+  }
+  const top = toIso({ x: s.x0 + frame.ox, y: s.y0 + frame.oy }, view);
+  return { raster, x: top.x, y: top.y - s.lift, height: s.height * view.squash };
+}
+
 export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: SceneOptions): Scene {
   const { hexSize: size, seed, view } = opts;
   const frame = gridFrame(grid.cols, grid.rows, size);
@@ -157,16 +188,27 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
 
   // On the flat map mountains are ridge sprites; rivers keep their cells free of them.
+  const flat = opts.relief.style === 'sprites';
   const riverCells = new Set(t.rivers.flatMap((r) => r.cells));
-  const ridges = opts.relief.style === 'sprites' ? ridgeProps(grid, size, seed, riverCells) : [];
+  const ridges = flat ? ridgeProps(grid, size, seed, riverCells) : [];
+  const toScene = (p: PropInstance) => {
+    const [fx, fy] = [p.x + frame.ox, p.y + frame.oy];
+    const iso = toIso({ x: fx, y: fy }, view);
+    return { fy, prop: { ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) } };
+  };
   const free = (x: number, y: number) =>
     !t.river[Math.floor(y) * frame.width + Math.floor(x)] && t.cascades.every((c) => Math.hypot(x - c.at.x, y - c.at.y) > FALL_CLEARANCE * size);
   for (const p of [...scatterProps(grid, terrain, opts.rules ?? PROP_RULES, size, seed), ...ridges]) {
-    const fx = p.x + frame.ox;
-    const fy = p.y + frame.oy;
-    if (!free(fx, fy)) continue;
-    const iso = toIso({ x: fx, y: fy }, view);
-    bands[bandIndex(bands, fy)].props.push({ ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) });
+    if (!free(p.x + frame.ox, p.y + frame.oy)) continue;
+    const { fy, prop } = toScene(p);
+    bands[bandIndex(bands, fy)].props.push(prop);
+  }
+  // Each mountain lake is one prop: its pieces drawn together where its front piece stands, its water on top.
+  for (const group of flat ? tarnGroups(grid, size, seed, t.rivers, view.squash) : []) {
+    const parts = group.parts.map(toScene);
+    const front = parts[parts.length - 1];
+    const surface = group.surface && paintSurface(group.surface, frame, view);
+    bands[bandIndex(bands, front.fy)].props.push({ ...front.prop, parts: parts.map((q) => q.prop), surface });
   }
   t.cascades.forEach((c, i) => bands[bandIndex(bands, c.at.y)].props.push(cascadeProp(c, i, frame, view, size)));
   for (const b of bands) b.props.sort((a, c) => a.y - c.y);

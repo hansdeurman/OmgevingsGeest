@@ -1,6 +1,6 @@
 import type { Pixel } from '../math/hex';
 import { rgbToCss } from '../rendering/palette';
-import type { SpriteSet } from './placeholderSprites';
+import type { Sprite, SpriteSet } from './placeholderSprites';
 import type { Raster } from './raster';
 import type { PropInstance } from './scatter';
 import type { Scene, SideFace, WallKind } from './scene';
@@ -68,6 +68,7 @@ function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number):
  */
 export class IsoRenderer {
   private readonly slices = new WeakMap<Scene, HTMLCanvasElement[]>();
+  private readonly surfaces = new WeakMap<Raster, HTMLCanvasElement>();
   private readonly patterns = new Map<HTMLImageElement, CanvasPattern>();
 
   constructor(
@@ -136,13 +137,46 @@ export class IsoRenderer {
     return p;
   }
 
+  /**
+   * One prop, or a group of parts drawn as one object: every part back to
+   * front, then the group's surface on top (a lake's water over all its pieces).
+   */
   private drawProp(ctx: CanvasRenderingContext2D, p: PropInstance): void {
+    const parts = (p.parts ?? [p]).map((part) => ({ part, ...this.sized(part) }));
+    for (const { part, s, k } of parts) {
+      if (s.shadow) drawShadow(ctx, part, s.shadow * k);
+      this.drawSprite(ctx, part, s.image, s.width * k, s.height * k);
+    }
+    if (p.surface) {
+      const { raster, x, y, height } = p.surface;
+      ctx.drawImage(this.surfaceCanvas(raster), x, y, raster.width, height);
+    }
+  }
+
+  private surfaceCanvas(r: Raster): HTMLCanvasElement {
+    let canvas = this.surfaces.get(r);
+    if (!canvas) this.surfaces.set(r, (canvas = rasterCanvas(r)));
+    return canvas;
+  }
+
+  /** The prop's sprite variant and its scale (1 unless the prop asks for a height). */
+  private sized(p: PropInstance): { s: Sprite; k: number } {
     const variants = this.sprites[p.kind];
     const s = variants[p.variant % variants.length];
-    const k = p.height ? p.height / s.height : 1;
-    const [w, h] = [s.width * k, s.height * k];
-    if (s.shadow) drawShadow(ctx, p, s.shadow * k);
-    ctx.drawImage(s.image, p.x - w / 2, p.y - h, w, h);
+    return { s, k: p.height ? p.height / s.height : 1 };
+  }
+
+  /** Draw an image with its bottom-centre on the prop's foot, mirrored if the prop says so. */
+  private drawSprite(ctx: CanvasRenderingContext2D, p: PropInstance, image: CanvasImageSource, w: number, h: number): void {
+    if (!p.flip) {
+      ctx.drawImage(image, p.x - w / 2, p.y - h, w, h);
+      return;
+    }
+    ctx.save();
+    ctx.translate(p.x, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(image, -w / 2, p.y - h, w, h);
+    ctx.restore();
   }
 
   private outline(ctx: CanvasRenderingContext2D, points: Pixel[]): void {

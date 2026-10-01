@@ -1,4 +1,5 @@
 import { offsetNeighbours, offsetToPixel } from '../math/hex';
+import { hash2 } from '../math/noise';
 import type { CoverGrid } from './coverGrid';
 import type { PropKind } from './propRules';
 import type { PropInstance } from './scatter';
@@ -18,13 +19,6 @@ const JITTER = 0.12;
 
 const kindFor = (e: number): PropKind => (e < 5.5 ? 'hill' : e < 6.5 ? 'crag' : 'peak');
 
-/** Small deterministic hash in [0, 1). */
-function hash(a: number, b: number, seed: number): number {
-  let h = Math.imul(a + 1, 374761393) ^ Math.imul(b + 7, 668265263) ^ Math.imul(seed + 13, 2246822519);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
 /** Ridge sprites in grid-local pixels; `blocked` cells (rivers) stay free. */
 export function ridgeProps(grid: CoverGrid, size: number, seed: number, blocked: ReadonlySet<number> = new Set()): PropInstance[] {
   const { cols, rows } = grid;
@@ -35,9 +29,9 @@ export function ridgeProps(grid: CoverGrid, size: number, seed: number, blocked:
   };
   const props: PropInstance[] = [];
   const place = (kind: PropKind, x: number, y: number, col: number, row: number, a: number, b: number) => {
-    const jx = (hash(a, b, seed) - 0.5) * 2 * JITTER * size;
-    const jy = (hash(b, a, seed) - 0.5) * 2 * JITTER * size;
-    props.push({ kind, variant: Math.floor(hash(a, b, seed + 1) * 1000), x: x + jx, y: y + jy, col, row });
+    const jx = (hash2(a, b, seed) - 0.5) * 2 * JITTER * size;
+    const jy = (hash2(b, a, seed) - 0.5) * 2 * JITTER * size;
+    props.push({ kind, variant: Math.floor(hash2(a, b, seed + 1) * 1000), x: x + jx, y: y + jy, col, row });
   };
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {

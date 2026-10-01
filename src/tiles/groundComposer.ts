@@ -13,6 +13,7 @@ import type { Pixel } from '../math/hex';
 import { lakeOutlets } from './hydrology';
 import { fallLips, fillPoolHoles, markFalls, paintPoolRims, paintSplash, shadePoolFoot } from './pools';
 import { lakeRivers, rapidsFoam, riverStroke, smoothPath, type River } from './rivers';
+import { TARN_FROM } from './tarns';
 import {
   MOUNTAIN_FROM,
   RELIEF_BLEND,
@@ -75,6 +76,9 @@ const RIVER_WIDTH: [number, number] = [0.22, 0.42];
 const RAPIDS_REACH = 0.9;
 const FOAM: RGB = [240, 248, 255];
 
+/** On the flat map a mountain lake is drawn as sprites: the ground under it is stone, wet just around it. */
+const WET_RIM = 0.3;
+const isTarnCell = (grid: CoverGrid, i: number) => grid.elevation[i] >= TARN_FROM && grid.cells[i].water >= 1;
 const isLakeCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] > 0.5;
 const isSeaCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] <= 0.5;
 const cellCentre = (grid: CoverGrid, i: number, size: number, frame: GridFrame): Pixel => {
@@ -143,6 +147,7 @@ function paintBase(
   const a = zeroAmounts();
   const r = zeroAmounts();
   const reliefField = createCoverField(grid, size, RELIEF_BLEND);
+  const flat = relief.style === 'sprites';
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const lx = x + 0.5 - frame.ox;
@@ -152,9 +157,11 @@ function paintBase(
       const i = y * W + x;
       rows[i] = hex.row;
       terrain.sample(lx, ly, a);
+      let level = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
+      if (flat && isTarnCell(grid, hex.row * grid.cols + hex.col)) [a.water, level] = [0, undefined];
+      else if (flat && level !== undefined && level >= TARN_FROM) [a.water, level] = [Math.min(a.water, WET_RIM), undefined];
       setPixel(ground, x, y, shadeGround(a, texelAt(textures, x, y, seed, frame, size)));
 
-      const level = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
       if (level !== undefined) {
         field[i] = lakeHeight(level, relief);
         elevation[i] = level;

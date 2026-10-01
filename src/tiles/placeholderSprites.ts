@@ -1,5 +1,6 @@
 import { rgbToCss, shade, type RGB } from '../rendering/palette';
 import type { PropKind } from './propRules';
+import { TARN_HEIGHT, TARN_SHAPE } from './tarns';
 
 /** An upright image drawn with its bottom-centre on the prop's foot. Sizes in scene pixels. */
 export interface Sprite {
@@ -195,7 +196,40 @@ export function createPlaceholderSprites(s: number, res = 3): SpriteSet {
       ctx.fillRect(cw * 0.2, 0, cw * 0.6, ch);
     });
 
+  /** A table mountain holding a lake, its hollow shaped as TARN_SHAPE; `fill` is the share under water. */
+  const tarn = (fill: number): Sprite => {
+    const h = TARN_HEIGHT * s;
+    return sprite(TARN_SHAPE.aspect * h, h, res, (ctx, cw, ch) => {
+      const g = ctx.createLinearGradient(0, 0, cw, 0);
+      g.addColorStop(0, '#a89c8c');
+      g.addColorStop(1, '#6e665c');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(cw * 0.12, ch * 0.3);
+      ctx.lineTo(cw * 0.88, ch * 0.3);
+      ctx.lineTo(cw, ch);
+      ctx.lineTo(0, ch);
+      ctx.closePath();
+      ctx.fill();
+      const { top, rx, ry } = TARN_SHAPE;
+      ctx.fillStyle = '#b8ad9e';
+      ctx.beginPath();
+      ctx.ellipse(cw / 2, ch * top, cw * rx * 1.3, ch * ry * 1.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (fill <= 0) return;
+      ctx.fillStyle = '#2f5f8c';
+      ctx.beginPath();
+      ctx.ellipse(cw / 2, ch * top, cw * rx * fill, ch * ry * fill, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  };
+
   return {
+    tarn: [tarn(1)],
+    tarnFront: [tarn(1)],
+    tarnSide: [tarn(1)],
+    tarnLow: [tarn(0.4)],
+    tarnDry: [tarn(0)],
     fall: [fall(0.6, 0.8)],
     peak: [mountain(1.6, 1.5, [140, 128, 116], 0.35), mountain(1.4, 1.3, [128, 120, 110], 0.25)],
     crag: [mountain(1.3, 1.2, [150, 138, 124], 0)],

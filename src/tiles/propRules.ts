@@ -2,7 +2,25 @@ import { ROCK_LINE } from './groundShader';
 import type { Amounts, Cover, Layer } from './levels';
 
 /** Upright sprites standing on the ground. Each kind has several variants. */
-export const PROP_KINDS = ['tree', 'bush', 'tuft', 'flower', 'reed', 'pebble', 'boulder', 'hill', 'crag', 'peak', 'fall'] as const;
+export const PROP_KINDS = [
+  'tree',
+  'bush',
+  'tuft',
+  'flower',
+  'reed',
+  'pebble',
+  'boulder',
+  'hill',
+  'crag',
+  'peak',
+  'fall',
+  // Mountain lakes: full, spilling toward the viewer or sideways, a pond, a dry hollow.
+  'tarn',
+  'tarnFront',
+  'tarnSide',
+  'tarnLow',
+  'tarnDry',
+] as const;
 export type PropKind = (typeof PROP_KINDS)[number];
 
 /**

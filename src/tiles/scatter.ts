@@ -4,6 +4,7 @@ import { mulberry32 } from '../math/rng';
 import { forEachCell, type CoverGrid } from './coverGrid';
 import type { CoverField } from './coverField';
 import type { PropKind, PropRule } from './propRules';
+import type { Raster } from './raster';
 
 /** A placed prop, in grid-local top-down pixels. `variant` is any uint; renderers wrap it. */
 export interface PropInstance {
@@ -16,6 +17,12 @@ export interface PropInstance {
   row: number;
   /** Drawn height in scene pixels, overriding the sprite's own (e.g. a waterfall fitted to its drop). */
   height?: number;
+  /** Mirror the sprite left-right. */
+  flip?: boolean;
+  /** Sprites drawn together as one object, back to front (e.g. the pieces of one mountain lake). */
+  parts?: PropInstance[];
+  /** An image drawn over the parts, its top-left at (x, y) in scene pixels, squashed to `height` (a lake's water surface). */
+  surface?: { raster: Raster; x: number; y: number; height: number };
 }
 
 const CANDIDATES = 40;

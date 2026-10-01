@@ -1,6 +1,7 @@
 import type { SpriteSet } from './placeholderSprites';
 import type { PropKind } from './propRules';
 import { scaleToMedian } from './spriteScale';
+import { TARN_HEIGHT } from './tarns';
 
 /** Number of cut-out sprites per kind in public/tiles/sprites/, named `<kind>-<n>.png`. */
 export const SPRITE_COUNTS: Partial<Record<PropKind, number>> = {
@@ -15,7 +16,13 @@ export const SPRITE_COUNTS: Partial<Record<PropKind, number>> = {
   hill: 1,
   boulder: 1,
   fall: 2,
+  tarn: 2,
+  tarnFront: 1,
+  tarnSide: 2,
+  tarnLow: 1,
+  tarnDry: 1,
 };
+
 
 /** In-game height of a kind's median variant, in hex radii. */
 export const SPRITE_HEIGHTS: Record<PropKind, number> = {
@@ -30,6 +37,11 @@ export const SPRITE_HEIGHTS: Record<PropKind, number> = {
   crag: 0.7,
   peak: 0.95,
   fall: 0.7,
+  tarn: TARN_HEIGHT,
+  tarnFront: TARN_HEIGHT,
+  tarnSide: TARN_HEIGHT,
+  tarnLow: TARN_HEIGHT,
+  tarnDry: TARN_HEIGHT,
 };
 
 /** Generated art carries no shadow; the renderer adds one this wide (share of sprite width). */

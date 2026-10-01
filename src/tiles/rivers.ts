@@ -13,6 +13,8 @@ export interface River {
   cells: number[];
   /** Consecutive cell pairs where the river drops steeply: drawn as a cascade. */
   cascades: [number, number][];
+  /** Where the lake overflows: from the edge of its basin into the lower cell. */
+  outlet: [number, number];
 }
 
 /** Elevation drop (steps) between neighbouring river cells that shows as a cascade below the outlet. */
@@ -59,7 +61,7 @@ export function lakeRivers(map: ElevationMap, isLake: (i: number) => boolean, is
         .slice(1)
         .map((b, k): [number, number] => [path[k], b])
         .filter(([a, b], k) => map.elevation[a] - map.elevation[b] >= (k === head.length - 1 ? OUTLET_DROP : cascadeDrop));
-      return { cells: path, cascades };
+      return { cells: path, cascades, outlet: [from, to] as [number, number] };
     });
 }
 

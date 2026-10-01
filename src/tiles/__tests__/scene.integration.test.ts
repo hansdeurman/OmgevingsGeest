@@ -8,6 +8,7 @@ import { BAND_ROWS, buildScene } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
+import { TARN_FROM } from '../tarns';
 
 /**
  * End-to-end: demo map → terrain sampler → ground image + scattered props +
@@ -160,6 +161,31 @@ describe('buildScene (highlands, flat map)', () => {
     const at = (i: number) => (p: { col: number; row: number }) => p.col === i % hg.cols && p.row === Math.floor(i / hg.cols);
     expect(ridge.some(at(outlet.from))).toBe(false);
     expect(ridge.some(at(outlet.to))).toBe(false);
+  });
+
+  it('draws the high lake as one object of mountain-lake pieces covering every lake cell', () => {
+    const lakes = props.filter((p) => p.parts);
+    expect(lakes).toHaveLength(1);
+    const parts = lakes[0].parts!;
+    const lakeCells = [...hg.cells.keys()].filter((i) => isLake(i) && hg.elevation[i] >= TARN_FROM);
+    for (const i of lakeCells) expect(parts.some((p) => p.col === i % hg.cols && p.row === Math.floor(i / hg.cols))).toBe(true);
+    expect(parts.every((p) => p.kind.startsWith('tarn'))).toBe(true);
+  });
+
+  it('turns the piece where the lake spills into a waterfall', () => {
+    const parts = props.find((p) => p.parts)!.parts!;
+    expect(parts.some((p) => p.kind === 'tarnFront' || p.kind === 'tarnSide')).toBe(true);
+  });
+
+  it('paints no open water on the ground under the mountain lake: the water is in the sprites', () => {
+    const blue = [...hg.cells.keys()]
+      .filter((i) => isLake(i))
+      .map((i) => frameCentre(i % hg.cols, Math.floor(i / hg.cols), SIZE, scene.frame))
+      .filter((c) => {
+        const [r, , b] = getPixel(scene.ground, Math.round(c.x), Math.round(c.y));
+        return b - r > 40;
+      });
+    expect(blue.length).toBeLessThanOrEqual(1); // at most where the river leaves
   });
 
   it('pastes no waterfall sprites onto the flat map: rivers carry their own white water', () => {

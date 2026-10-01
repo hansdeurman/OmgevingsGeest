@@ -18,6 +18,7 @@ describe('lakeRivers', () => {
     const [river] = lakeRivers(g, isLake, isSea);
     expect(isLake(river.cells[0])).toBe(true);
     expect(river.cells).toContain(17); // the notch
+    expect(river.outlet[1]).toBe(17);
     expect(isSea(river.cells[river.cells.length - 1])).toBe(true);
     for (let k = 2; k < river.cells.length; k++) {
       expect(g.elevation[river.cells[k]]).toBeLessThanOrEqual(g.elevation[river.cells[k - 1]]);

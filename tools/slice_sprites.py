@@ -40,8 +40,12 @@ def cells(rgb: np.ndarray, rows: int) -> list:
 
 
 def line_cells(rgb: np.ndarray) -> list:
-    """Fallback for objects touching the separators: cut along rows and columns that are mostly white."""
-    white = rgb.min(axis=2) > 200
+    """Fallback for objects touching the separators: cut along rows and columns that are mostly white.
+
+    A thin white line on magenta may come out pink after compression, so light pink counts as white too.
+    """
+    pink = (rgb[..., 1] > 120) & (rgb[..., 0] > 220) & (rgb[..., 2] > 220)
+    white = (rgb.min(axis=2) > 200) | pink
 
     def spans(share: np.ndarray) -> list:
         inside = share < LINE_SHARE
