@@ -10,6 +10,7 @@ export type TextureFiles = Partial<Record<GroundKind, string[]>>;
 export const TEXTURE_FILES: TextureFiles = {
   sand: ['sand-1.webp'],
   grass: ['grass-1.webp'],
+  water: ['water-1.webp'],
 };
 
 /** Pixel size textures are scaled to; at hex radius 40 one texture spans ~2.3 hexes. */
