@@ -50,7 +50,13 @@ export const PROP_RULES: readonly PropRule[] = [
     spacing: 0.14,
     fits: (a) => soil(a) && a.grass > 0.45,
   },
-  { kind: 'reed', count: byLevel('water', [0, 3, 3, 2, 0]), spacing: 0.1, fits: (a) => a.water > 0.3 && a.water < 0.48 },
+  // Reeds belong to lowland water: around a mountain lake they would make it read as sea level.
+  {
+    kind: 'reed',
+    count: byLevel('water', [0, 3, 3, 2, 0]),
+    spacing: 0.1,
+    fits: (a) => a.water > 0.3 && a.water < 0.48 && a.alt < ROCK_LINE[0],
+  },
   {
     kind: 'pebble',
     count: (c) => (c.grass + c.trees === 0 && c.water <= 1 ? 2 : 0),

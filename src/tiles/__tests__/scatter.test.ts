@@ -121,6 +121,11 @@ describe('PROP_RULES', () => {
     expect(rule('boulder').count(empty, MAX_ELEVATION)).toBe(0);
   });
 
+  it('grows reeds only along lowland water, never around a mountain lake', () => {
+    expect(rule('reed').fits({ water: 0.4, grass: 0, trees: 0, alt: 0.1 })).toBe(true);
+    expect(rule('reed').fits({ water: 0.4, grass: 0, trees: 0, alt: 0.75 })).toBe(false);
+  });
+
   it('keeps trees off bare rock', () => {
     expect(rule('tree').fits({ water: 0, grass: 1, trees: 1, alt: ROCK_LINE[1] })).toBe(false);
     expect(rule('tree').fits({ water: 0, grass: 1, trees: 1, alt: 0.2 })).toBe(true);

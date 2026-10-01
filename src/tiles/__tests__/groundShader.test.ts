@@ -71,6 +71,32 @@ describe('shadeGround', () => {
     expect(deep[0] + deep[1]).toBeLessThan(shallow[0] + shallow[1]);
   });
 
+  describe('high in the mountains', () => {
+    const HIGH = 0.75;
+    const lum = ([r, g, b]: RGB) => 0.3 * r + 0.59 * g + 0.11 * b;
+
+    it('makes a mountain lake darker and deeper blue than the sea, even in its shallows', () => {
+      for (const water of [0.5, 0.8]) {
+        const lake = shade({ water, alt: HIGH });
+        const sea = shade({ water });
+        expect(lum(lake)).toBeLessThan(lum(sea) - 15);
+        expect(lake[2]).toBeGreaterThan(lake[0]);
+      }
+    });
+
+    it('lines a mountain lake with wet stone instead of wet sand', () => {
+      const shore = shade({ water: 0.3, alt: HIGH });
+      const beach = shade({ water: 0.3 });
+      expect(shore).not.toEqual(beach);
+      expect(Math.abs(shore[0] - shore[2])).toBeLessThan(Math.abs(beach[0] - beach[2])); // grey, not sandy
+    });
+
+    it('keeps surf foam off a mountain lake\'s edge', () => {
+      const edge = shade({ water: 0.43, alt: HIGH });
+      expect(lum(edge)).toBeLessThan(lum(shade({ water: 0.43 })) - 20);
+    });
+  });
+
   it('peaks foam on the waterline and fades it away from it', () => {
     expect(foamAmount(0.43)).toBeGreaterThan(foamAmount(0.41));
     expect(foamAmount(0.3)).toBe(0);
