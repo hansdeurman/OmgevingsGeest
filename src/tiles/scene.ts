@@ -132,6 +132,9 @@ function tileDraw(grid: CoverGrid, ground: Raster, heights: Float32Array, cover:
 
 const bandIndex = (bands: SceneBand[], fy: number) => Math.min(bands.length - 1, Math.max(0, Math.floor(Math.floor(fy) / BAND_ROWS)));
 
+/** Radius around a waterfall's lip kept free of other props, in hex radii. */
+const FALL_CLEARANCE = 1;
+
 /** Share of a waterfall sprite's height from its rim down to the bottom of its splash. */
 const FALL_DROP_SHARE = 0.85;
 
@@ -161,9 +164,11 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const tiles: TileDraw[] = [];
   forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
 
+  const clear = (x: number, y: number) => lips.every((l) => Math.hypot(x - l.x, y - l.y) > FALL_CLEARANCE * size);
   for (const p of scatterProps(grid, terrain, opts.rules ?? rulesFor(opts.relief.style), size, seed)) {
     const fx = p.x + frame.ox;
     const fy = p.y + frame.oy;
+    if (!clear(fx, fy)) continue;
     const iso = toIso({ x: fx, y: fy }, view);
     bands[bandIndex(bands, fy)].props.push({ ...p, x: iso.x, y: iso.y - heightAt(heights, frame, fx, fy) });
   }

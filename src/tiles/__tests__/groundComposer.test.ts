@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { offsetNeighbours, pixelToOffset } from '../../math/hex';
-import { coverAt } from '../coverGrid';
+import { elevationAt } from '../coverGrid';
 import { demoMap } from '../demoMaps';
 import { gridFrame } from '../geometry';
 import { composeTerrain } from '../groundComposer';
@@ -29,15 +29,16 @@ describe('composeTerrain', () => {
     });
   }
 
-  it('leaves dry land flat in sprite style: only hexes at or next to water are raised', () => {
+  it('raises only the high lake and the land around it at or above its level, in sprite style', () => {
     const t = compose('sprites');
-    const wet = (c: number, r: number) => (coverAt(grid, c, r)?.water ?? 0) > 0;
-    const nearWater = (c: number, r: number) => wet(c, r) || offsetNeighbours(r).some((d) => wet(c + d.dc, r + d.dr));
+    const lakeLevel = Math.max(...grid.cells.map((c, i) => (c.water >= 2 ? grid.elevation[i] : 0)));
+    const high = (c: number, r: number) => (elevationAt(grid, c, r) ?? 0) >= lakeLevel - 0.6;
+    const nearHigh = (c: number, r: number) => high(c, r) || offsetNeighbours(r).some((d) => high(c + d.dc, r + d.dr));
     const raised = [...t.heights.keys()].filter((i) => t.heights[i] > 0);
     expect(raised.length).toBeGreaterThan(0);
     for (const i of raised) {
       const hex = pixelToOffset((i % frame.width) + 0.5 - frame.ox, Math.floor(i / frame.width) + 0.5 - frame.oy, SIZE);
-      expect(nearWater(hex.col, hex.row)).toBe(true);
+      expect(nearHigh(hex.col, hex.row)).toBe(true);
     }
   });
 });
