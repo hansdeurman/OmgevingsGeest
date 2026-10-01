@@ -1,4 +1,6 @@
 import type { Pixel } from '../math/hex';
+import { valueNoise2D } from '../math/noise';
+import { smoothstep } from '../math/scalar';
 import { fillDepressions, lakeOutlets, neighbourIndices, type ElevationMap } from './hydrology';
 
 /**
@@ -104,4 +106,16 @@ export function riverStroke(points: readonly Pixel[], W: number, H: number, widt
     done += len;
   });
   return wet;
+}
+
+/**
+ * White water around a cascade at `at`, in [0, 1]: broken foam streaks,
+ * strongest at the drop and fading out over `radius` px. Painted into the
+ * river itself, so a steep stretch reads as rapids rather than a pasted sprite.
+ */
+export function rapidsFoam(x: number, y: number, at: Pixel, radius: number): number {
+  const d = Math.hypot(x - at.x, y - at.y);
+  if (d >= radius) return 0;
+  const streaks = smoothstep(0.35, 0.7, valueNoise2D(x * 0.45, y * 0.2, 77));
+  return smoothstep(radius, radius * 0.3, d) * (0.35 + 0.65 * streaks);
 }

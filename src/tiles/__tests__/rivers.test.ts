@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lakeRivers, riverStroke, smoothPath } from '../rivers';
+import { lakeRivers, rapidsFoam, riverStroke, smoothPath } from '../rivers';
 
 /** Build a cols×rows elevation map from row strings of digits. */
 const grid = (...rows: string[]) => ({
@@ -62,5 +62,19 @@ describe('riverStroke', () => {
     const wet = riverStroke(line, W, W, (t) => 2 + 8 * t);
     const across = (x: number) => [...Array(W).keys()].filter((y) => wet.has(y * W + x)).length;
     expect(across(25)).toBeGreaterThan(across(5));
+  });
+});
+
+describe('rapidsFoam', () => {
+  const at = { x: 50, y: 50 };
+
+  it('churns the water white around a cascade, fading out at its reach', () => {
+    expect(rapidsFoam(50, 50, at, 10)).toBeGreaterThan(0.3);
+    expect(rapidsFoam(61, 50, at, 10)).toBe(0);
+  });
+
+  it('breaks the foam into streaks rather than one flat blob', () => {
+    const near = Array.from({ length: 40 }, (_, k) => rapidsFoam(48 + (k % 8) * 0.5, 48 + Math.floor(k / 8), at, 20));
+    expect(Math.max(...near) - Math.min(...near)).toBeGreaterThan(0.1);
   });
 });

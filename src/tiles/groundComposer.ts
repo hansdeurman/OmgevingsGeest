@@ -8,10 +8,11 @@ import { shadeGround, type GroundKind, type TexelLookup } from './groundShader';
 import { MAX_ELEVATION, zeroAmounts } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { createRaster, sampleVariants, setPixel, type Raster } from './raster';
+import { mix, type RGB } from '../rendering/palette';
 import type { Pixel } from '../math/hex';
 import { lakeOutlets } from './hydrology';
 import { fallLips, fillPoolHoles, markFalls, paintPoolRims, paintSplash, shadePoolFoot } from './pools';
-import { lakeRivers, riverStroke, smoothPath, type River } from './rivers';
+import { lakeRivers, rapidsFoam, riverStroke, smoothPath, type River } from './rivers';
 import {
   MOUNTAIN_FROM,
   RELIEF_BLEND,
@@ -54,6 +55,7 @@ export interface Terrain {
   rivers: River[];
   /** 1 on river pixels: props keep off them. */
   river: Uint8Array;
+  /** Waterfall sprites over raised lakes' outlets (relief style); the flat map paints rapids instead. */
   cascades: Cascade[];
 }
 
@@ -69,8 +71,9 @@ const FOOT_SHADOW = 0.25;
 const FALL_DROP_SHARE = 0.85;
 /** River width at its source and at its mouth, in hex radii. */
 const RIVER_WIDTH: [number, number] = [0.22, 0.42];
-/** Height of a cascade sprite on the flat map, in hex radii. */
-const CASCADE_SIZE = 0.7;
+/** Reach of the white water around a river's cascade, in hex radii. */
+const RAPIDS_REACH = 0.9;
+const FOAM: RGB = [240, 248, 255];
 
 const isLakeCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] > 0.5;
 const isSeaCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] <= 0.5;
@@ -176,30 +179,30 @@ function texelAt(textures: GroundTextures, x: number, y: number, seed: number, f
 
 /**
  * Paint each high lake's river onto the ground, from the lake down to the
- * sea, widening as it goes; open water it crosses stays as it is. Returns
- * the rivers, their pixels and a cascade wherever a river drops steeply.
+ * sea, widening as it goes, with white water where it drops steeply; open
+ * water it crosses stays as it is. Returns the rivers and their pixels.
  */
 function paintRivers(base: BaseTerrain, grid: CoverGrid, textures: GroundTextures, frame: GridFrame, size: number, seed: number) {
   const { width: W, height: H } = frame;
   const rivers = lakeRivers(grid, isLakeCell(grid), isSeaCell(grid));
   const mask = new Uint8Array(W * H);
-  const cascades: Cascade[] = [];
   const [w0, w1] = RIVER_WIDTH;
   for (const river of rivers) {
     const path = smoothPath(river.cells.map((i) => cellCentre(grid, i, size, frame)), 2);
+    const drops = river.cascades.map(([a, b]) => {
+      const [p, q] = [cellCentre(grid, a, size, frame), cellCentre(grid, b, size, frame)];
+      return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    });
     for (const [i, centre] of riverStroke(path, W, H, (t) => (w0 + (w1 - w0) * t) * size)) {
       if (base.rows[i] < 0 || base.open[i]) continue;
       const [x, y] = [i % W, Math.floor(i / W)];
       const stream = { ...zeroAmounts(), water: 0.3 + 0.4 * smoothstep(0, 0.6, centre), alt: base.elevation[i] / MAX_ELEVATION };
-      setPixel(base.ground, x, y, shadeGround(stream, texelAt(textures, x, y, seed, frame, size)));
+      const foam = Math.max(0, ...drops.map((at) => rapidsFoam(x, y, at, RAPIDS_REACH * size)));
+      setPixel(base.ground, x, y, mix(shadeGround(stream, texelAt(textures, x, y, seed, frame, size)), FOAM, foam * (0.5 + 0.5 * smoothstep(0, 0.5, centre))));
       mask[i] = 1;
     }
-    for (const [a, b] of river.cascades) {
-      const [p, q] = [cellCentre(grid, a, size, frame), cellCentre(grid, b, size, frame)];
-      cascades.push({ at: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, height: CASCADE_SIZE * size });
-    }
   }
-  return { rivers, mask, cascades };
+  return { rivers, mask };
 }
 
 /** Heights get projected: raised lakes stand on a cliff and pour over their outlet. */
@@ -246,7 +249,7 @@ export function composeTerrain(
         blurHeights(base.field, W, H, Math.max(1, Math.round(size * 0.08)));
         shadeSlopes(base.ground, base.field, HILLSHADE);
         const none = new Uint8Array(W * H);
-        return { heights: new Float32Array(W * H), falls: none, pool: none, cascades: rivers.cascades };
+        return { heights: new Float32Array(W * H), falls: none, pool: none, cascades: [] };
       })()
     : raiseRelief(base, grid, frame, size);
   if (relief.contours) paintContours(base.ground, base.elevation, 1);

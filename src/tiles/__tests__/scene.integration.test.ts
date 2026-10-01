@@ -162,17 +162,7 @@ describe('buildScene (highlands, flat map)', () => {
     expect(ridge.some(at(outlet.to))).toBe(false);
   });
 
-  it('puts a cascade at the lake\'s outlet', () => {
-    expect(falls.length).toBeGreaterThan(0);
-    const near = [outlet.from, outlet.to].flatMap((i) => {
-      const [c, r] = [i % hg.cols, Math.floor(i / hg.cols)];
-      return [[c, r], ...offsetNeighbours(r).map((d) => [c + d.dc, r + d.dr])];
-    });
-    expect(falls.some((f) => near.some(([c, r]) => c === f.col && r === f.row))).toBe(true);
-  });
-
-  it('keeps rocks, trees and plants out of the way of the waterfalls', () => {
-    const others = props.filter((p) => p.kind !== 'fall');
-    for (const f of falls) for (const p of others) expect(Math.hypot(p.x - f.x, (p.y - f.y) / view.squash)).toBeGreaterThan(0.5 * SIZE);
+  it('pastes no waterfall sprites onto the flat map: rivers carry their own white water', () => {
+    expect(falls).toHaveLength(0);
   });
 });

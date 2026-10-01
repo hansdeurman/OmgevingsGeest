@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pixelToOffset } from '../../math/hex';
+import { offsetToPixel, pixelToOffset } from '../../math/hex';
 import { coverAt } from '../coverGrid';
 import { demoMap } from '../demoMaps';
 import { gridFrame } from '../geometry';
@@ -43,14 +43,27 @@ describe('composeTerrain (flat map)', () => {
     expect(sea.filter(differs).length).toBeLessThan(0.02 * sea.length); // only right along the coast
   });
 
-  it('paints a river from the high lake down to the sea, with a cascade where it drops', () => {
+  it('paints a river from the high lake down to the sea', () => {
     expect(t.rivers).toHaveLength(1);
     const cells = t.rivers[0].cells;
     const last = grid.cells[cells[cells.length - 1]];
     expect(last.water).toBeGreaterThanOrEqual(2);
     expect(grid.elevation[cells[cells.length - 1]]).toBeLessThanOrEqual(0.5);
     expect(t.river.some(Boolean)).toBe(true);
-    expect(t.cascades.length).toBeGreaterThan(0);
+  });
+
+  it('paints white water where the river drops, instead of pasting a waterfall sprite on it', () => {
+    expect(t.cascades).toHaveLength(0);
+    const [a, b] = t.rivers[0].cascades[0];
+    const centre = (i: number) => offsetToPixel(i % grid.cols, Math.floor(i / grid.cols), SIZE);
+    const drop = { x: (centre(a).x + centre(b).x) / 2 + frame.ox, y: (centre(a).y + centre(b).y) / 2 + frame.oy };
+    const river = [...t.river.keys()].filter((i) => t.river[i]);
+    const dist = (i: number) => Math.hypot((i % frame.width) - drop.x, Math.floor(i / frame.width) - drop.y);
+    const bright = (i: number) => t.ground.data[i * 4] + t.ground.data[i * 4 + 1] + t.ground.data[i * 4 + 2];
+    const mean = (xs: number[]) => xs.reduce((s, i) => s + bright(i), 0) / xs.length;
+    // Against the same river just beyond the white water, at about the same height (water darkens with altitude).
+    const beyond = river.filter((i) => dist(i) > SIZE * 1 && dist(i) < SIZE * 1.5);
+    expect(mean(river.filter((i) => dist(i) < SIZE * 0.3))).toBeGreaterThan(mean(beyond) + 50);
   });
 
   it('draws height lines only when asked', () => {
