@@ -3,7 +3,7 @@ import { hash2 } from '../math/noise';
 import type { CoverGrid } from './coverGrid';
 import type { PropKind } from './propRules';
 import type { PropInstance } from './scatter';
-import { TARN_FROM } from './tarns';
+import { HIGH_LAKE_FROM } from './shores';
 
 /**
  * Mountains as chains: a mountain sprite on every high, dry cell, and one on
@@ -35,7 +35,7 @@ export function ridgeProps(grid: CoverGrid, size: number, seed: number, blocked:
   const index = (c: number, r: number) => (c < 0 || r < 0 || c >= cols || r >= rows ? -1 : r * cols + c);
   const isHigh = (i: number) => i >= 0 && grid.elevation[i] >= RIDGE_FROM;
   const mountain = (i: number) => isHigh(i) && grid.cells[i].water <= 1 && !blocked.has(i);
-  const lake = (i: number) => i >= 0 && grid.elevation[i] >= TARN_FROM && grid.cells[i].water >= 2;
+  const lake = (i: number) => i >= 0 && grid.elevation[i] >= HIGH_LAKE_FROM && grid.cells[i].water >= 2;
   const neighbours = (i: number) => offsetNeighbours(Math.floor(i / cols)).map((d) => index((i % cols) + d.dc, Math.floor(i / cols) + d.dr));
   const centre = (i: number) => offsetToPixel(i % cols, Math.floor(i / cols), size);
   const e = (...cells: number[]) => Math.min(...cells.map((i) => grid.elevation[i]));

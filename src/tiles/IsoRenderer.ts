@@ -138,18 +138,23 @@ export class IsoRenderer {
   }
 
   /**
-   * One prop, or a group of parts drawn as one object: every part back to
-   * front, then the group's surface on top (a lake's water over all its pieces).
+   * One prop, or a group drawn as one object: its parts back to front, then
+   * its surface (a lake's water), then the parts in front of it.
    */
   private drawProp(ctx: CanvasRenderingContext2D, p: PropInstance): void {
-    const parts = (p.parts ?? [p]).map((part) => ({ part, ...this.sized(part) }));
-    for (const { part, s, k } of parts) {
-      if (s.shadow) drawShadow(ctx, part, s.shadow * k);
-      this.drawSprite(ctx, part, s.image, s.width * k, s.height * k * (part.heightScale ?? 1));
-    }
+    this.drawParts(ctx, p.parts ?? [p]);
     if (p.surface) {
       const { raster, x, y, height } = p.surface;
       ctx.drawImage(this.surfaceCanvas(raster), x, y, raster.width, height);
+    }
+    this.drawParts(ctx, p.front ?? []);
+  }
+
+  private drawParts(ctx: CanvasRenderingContext2D, parts: readonly PropInstance[]): void {
+    for (const part of parts) {
+      const { s, k } = this.sized(part);
+      if (s.shadow) drawShadow(ctx, part, s.shadow * k);
+      this.drawSprite(ctx, part, s.image, s.width * k, s.height * k * (part.heightScale ?? 1));
     }
   }
 

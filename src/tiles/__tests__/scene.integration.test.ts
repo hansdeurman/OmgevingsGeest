@@ -8,7 +8,6 @@ import { BAND_ROWS, buildScene } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
-import { TARN_FROM } from '../tarns';
 
 /**
  * End-to-end: demo map → terrain sampler → ground image + scattered props +
@@ -163,18 +162,25 @@ describe('buildScene (highlands, flat map)', () => {
     expect(ridge.some(at(outlet.to))).toBe(false);
   });
 
-  it('draws the high lake as one object of mountain-lake pieces covering every lake cell', () => {
-    const lakes = props.filter((p) => p.parts);
+  it('draws the high lake as one object: rocks on the far shore, the lifted water, banks along the near shore', () => {
+    const lakes = props.filter((p) => p.surface);
     expect(lakes).toHaveLength(1);
-    const parts = lakes[0].parts!;
-    const lakeCells = [...hg.cells.keys()].filter((i) => isLake(i) && hg.elevation[i] >= TARN_FROM);
-    for (const i of lakeCells) expect(parts.some((p) => p.col === i % hg.cols && p.row === Math.floor(i / hg.cols))).toBe(true);
-    expect(parts.every((p) => p.kind.startsWith('tarn'))).toBe(true);
+    const [lake] = lakes;
+    expect(lake.parts!.length).toBeGreaterThan(0);
+    expect(lake.parts!.every((p) => p.kind === 'backRock')).toBe(true);
+    expect(lake.front!.length).toBeGreaterThan(0);
+    expect(lake.front!.every((p) => /^(bank|fall|spray)/.test(p.kind))).toBe(true);
   });
 
-  it('turns the piece where the lake spills into a waterfall', () => {
-    const parts = props.find((p) => p.parts)!.parts!;
-    expect(parts.some((p) => p.kind === 'tarnFront' || p.kind === 'tarnSide')).toBe(true);
+  it('lifts the water above the shore it lies on', () => {
+    const [lake] = props.filter((p) => p.surface);
+    const lowestBank = Math.max(...lake.front!.map((p) => p.y));
+    expect(lake.surface!.y + lake.surface!.height).toBeLessThan(lowestBank);
+  });
+
+  it('turns the bank toward the outlet into a waterfall', () => {
+    const [lake] = props.filter((p) => p.surface);
+    expect(lake.front!.some((p) => p.kind.startsWith('fall'))).toBe(true);
   });
 
   it('paints no open water on the ground under the mountain lake: the water is in the sprites', () => {

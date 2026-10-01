@@ -23,6 +23,8 @@ export interface PropInstance {
   flip?: boolean;
   /** Sprites drawn together as one object, back to front (e.g. the pieces of one mountain lake). */
   parts?: PropInstance[];
+  /** Parts drawn after the surface: in front of it (the banks along a lake's near shore). */
+  front?: PropInstance[];
   /** An image drawn over the parts, its top-left at (x, y) in scene pixels, squashed to `height` (a lake's water surface). */
   surface?: { raster: Raster; x: number; y: number; height: number };
 }

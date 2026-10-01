@@ -8,7 +8,10 @@ import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { PROP_RULES, type PropRule } from './propRules';
 import { ridgeProps } from './ridges';
-import { TARN_FROM, tarnGroups, type Surface } from './tarns';
+import { HIGH_LAKE_FROM, lakeLift, lakeShapes, shoreProps, type LakeShape } from './shores';
+import { blurHeights } from './relief';
+import type { River } from './rivers';
+import { clamp } from '../math/scalar';
 import { MAX_ELEVATION } from './levels';
 import { valueNoise2D } from '../math/noise';
 import { smoothstep } from '../math/scalar';
@@ -137,6 +140,8 @@ function tileDraw(grid: CoverGrid, ground: Raster, heights: Float32Array, cover:
 
 const bandIndex = (bands: SceneBand[], fy: number) => Math.min(bands.length - 1, Math.max(0, Math.floor(Math.floor(fy) / BAND_ROWS)));
 
+/** Side of the smallest patch of high water drawn as a lake, in hex radii: smaller specks are shore wetness. */
+const MIN_LAKE = 0.6;
 /** Radius around a waterfall kept free of other props, in hex radii. */
 const FALL_CLEARANCE = 1;
 
@@ -155,31 +160,43 @@ const LAKE_SHALLOW: RGB = [66, 118, 148];
 const LAKE_DEEP: RGB = [36, 82, 114];
 const HILL_SHALLOW: RGB = [84, 150, 160];
 const HILL_DEEP: RGB = [46, 112, 138];
-/** Distance from the shore over which the water deepens, as a share of the lake's surface height. */
-const LAKE_SHELF = 0.6;
 
 /**
- * Colour a lake's water surface and place it in scene pixels: squashed by
- * the view and lifted to the rims. Deeper away from the shore, with soft
- * ripples of light.
+ * Colour a high lake's water and place it in scene pixels: squashed by the
+ * view and lifted by the lake's height. Deeper away from the shore, with soft
+ * ripples of light; colder and darker the higher the lake.
  */
-function paintSurface(s: Surface, frame: GridFrame, view: IsoView) {
-  const raster = createRaster(s.width, s.height);
-  const shelf = LAKE_SHELF * s.lift;
-  const cold = smoothstep(TARN_FROM, MAX_ELEVATION - 1, s.level);
-  const [shallow, deep] = [mix(HILL_SHALLOW, LAKE_SHALLOW, cold), mix(HILL_DEEP, LAKE_DEEP, cold)];
-  for (let y = 0; y < s.height; y++) {
-    for (let x = 0; x < s.width; x++) {
-      const i = y * s.width + x;
-      if (!s.alpha[i]) continue;
-      const [gx, gy] = [s.x0 + x + frame.ox, s.y0 + y + frame.oy];
-      const ripple = valueNoise2D(gx * 0.08, gy * 0.22, 41) - 0.5;
-      const c = shade(mix(shallow, deep, smoothstep(0, shelf, s.inset[i])), 1 + 0.16 * ripple);
-      setPixel(raster, x, y, c, Math.round(s.alpha[i] * 255));
+function paintSurface(shape: LakeShape, size: number, view: IsoView) {
+  const { width: W, height: H } = shape;
+  const soft = Float32Array.from(shape.mask);
+  const deep = Float32Array.from(shape.mask);
+  blurHeights(soft, W, H, 1);
+  blurHeights(deep, W, H, Math.max(1, Math.round(size * 0.3)));
+  const cold = smoothstep(HIGH_LAKE_FROM, MAX_ELEVATION - 1, shape.level);
+  const [shallow, deepest] = [mix(HILL_SHALLOW, LAKE_SHALLOW, cold), mix(HILL_DEEP, LAKE_DEEP, cold)];
+  const raster = createRaster(W, H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!shape.mask[i]) continue;
+      const ripple = valueNoise2D((shape.x0 + x) * 0.08, (shape.y0 + y) * 0.22, 41) - 0.5;
+      const c = shade(mix(shallow, deepest, smoothstep(0.5, 0.95, deep[i])), 1 + 0.16 * ripple);
+      setPixel(raster, x, y, c, Math.round(clamp(soft[i] * 2 - 0.2, 0, 1) * 255));
     }
   }
-  const top = toIso({ x: s.x0 + frame.ox, y: s.y0 + frame.oy }, view);
-  return { raster, x: top.x, y: top.y - s.lift, height: s.height * view.squash };
+  const top = toIso({ x: shape.x0, y: shape.y0 }, view);
+  return { raster, x: top.x, y: top.y - lakeLift(shape.level) * size, height: H * view.squash };
+}
+
+/** Where a high lake pours out (frame pixels): between the lake cell its river starts from and the cell it falls into. */
+function outletOf(shape: LakeShape, rivers: readonly River[], grid: CoverGrid, size: number, frame: GridFrame) {
+  const centre = (i: number) => frameCentre(i % grid.cols, Math.floor(i / grid.cols), size, frame);
+  const inside = (p: { x: number; y: number }) =>
+    p.x >= shape.x0 && p.y >= shape.y0 && p.x < shape.x0 + shape.width && p.y < shape.y0 + shape.height;
+  const river = rivers.find((r) => Math.abs(grid.elevation[r.cells[0]] - shape.level) < 1e-6 && inside(centre(r.cells[0])));
+  if (!river) return undefined;
+  const [a, b] = [centre(river.cells[0]), centre(river.outlet[1])];
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
 export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: SceneOptions): Scene {
@@ -211,12 +228,13 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
     const { fy, prop } = toScene(p);
     bands[bandIndex(bands, fy)].props.push(prop);
   }
-  // Each mountain lake is one prop: its pieces drawn together where its front piece stands, its water on top.
-  for (const group of flat ? tarnGroups(grid, size, seed, t.rivers, view.squash) : []) {
-    const parts = group.parts.map(toScene);
-    const front = parts[parts.length - 1];
-    const surface = group.surface && paintSurface(group.surface, frame, view);
-    bands[bandIndex(bands, front.fy)].props.push({ ...front.prop, parts: parts.map((q) => q.prop), surface });
+  // Each high lake is one prop where its nearest bank stands: far-shore rocks, then the lifted water, then the banks.
+  for (const shape of flat ? lakeShapes(t.highWater, frame.width, frame.height, (MIN_LAKE * size) ** 2) : []) {
+    const { back, front, lift } = shoreProps(shape, size, seed, outletOf(shape, t.rivers, grid, size, frame));
+    const iso = (p: PropInstance, raise = 0) => ({ ...p, x: p.x, y: p.y * view.squash - raise });
+    const footY = Math.max(shape.y0 + shape.height, ...front.map((p) => p.y));
+    const lake: PropInstance = { kind: 'backRock', variant: 0, x: shape.x0, y: footY * view.squash, col: -1, row: -1 };
+    bands[bandIndex(bands, footY)].props.push({ ...lake, parts: back.map((p) => iso(p, lift)), surface: paintSurface(shape, size, view), front: front.map((p) => iso(p)) });
   }
   t.cascades.forEach((c, i) => bands[bandIndex(bands, c.at.y)].props.push(cascadeProp(c, i, frame, view, size)));
   for (const b of bands) b.props.sort((a, c) => a.y - c.y);

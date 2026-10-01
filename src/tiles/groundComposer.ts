@@ -13,7 +13,7 @@ import type { Pixel } from '../math/hex';
 import { lakeOutlets } from './hydrology';
 import { fallLips, fillPoolHoles, markFalls, paintPoolRims, paintSplash, shadePoolFoot } from './pools';
 import { lakeRivers, rapidsFoam, riverStroke, smoothPath, type River } from './rivers';
-import { TARN_FROM } from './tarns';
+import { HIGH_LAKE_FROM } from './shores';
 import {
   MOUNTAIN_FROM,
   RELIEF_BLEND,
@@ -58,6 +58,8 @@ export interface Terrain {
   river: Uint8Array;
   /** Waterfall sprites over raised lakes' outlets (relief style); the flat map paints rapids instead. */
   cascades: Cascade[];
+  /** Flat map: the level of the high lake on each of its water pixels (drawn lifted, apart from the ground), NaN elsewhere. */
+  highWater: Float32Array;
 }
 
 /** Width of the waterfall along a pool's rim, in hex radii. */
@@ -76,9 +78,9 @@ const RIVER_WIDTH: [number, number] = [0.22, 0.42];
 const RAPIDS_REACH = 0.9;
 const FOAM: RGB = [240, 248, 255];
 
-/** On the flat map a mountain lake is drawn as sprites: the ground under it is stone, wet just around it. */
+/** On the flat map a high lake is drawn lifted, apart from the ground: under it the ground is stone, wet just around it. */
 const WET_RIM = 0.3;
-const isTarnCell = (grid: CoverGrid, i: number) => grid.elevation[i] >= TARN_FROM && grid.cells[i].water >= 1;
+const isHighLakeCell = (grid: CoverGrid, i: number) => grid.elevation[i] >= HIGH_LAKE_FROM && grid.cells[i].water >= 1;
 const isLakeCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] > 0.5;
 const isSeaCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] <= 0.5;
 const cellCentre = (grid: CoverGrid, i: number, size: number, frame: GridFrame): Pixel => {
@@ -126,6 +128,8 @@ interface BaseTerrain {
   lake: Uint8Array;
   /** 1 on open water of any kind. */
   open: Uint8Array;
+  /** On the flat map: the level of the high lake on each of its water pixels, NaN elsewhere. */
+  highWater: Float32Array;
 }
 
 function paintBase(
@@ -144,6 +148,7 @@ function paintBase(
   const rows = new Int16Array(W * H).fill(-1);
   const lake = new Uint8Array(W * H);
   const open = new Uint8Array(W * H);
+  const highWater = new Float32Array(W * H).fill(NaN);
   const a = zeroAmounts();
   const r = zeroAmounts();
   const reliefField = createCoverField(grid, size, RELIEF_BLEND);
@@ -158,8 +163,9 @@ function paintBase(
       rows[i] = hex.row;
       terrain.sample(lx, ly, a);
       let level = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
-      if (flat && isTarnCell(grid, hex.row * grid.cols + hex.col)) [a.water, level] = [0, undefined];
-      else if (flat && level !== undefined && level >= TARN_FROM) [a.water, level] = [Math.min(a.water, WET_RIM), undefined];
+      if (flat && level !== undefined && level >= HIGH_LAKE_FROM) highWater[i] = level;
+      if (flat && isHighLakeCell(grid, hex.row * grid.cols + hex.col)) [a.water, level] = [0, undefined];
+      else if (flat && level !== undefined && level >= HIGH_LAKE_FROM) [a.water, level] = [Math.min(a.water, WET_RIM), undefined];
       setPixel(ground, x, y, shadeGround(a, texelAt(textures, x, y, seed, frame, size)));
 
       if (level !== undefined) {
@@ -174,7 +180,7 @@ function paintBase(
       elevation[i] = e;
     }
   }
-  return { ground, field, elevation, rows, lake, open };
+  return { ground, field, elevation, rows, lake, open, highWater };
 }
 
 /** Texture lookup at a frame pixel, with variants chosen by slowly varying noise. */
@@ -260,5 +266,5 @@ export function composeTerrain(
       })()
     : raiseRelief(base, grid, frame, size);
   if (relief.contours) paintContours(base.ground, base.elevation, 1);
-  return { ground: base.ground, rows: base.rows, rivers: rivers.rivers, river: rivers.mask, ...shown };
+  return { ground: base.ground, rows: base.rows, rivers: rivers.rivers, river: rivers.mask, highWater: base.highWater, ...shown };
 }
