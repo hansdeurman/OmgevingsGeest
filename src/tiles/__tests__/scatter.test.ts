@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { offsetToPixel, pixelToOffset } from '../../math/hex';
 import { createCoverGrid, inGrid } from '../coverGrid';
-import { PROP_KINDS, PROP_RULES, byLevel, rulesFor, type PropRule } from '../propRules';
+import { PROP_KINDS, PROP_RULES, byLevel, type PropRule } from '../propRules';
 import { scatterProps } from '../scatter';
 import { createTerrainSampler } from '../terrainSampler';
 import { MAX_ELEVATION, type Cover } from '../levels';
@@ -115,16 +115,10 @@ describe('PROP_RULES', () => {
     expect(kinds).toEqual(['pebble']);
   });
 
-  it('leaves mountains to the relief by default: no peak sprites, boulders only on the foothills', () => {
-    expect(rulesFor('relief').some((r) => r.kind === 'peak')).toBe(false);
+  it('leaves mountains to the ridges: no peak sprites, boulders only on the foothills', () => {
+    expect(PROP_RULES.some((r) => r.kind === 'peak')).toBe(false);
     expect(rule('boulder').count(empty, 3.2)).toBe(1);
     expect(rule('boulder').count(empty, MAX_ELEVATION)).toBe(0);
-  });
-
-  it('adds mountain sprites in sprite style: peaks only on the highest ground', () => {
-    const peak = rulesFor('sprites').find((r) => r.kind === 'peak')!;
-    expect(peak.count(empty, MAX_ELEVATION)).toBe(1);
-    expect(peak.count(empty, 5)).toBe(0);
   });
 
   it('keeps trees off bare rock', () => {

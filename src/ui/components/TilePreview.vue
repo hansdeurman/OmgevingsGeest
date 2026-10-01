@@ -21,6 +21,7 @@ const mapId = ref(DEMO_MAPS[0].id);
 const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
+const contours = ref(false);
 const useArt = ref(true);
 /** Height of the highest ground, as a percentage of one hex row's offset. */
 const relief = ref(100);
@@ -50,7 +51,7 @@ function rebuild(): void {
     seed: seed.value,
     blend: blend.value,
     view: { squash: SQUASH, thickness: THICKNESS },
-    relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value },
+    relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value },
     cliff: useArt.value ? artCliff : undefined,
     poolFace: useArt.value ? artPoolFace : undefined,
   });
@@ -104,7 +105,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => resizeObs?.disconnect());
 
-watch([mapId, seed, blend, useArt, relief, mountainStyle], rebuild);
+watch([mapId, seed, blend, useArt, relief, mountainStyle, contours], rebuild);
 watch(showGrid, draw);
 </script>
 
@@ -130,7 +131,7 @@ watch(showGrid, draw);
       <label>
         Mountains
         <select v-model="mountainStyle">
-          <option value="sprites">Sprites, flat land</option>
+          <option value="sprites">Flat map</option>
           <option value="relief">Relief</option>
         </select>
       </label>
@@ -139,6 +140,7 @@ watch(showGrid, draw);
         <input v-model.lazy.number="relief" type="range" min="0" max="150" step="10" />
       </label>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
+      <label class="check"><input v-model="contours" type="checkbox" /> Height lines</label>
       <label class="check"><input v-model="useArt" type="checkbox" /> Generated art</label>
       <p v-if="mapId === 'levels'" class="hint">Rows: water · grass · trees (levels 0 → 4) · height</p>
     </div>

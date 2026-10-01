@@ -137,50 +137,42 @@ describe('buildScene (highlands)', () => {
   });
 });
 
-describe('buildScene (highlands, sprite mountains)', () => {
+describe('buildScene (highlands, flat map)', () => {
   const { grid: hg } = demoMap('highlands', 1);
   const scene = buildScene(hg, textures, { hexSize: SIZE, seed: 3, blend: 0.6, view, relief: { height: 30, style: 'sprites' } });
-  const lakeTiles = scene.tiles.filter((t) => coverAt(hg, t.col, t.row)!.water >= 3 && t.elevation >= 3);
-  const dryTiles = scene.tiles.filter((t) => coverAt(hg, t.col, t.row)!.water === 0);
+  const props = scene.bands.flatMap((b) => b.props);
+  const falls = props.filter((p) => p.kind === 'fall');
+  const isLake = (i: number) => hg.cells[i].water >= 2 && hg.elevation[i] > 0.5;
+  const [outlet] = lakeOutlets(hg, isLake);
 
-  it('raises the high lake and the massif holding it as one plateau, and keeps lower land flat', () => {
-    expect(lakeTiles.length).toBeGreaterThan(0);
-    const lake = lakeTiles[0].lift;
-    expect(lake).toBeGreaterThan(0);
-    for (const t of lakeTiles) expect(t.lift).toBeCloseTo(lake, 3);
-    const ring = scene.tiles.filter((t) => t.elevation >= 6.5);
-    expect(ring.length).toBeGreaterThan(0);
-    for (const t of ring) expect(t.lift).toBeCloseTo(lake, 3);
-    const low = scene.tiles.filter((t) => t.elevation < 3.5);
-    expect(low.every((t) => t.lift === 0)).toBe(true);
-    expect(dryTiles.some((t) => t.lift === 0)).toBe(true);
+  it('keeps every tile on the floor, the high lake included', () => {
+    expect(scene.tiles.every((t) => t.lift === 0)).toBe(true);
   });
 
-  it('shows the mountains as peak sprites on the highest ground', () => {
-    const peaks = scene.bands.flatMap((b) => b.props).filter((p) => p.kind === 'peak');
+  it('shows the mountains as ridge sprites, snowy peaks only on the highest ground', () => {
+    const peaks = props.filter((p) => p.kind === 'peak');
     expect(peaks.length).toBeGreaterThan(0);
     for (const p of peaks) expect(elevationAt(hg, p.col, p.row)).toBeGreaterThanOrEqual(6.5);
   });
 
-  it('keeps rocks, trees and plants out of the way of the waterfall', () => {
-    const props = scene.bands.flatMap((b) => b.props);
-    const [fall] = props.filter((p) => p.kind === 'fall');
-    const others = props.filter((p) => p.kind !== 'fall');
-    for (const p of others) expect(Math.hypot(p.x - fall.x, (p.y - fall.y) / view.squash)).toBeGreaterThan(0.5 * SIZE);
+  it('leaves a gap in the ridge where the lake pours out', () => {
+    const ridge = props.filter((p) => p.kind === 'peak' || p.kind === 'crag' || p.kind === 'hill');
+    const at = (i: number) => (p: { col: number; row: number }) => p.col === i % hg.cols && p.row === Math.floor(i / hg.cols);
+    expect(ridge.some(at(outlet.from))).toBe(false);
+    expect(ridge.some(at(outlet.to))).toBe(false);
   });
 
-  it('puts one waterfall at the lake\'s outlet, on the floor and as tall as the drop', () => {
-    const falls = scene.bands.flatMap((b) => b.props).filter((p) => p.kind === 'fall');
-    expect(falls).toHaveLength(1);
-    const lake = Math.max(...lakeTiles.map((t) => t.lift));
-    expect(falls[0].height).toBeGreaterThan(lake * 0.8);
-    expect(falls[0].height).toBeLessThan(lake * 2);
-    const isLake = (i: number) => hg.cells[i].water >= 2 && hg.elevation[i] > 0.5;
-    const [{ from, to }] = lakeOutlets(hg, isLake);
-    const near = [from, to].flatMap((i) => {
+  it('puts a cascade at the lake\'s outlet', () => {
+    expect(falls.length).toBeGreaterThan(0);
+    const near = [outlet.from, outlet.to].flatMap((i) => {
       const [c, r] = [i % hg.cols, Math.floor(i / hg.cols)];
       return [[c, r], ...offsetNeighbours(r).map((d) => [c + d.dc, r + d.dr])];
     });
-    expect(near.some(([c, r]) => c === falls[0].col && r === falls[0].row)).toBe(true);
+    expect(falls.some((f) => near.some(([c, r]) => c === f.col && r === f.row))).toBe(true);
+  });
+
+  it('keeps rocks, trees and plants out of the way of the waterfalls', () => {
+    const others = props.filter((p) => p.kind !== 'fall');
+    for (const f of falls) for (const p of others) expect(Math.hypot(p.x - f.x, (p.y - f.y) / view.squash)).toBeGreaterThan(0.5 * SIZE);
   });
 });

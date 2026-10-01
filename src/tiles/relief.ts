@@ -12,8 +12,9 @@ import { createRaster, getPixel, sampleRaster, setPixel, type Raster } from './r
  * wall with ridges, and basins between them hold lakes at their own level.
  */
 /**
- * 'relief': mountains are part of the height field. 'sprites': all land stays
- * flat, mountains are sprites, and only high water rises, as a pool on rock.
+ * 'relief': the height field is projected, mountains are part of it.
+ * 'sprites': the flat map: nothing is raised, height shows as hillshade and
+ * mountains are sprites.
  */
 export type MountainStyle = 'relief' | 'sprites';
 
@@ -21,6 +22,8 @@ export interface ReliefOptions {
   /** Height of the highest ground, in screen pixels (about one hex row). */
   height: number;
   style?: MountainStyle;
+  /** Draw height lines (one per elevation step) on the ground. */
+  contours?: boolean;
 }
 
 /** Elevation (terrace steps) from which land turns into mountain and gets ridges. */
@@ -42,16 +45,6 @@ export function terrainHeight(e: number, ridge: number, o: ReliefOptions): numbe
 /** A lake lies flat at the lowest ridge height of its elevation, so its rim always rises above it. */
 export function lakeHeight(e: number, o: ReliefOptions): number {
   return o.height * curve(e) * (1 - RIDGE_AMP * 0.5 * mountainness(e));
-}
-
-/** Height of land in the chosen style. */
-export function landHeight(e: number, ridge: number, o: ReliefOptions): number {
-  return o.style === 'sprites' ? 0 : terrainHeight(e, ridge, o);
-}
-
-/** Height of a water surface at elevation `e` in the chosen style. */
-export function waterHeight(e: number, o: ReliefOptions): number {
-  return o.style === 'sprites' ? o.height * curve(e) : lakeHeight(e, o);
 }
 
 /** Sharp-crested ridge noise in [0, 1]; crests are thin, valleys broad. */
@@ -84,6 +77,29 @@ export function blurHeights(heights: Float32Array, W: number, H: number, radius:
   for (let pass = 0; pass < 2; pass++) {
     blurAxis(heights, tmp, W, H, radius, true);
     blurAxis(tmp, heights, W, H, radius, false);
+  }
+}
+
+/** How dark a contour line is drawn. */
+const CONTOUR_SHADE = 0.62;
+
+/**
+ * Height lines, as on a walking map: darken each pixel where the elevation
+ * (`elevation`, in steps; -Infinity off the map) crosses a multiple of `step`
+ * toward its right or lower neighbour. Level ground, like a lake, gets none.
+ */
+export function paintContours(ground: Raster, elevation: Float32Array, step: number): void {
+  const { width: W, height: H } = ground;
+  const band = (i: number) => Math.floor(elevation[i] / step);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!Number.isFinite(elevation[i])) continue;
+      const crosses = (j: number) => Number.isFinite(elevation[j]) && band(j) !== band(i);
+      if (!(x + 1 < W && crosses(i + 1)) && !(y + 1 < H && crosses(i + W))) continue;
+      const [r, g, b, a] = getPixel(ground, x, y);
+      if (a) setPixel(ground, x, y, shade([r, g, b], CONTOUR_SHADE), a);
+    }
   }
 }
 

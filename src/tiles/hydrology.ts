@@ -7,7 +7,7 @@ export interface ElevationMap {
   elevation: readonly number[];
 }
 
-function neighbourIndices(map: ElevationMap, i: number): number[] {
+export function neighbourIndices(map: ElevationMap, i: number): number[] {
   const col = i % map.cols;
   const row = Math.floor(i / map.cols);
   const out: number[] = [];

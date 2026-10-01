@@ -1,5 +1,4 @@
 import { ROCK_LINE } from './groundShader';
-import type { MountainStyle } from './relief';
 import type { Amounts, Cover, Layer } from './levels';
 
 /** Upright sprites standing on the ground. Each kind has several variants. */
@@ -62,12 +61,3 @@ export const PROP_RULES: readonly PropRule[] = [
   { kind: 'boulder', count: byElevation([0, 0, 0, 1, 1]), chance: 0.35, spacing: 0.4, fits: dry },
 ];
 
-/** Mountains as sprites (sprite style): mounds on the foothills, crags, then snowy peaks on top. */
-export const MOUNTAIN_SPRITE_RULES: readonly PropRule[] = [
-  { kind: 'hill', count: byElevation([0, 0, 0, 0, 1, 1]), chance: 0.5, centred: true, spacing: 0.5, fits: dry },
-  { kind: 'crag', count: byElevation([0, 0, 0, 0, 0, 0, 1]), chance: 0.85, centred: true, spacing: 0.5, fits: dry },
-  { kind: 'peak', count: byElevation([0, 0, 0, 0, 0, 0, 0, 1, 1]), centred: true, spacing: 0.5, fits: dry },
-];
-
-export const rulesFor = (style?: MountainStyle): readonly PropRule[] =>
-  style === 'sprites' ? [...PROP_RULES, ...MOUNTAIN_SPRITE_RULES] : PROP_RULES;

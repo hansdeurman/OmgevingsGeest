@@ -4,11 +4,10 @@ import {
   MOUNTAIN_FROM,
   blurHeights,
   lakeHeight,
-  landHeight,
+  paintContours,
   shadeSlopes,
   sliceTerrain,
   terrainHeight,
-  waterHeight,
   type Slice,
 } from '../relief';
 import { getPixel, paintRaster, setPixel, createRaster, type Raster } from '../raster';
@@ -37,26 +36,6 @@ describe('terrainHeight', () => {
     for (let e = 0; e <= MAX_ELEVATION; e++) {
       for (const ridge of [0, 0.5, 1]) expect(lakeHeight(e, OPTS)).toBeLessThanOrEqual(terrainHeight(e, ridge, OPTS));
     }
-  });
-});
-
-describe('sprite style', () => {
-  const SPRITES = { height: 40, style: 'sprites' as const };
-
-  it('keeps all land flat: mountains are drawn as sprites instead', () => {
-    for (let e = 0; e <= MAX_ELEVATION; e++) expect(landHeight(e, 1, SPRITES)).toBe(0);
-  });
-
-  it('still raises high water above the floor, more for higher lakes', () => {
-    expect(waterHeight(0, SPRITES)).toBe(0);
-    expect(waterHeight(5, SPRITES)).toBeGreaterThan(0);
-    expect(waterHeight(7, SPRITES)).toBeGreaterThan(waterHeight(5, SPRITES));
-    expect(waterHeight(MAX_ELEVATION, SPRITES)).toBeLessThanOrEqual(SPRITES.height);
-  });
-
-  it('matches the relief functions in relief style', () => {
-    expect(landHeight(6, 0.3, OPTS)).toBe(terrainHeight(6, 0.3, OPTS));
-    expect(waterHeight(6, OPTS)).toBe(lakeHeight(6, OPTS));
   });
 });
 
@@ -96,6 +75,26 @@ describe('shadeSlopes', () => {
     shadeSlopes(right, ramp(-1));
     expect(getPixel(left, 4, 4)[0]).toBeGreaterThan(100);
     expect(getPixel(right, 4, 4)[0]).toBeLessThan(100);
+  });
+});
+
+describe('paintContours', () => {
+  const W = 12;
+  const grey = () => paintRaster(W, 4, () => [100, 100, 100]);
+  /** Elevation rising one step every two pixels to the right. */
+  const ramp = Float32Array.from({ length: W * 4 }, (_, i) => (i % W) / 2);
+
+  it('draws a darker line where the ground crosses a whole step', () => {
+    const g = grey();
+    paintContours(g, ramp, 1);
+    const xs = [...Array(W).keys()].filter((x) => getPixel(g, x, 1)[0] < 100);
+    expect(xs).toEqual([1, 3, 5, 7, 9]); // just before each step up
+  });
+
+  it('draws nothing on level ground, such as a lake surface', () => {
+    const g = grey();
+    paintContours(g, new Float32Array(W * 4).fill(5.5), 1);
+    expect(getPixel(g, 6, 2)[0]).toBe(100);
   });
 });
 

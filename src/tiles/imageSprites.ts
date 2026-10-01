@@ -26,10 +26,10 @@ export const SPRITE_HEIGHTS: Record<PropKind, number> = {
   flower: 0.15,
   pebble: 0.09,
   boulder: 0.45,
-  hill: 0.65,
-  crag: 1.2,
-  peak: 1.55,
-  fall: 0.8,
+  hill: 0.45,
+  crag: 0.7,
+  peak: 0.95,
+  fall: 0.7,
 };
 
 /** Generated art carries no shadow; the renderer adds one this wide (share of sprite width). */
