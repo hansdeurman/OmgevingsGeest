@@ -1,3 +1,4 @@
+import { withDerivedFuses } from './derivedTextures';
 import type { GroundKind } from './groundShader';
 import type { GroundTextures } from './placeholderTextures';
 import type { Raster } from './raster';
@@ -26,7 +27,7 @@ async function loadRaster(url: string, size: number): Promise<Raster> {
   return { width: size, height: size, data: ctx.getImageData(0, 0, size, size).data };
 }
 
-/** Load, downscale and seam-fix every listed texture. */
+/** Load, downscale and seam-fix every listed texture, then derive missing fuse textures. */
 export async function loadGroundTextures(files: TextureFiles, size = TEXTURE_SIZE): Promise<Partial<GroundTextures>> {
   const base = `${import.meta.env.BASE_URL}tiles/`;
   const entries = await Promise.all(
@@ -35,5 +36,5 @@ export async function loadGroundTextures(files: TextureFiles, size = TEXTURE_SIZ
       return [kind, rasters.map((r) => makeSeamless(r))] as const;
     }),
   );
-  return Object.fromEntries(entries);
+  return withDerivedFuses(Object.fromEntries(entries));
 }
