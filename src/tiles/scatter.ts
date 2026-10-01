@@ -17,6 +17,8 @@ export interface PropInstance {
   row: number;
   /** Drawn height in scene pixels, overriding the sprite's own (e.g. a waterfall fitted to its drop). */
   height?: number;
+  /** Stretch the sprite's height only, keeping its width (e.g. a lower lake rim). */
+  heightScale?: number;
   /** Mirror the sprite left-right. */
   flip?: boolean;
   /** Sprites drawn together as one object, back to front (e.g. the pieces of one mountain lake). */

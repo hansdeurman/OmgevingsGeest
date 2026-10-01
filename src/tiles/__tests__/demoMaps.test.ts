@@ -82,6 +82,53 @@ describe('highlands', () => {
   }
 });
 
+describe('mountains (random)', () => {
+  /** Each lake's surface level: connected lake cells above the sea, which all share one elevation. */
+  const lakeLevels = (grid: CoverGrid) => {
+    const isLake = (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] > 0.5;
+    const seen = new Set<number>();
+    const levels: number[] = [];
+    grid.cells.forEach((_, start) => {
+      if (seen.has(start) || !isLake(start)) return;
+      const stack = [start];
+      seen.add(start);
+      while (stack.length) {
+        const i = stack.pop()!;
+        const [col, row] = [i % grid.cols, Math.floor(i / grid.cols)];
+        for (const d of offsetNeighbours(row)) {
+          const [c, r] = [col + d.dc, row + d.dr];
+          const j = r * grid.cols + c;
+          if (c < 0 || r < 0 || c >= grid.cols || r >= grid.rows || seen.has(j) || !isLake(j)) continue;
+          expect(grid.elevation[j]).toBeCloseTo(grid.elevation[start], 6); // a lake is level
+          seen.add(j);
+          stack.push(j);
+        }
+      }
+      levels.push(grid.elevation[start]);
+    });
+    return levels;
+  };
+
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const { grid } = demoMap('mountains', seed);
+    const levels = lakeLevels(grid);
+
+    it(`has high mountains (seed ${seed})`, () => {
+      expect(Math.max(...grid.elevation)).toBeGreaterThanOrEqual(MAX_ELEVATION - 1);
+    });
+
+    it(`holds lakes at clearly different heights, from the foothills to high up (seed ${seed})`, () => {
+      expect(levels.length).toBeGreaterThanOrEqual(2);
+      expect(Math.max(...levels)).toBeGreaterThanOrEqual(5);
+      expect(Math.max(...levels) - Math.min(...levels)).toBeGreaterThanOrEqual(2);
+    });
+  }
+
+  it('is different for every seed', () => {
+    expect(demoMap('mountains', 1).grid.elevation).not.toEqual(demoMap('mountains', 2).grid.elevation);
+  });
+});
+
 describe('DEMO_MAPS', () => {
   it('builds every registered map', () => {
     for (const def of DEMO_MAPS) expect(def.build(1).grid.cells.length).toBeGreaterThan(0);

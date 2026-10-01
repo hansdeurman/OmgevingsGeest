@@ -1,7 +1,9 @@
 import { offsetNeighbours, offsetToPixel, type Pixel } from '../math/hex';
 import { hash2, valueNoise2D } from '../math/noise';
-import { clamp } from '../math/scalar';
+import { clamp, smoothstep } from '../math/scalar';
 import type { CoverGrid } from './coverGrid';
+import { MAX_ELEVATION } from './levels';
+import { blurHeights } from './relief';
 import type { PropKind } from './propRules';
 import type { River } from './rivers';
 import type { PropInstance } from './scatter';
@@ -18,7 +20,16 @@ import type { PropInstance } from './scatter';
  */
 
 /** Elevation (steps) from which standing water is a mountain lake. */
-export const TARN_FROM = 4.5;
+export const TARN_FROM = 2.5;
+
+/**
+ * How tall a lake's rim stands, as a share of a full mountain-lake piece:
+ * low on the foothills, full height high in the range. Pieces are only
+ * stretched vertically, so the hollow keeps its width.
+ */
+export function rimScale(level: number): number {
+  return clamp(0.4 + (0.6 * (level - TARN_FROM)) / (MAX_ELEVATION - 1 - TARN_FROM), 0.4, 1);
+}
 /** In-game height of a mountain-lake piece, in hex radii. */
 export const TARN_HEIGHT = 0.8;
 /**
@@ -44,9 +55,13 @@ export interface Surface {
   width: number;
   height: number;
   lift: number;
+  /** The lake's surface elevation (steps): higher water is colder and darker. */
+  level: number;
 }
 
 const FULL: ReadonlySet<PropKind> = new Set(['tarn', 'tarnFront', 'tarnSide']);
+/** How much the inner corners of a lake's shore are filled in, as a share of the oval's half width. */
+const CORNER_ROUNDING = 0.5;
 /** How far a lake's shore waves inward, as a share of the oval's half width. */
 const SHORE_WAVE = 0.8;
 
@@ -75,9 +90,9 @@ function inTriangle(p: Pixel, a: Pixel, b: Pixel, c: Pixel): boolean {
 /**
  * The water surface over lake pieces at `centres`: each piece's oval (half
  * axes `rx`, `ry`), swept along every link between two pieces and filled
- * between every three linked pieces. Anti-aliased at its edge; `wave` pulls
- * the shore inward by up to `amount` of rx, so long shores are not straight
- * (never outward, so the stone rim always shows).
+ * between every three linked pieces, its inner corners filled in. Anti-aliased
+ * at its edge; `wave` pulls the shore inward by up to `amount` of rx, so long
+ * shores are not straight (never outward, so the stone rim always shows).
  */
 export function lakeSurface(
   centres: readonly Pixel[],
@@ -85,7 +100,7 @@ export function lakeSurface(
   rx: number,
   ry: number,
   wave = { amount: 0, seed: 0 },
-): Omit<Surface, 'lift'> {
+): Omit<Surface, 'lift' | 'level'> {
   // In a space squeezed so the oval becomes a circle of radius rx, the surface is everything within rx of the skeleton.
   const k = rx / ry;
   const pts = centres.map((c) => ({ x: c.x, y: c.y * k }));
@@ -102,18 +117,22 @@ export function lakeSurface(
   const y0 = Math.floor(Math.min(...centres.map((c) => c.y)) - ry - 1);
   const width = Math.ceil(Math.max(...centres.map((c) => c.x)) + rx + 1) - x0;
   const height = Math.ceil(Math.max(...centres.map((c) => c.y)) + ry + 1) - y0;
-  const alpha = new Float32Array(width * height);
-  const inset = new Float32Array(width * height);
-  const waveScale = 1 / (2.5 * rx);
+  // Signed depth below the shore line per pixel.
+  const depth = new Float32Array(width * height);
+  const waveScale = 1 / (1.6 * rx);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const [gx, gy] = [x0 + x + 0.5, y0 + y + 0.5];
-      const shift = wave.amount ? rx * wave.amount * valueNoise2D(gx * waveScale, gy * waveScale, wave.seed) : 0;
-      const d = distance({ x: gx, y: gy * k }) + shift;
-      alpha[y * width + x] = clamp(rx - d + 0.5, 0, 1);
-      inset[y * width + x] = Math.max(0, rx - d);
+      const shift = wave.amount ? rx * wave.amount * smoothstep(0.3, 0.7, valueNoise2D(gx * waveScale, gy * waveScale, wave.seed)) : 0;
+      depth[y * width + x] = rx - distance({ x: gx, y: gy * k }) - shift;
     }
   }
+  // Smoothing fills the sharp inner corners where pieces join; keeping the larger depth leaves the outer edge as it is.
+  const smooth = depth.slice();
+  blurHeights(smooth, width, height, Math.max(1, Math.round(rx * CORNER_ROUNDING)));
+  const filled = depth.map((d, i) => Math.max(d, smooth[i]));
+  const alpha = filled.map((d) => clamp(d + 0.5, 0, 1));
+  const inset = filled.map((d) => Math.max(0, d));
   return { alpha, inset, x0, y0, width, height };
 }
 
@@ -127,6 +146,7 @@ export function tarnGroups(grid: CoverGrid, size: number, seed: number, rivers: 
   const spills = new Map(rivers.map((r) => [r.cells[0], spillKind(centre(r.cells[0]), centre(r.outlet[1]))]));
   const piece = (kind: PropKind, p: Pixel, a: number, b: number, flip = false): PropInstance => ({
     kind,
+    heightScale: rimScale(grid.elevation[a]),
     variant: Math.floor(hash2(a, b, seed + 5) * 1000),
     x: p.x,
     y: p.y,
@@ -143,7 +163,6 @@ export function tarnGroups(grid: CoverGrid, size: number, seed: number, rivers: 
 
   const h = TARN_HEIGHT * size;
   const rx = TARN_SHAPE.rx * TARN_SHAPE.aspect * h;
-  const ry = (TARN_SHAPE.ry * h) / squash; // the oval's depth on the ground, before the view squashes it
   const seen = new Set<number>();
   const groups: TarnGroup[] = [];
   for (let start = 0; start < cols * rows; start++) {
@@ -168,8 +187,12 @@ export function tarnGroups(grid: CoverGrid, size: number, seed: number, rivers: 
       return piece('tarn', { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, cells[a], cells[b]);
     });
     const full = own.map((p) => FULL.has(p.kind));
+    const level = grid.elevation[start];
+    const tall = h * rimScale(level);
+    const ry = (TARN_SHAPE.ry * tall) / squash; // the oval's depth on the ground, before the view squashes it
+    const fullLinks = links.filter(([a, b]) => full[a] && full[b]);
     const surface = full.some(Boolean)
-      ? { ...lakeSurface(cells.map(centre), links.filter(([a, b]) => full[a] && full[b]), rx, ry, { amount: SHORE_WAVE, seed }), lift: (1 - TARN_SHAPE.top) * h }
+      ? { ...lakeSurface(cells.map(centre), fullLinks, rx, ry, { amount: SHORE_WAVE, seed }), lift: (1 - TARN_SHAPE.top) * tall, level }
       : undefined;
     groups.push({ parts: [...own, ...linkPieces].sort((a, b) => a.y - b.y), surface });
   }

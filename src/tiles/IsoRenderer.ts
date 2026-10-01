@@ -145,7 +145,7 @@ export class IsoRenderer {
     const parts = (p.parts ?? [p]).map((part) => ({ part, ...this.sized(part) }));
     for (const { part, s, k } of parts) {
       if (s.shadow) drawShadow(ctx, part, s.shadow * k);
-      this.drawSprite(ctx, part, s.image, s.width * k, s.height * k);
+      this.drawSprite(ctx, part, s.image, s.width * k, s.height * k * (part.heightScale ?? 1));
     }
     if (p.surface) {
       const { raster, x, y, height } = p.surface;

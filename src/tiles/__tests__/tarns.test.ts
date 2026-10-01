@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { offsetToPixel } from '../../math/hex';
 import { createCoverGrid, type CellInit } from '../coverGrid';
 import type { River } from '../rivers';
-import { lakeSurface, tarnGroups } from '../tarns';
+import { TARN_FROM, lakeSurface, tarnGroups } from '../tarns';
 
 const SIZE = 10;
 const SQUASH = 0.65;
@@ -61,6 +61,19 @@ describe('tarnGroups', () => {
     expect(pond.surface).toBeUndefined(); // the pond sprite shows its own little water
   });
 
+  it('stands a lake higher up on a taller rim, and lifts its water further', () => {
+    const lakeAt = (e: number) => createCoverGrid(3, 3, (c, r): CellInit => (c === 1 && r === 1 ? { water: 3, elevation: e } : { elevation: e + 1 }));
+    const [low] = tarnGroups(lakeAt(TARN_FROM + 0.5), SIZE, 1, [], SQUASH);
+    const [high] = tarnGroups(lakeAt(7), SIZE, 1, [], SQUASH);
+    expect(high.parts[0].heightScale!).toBeGreaterThan(low.parts[0].heightScale!);
+    expect(high.surface!.lift).toBeGreaterThan(low.surface!.lift);
+    expect(high.surface!.level).toBe(7);
+  });
+
+  it('raises lakes from the foothills up, not only those high in the range', () => {
+    expect(TARN_FROM).toBeLessThanOrEqual(3);
+  });
+
   it('keeps separate lakes separate, and leaves low lakes on the ground', () => {
     expect(tarnGroups(map('7777777', '7L777L7', '7777777'), SIZE, 1, [], SQUASH)).toHaveLength(2);
     const low = createCoverGrid(3, 1, (c): CellInit => (c === 1 ? { water: 3, elevation: 2 } : { elevation: 3 }));
@@ -105,8 +118,16 @@ describe('lakeSurface', () => {
     expect(alphaAt(wavy, 40, 20)).toBe(1);
   });
 
-  it('fills between three mutually linked centres', () => {
-    const sf = lakeSurface([{ x: 10, y: 10 }, { x: 50, y: 10 }, { x: 30, y: 50 }], [[0, 1], [1, 2], [0, 2]], RX, RY);
-    expect(alphaAt(sf, 30, 23)).toBe(1); // the middle, far from every edge
+  it('fills between three mutually linked centres, as close as lake pieces stand', () => {
+    const sf = lakeSurface([{ x: 10, y: 10 }, { x: 22, y: 10 }, { x: 16, y: 20 }], [[0, 1], [1, 2], [0, 2]], RX, RY);
+    expect(alphaAt(sf, 16, 13)).toBe(1); // the middle
+  });
+
+  it('melts neighbouring pieces into a rounded shore, not a straight-edged polygon', () => {
+    // Three in a row: halfway between the links the shore bulges a little beyond a single oval.
+    const row = lakeSurface([{ x: 10, y: 20 }, { x: 22, y: 20 }, { x: 34, y: 20 }], [[0, 1], [1, 2]], RX, RY);
+    const reach = (x: number) => [...Array(row.height).keys()].filter((y) => row.alpha[y * row.width + Math.floor(x - row.x0)] > 0.5).length;
+    expect(reach(22)).toBeGreaterThanOrEqual(reach(10));
+    expect(reach(3)).toBeLessThan(reach(10)); // rounded off at the ends
   });
 });

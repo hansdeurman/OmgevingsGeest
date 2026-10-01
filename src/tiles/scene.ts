@@ -8,7 +8,8 @@ import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { PROP_RULES, type PropRule } from './propRules';
 import { ridgeProps } from './ridges';
-import { tarnGroups, type Surface } from './tarns';
+import { TARN_FROM, tarnGroups, type Surface } from './tarns';
+import { MAX_ELEVATION } from './levels';
 import { valueNoise2D } from '../math/noise';
 import { smoothstep } from '../math/scalar';
 import { createRaster, getPixel, setPixel, type Raster } from './raster';
@@ -146,9 +147,14 @@ function cascadeProp(c: Cascade, variant: number, frame: GridFrame, view: IsoVie
   return { kind: 'fall', variant, x: iso.x, y: iso.y, col: hex.col, row: hex.row, height: c.height };
 }
 
-/** A mountain lake's water, as painted in its sprites: lighter in the shallows, deep blue in the middle. */
+/**
+ * A mountain lake's water, as painted in its sprites: lighter in the shallows,
+ * deep blue in the middle; a lake on the foothills is a fresher, greener blue.
+ */
 const LAKE_SHALLOW: RGB = [66, 118, 148];
 const LAKE_DEEP: RGB = [36, 82, 114];
+const HILL_SHALLOW: RGB = [84, 150, 160];
+const HILL_DEEP: RGB = [46, 112, 138];
 /** Distance from the shore over which the water deepens, as a share of the lake's surface height. */
 const LAKE_SHELF = 0.6;
 
@@ -160,13 +166,15 @@ const LAKE_SHELF = 0.6;
 function paintSurface(s: Surface, frame: GridFrame, view: IsoView) {
   const raster = createRaster(s.width, s.height);
   const shelf = LAKE_SHELF * s.lift;
+  const cold = smoothstep(TARN_FROM, MAX_ELEVATION - 1, s.level);
+  const [shallow, deep] = [mix(HILL_SHALLOW, LAKE_SHALLOW, cold), mix(HILL_DEEP, LAKE_DEEP, cold)];
   for (let y = 0; y < s.height; y++) {
     for (let x = 0; x < s.width; x++) {
       const i = y * s.width + x;
       if (!s.alpha[i]) continue;
       const [gx, gy] = [s.x0 + x + frame.ox, s.y0 + y + frame.oy];
       const ripple = valueNoise2D(gx * 0.08, gy * 0.22, 41) - 0.5;
-      const c = shade(mix(LAKE_SHALLOW, LAKE_DEEP, smoothstep(0, shelf, s.inset[i])), 1 + 0.16 * ripple);
+      const c = shade(mix(shallow, deep, smoothstep(0, shelf, s.inset[i])), 1 + 0.16 * ripple);
       setPixel(raster, x, y, c, Math.round(s.alpha[i] * 255));
     }
   }

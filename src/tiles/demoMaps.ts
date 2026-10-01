@@ -139,10 +139,17 @@ function highlands(seed: number): DemoMap {
     }
   }
 
-  // Fill basins: cells that would hold water deeper than a third of a step become lake, flat at
-  // its level; shallower ones become a damp, level shore.
+  return { grid: fillLakes(cols, rows, elevation, cover), labels: [] };
+}
+
+/**
+ * Let rain fill every basin (priority-flood): cells that would hold water
+ * deeper than a third of a step become lake, flat at its level; shallower
+ * ones become a damp, level shore.
+ */
+function fillLakes(cols: number, rows: number, elevation: number[], cover: Partial<Cover>[]): CoverGrid {
   const waterLevel = fillDepressions({ cols, rows, elevation });
-  const grid = createCoverGrid(cols, rows, (col, row): CellInit => {
+  return createCoverGrid(cols, rows, (col, row): CellInit => {
     const i = row * cols + col;
     const depth = waterLevel[i] - elevation[i];
     if (depth > 0.35 && elevation[i] > 0) {
@@ -151,7 +158,69 @@ function highlands(seed: number): DemoMap {
     if (depth > 0) return { ...cover[i], water: 1, elevation: waterLevel[i] }; // damp, level shore
     return { ...cover[i], elevation: elevation[i] };
   });
-  return { grid, labels: [] };
+}
+
+/** Map coordinates of a cell in [-1, 1], rows shifted as in the odd-r layout. */
+const mapXY = (col: number, row: number, cols: number, rows: number) => [((col + (row & 1) * 0.5) / (cols - 0.5)) * 2 - 1, (row / (rows - 1)) * 2 - 1];
+
+/** Floors of the basins stamped into the mountain map: from the foothills to high in the range. */
+const BASIN_FLOORS = [2.5, 4, 5.5, 6.8];
+
+/**
+ * Random mountain country: ranges along ridged noise over rolling lowland,
+ * with basins stamped in at very different heights, each a bowl held by a
+ * rim with one low notch. Rain fills them (priority-flood), so lakes lie at
+ * many levels, each overflowing through its notch.
+ */
+function mountains(seed: number): DemoMap {
+  const [cols, rows] = [24, 18];
+  const rng = mulberry32(seed * 131 + 7);
+  const noise = (s: number, x: number, y: number) => fbm2D(x, y, { seed: seed * 13 + s, octaves: 4, persistence: 0.5, lacunarity: 2 });
+  const landAt = (nx: number, ny: number) => noise(0, nx * 2, ny * 2) * 0.8 + (1 - Math.hypot(nx * 0.9, ny)) * 0.8 - 0.25;
+
+  // Basins on land, apart from each other.
+  const basins: { x: number; y: number; r: number; floor: number; notch: number }[] = [];
+  for (const floor of BASIN_FLOORS) {
+    for (let tries = 0; tries < 40; tries++) {
+      const [x, y] = [rng() * 1.3 - 0.65, rng() * 1.1 - 0.55];
+      if (landAt(x, y) < 0.5 || basins.some((b) => Math.hypot(b.x - x, b.y - y) < 0.5)) continue;
+      basins.push({ x, y, r: 0.1 + rng() * 0.06, floor, notch: rng() * Math.PI * 2 });
+      break;
+    }
+  }
+
+  const elevation: number[] = [];
+  const cover: Partial<Cover>[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const [nx, ny] = mapXY(col, row, cols, rows);
+      const land = landAt(nx, ny);
+      if (land < 0.3) {
+        elevation.push(0);
+        cover.push({ water: land < 0.12 ? 4 : land < 0.2 ? 3 : land < 0.26 ? 2 : 1 });
+        continue;
+      }
+      const lowland = Math.min(3, (land - 0.3) * 6);
+      const ridge = (1 - Math.abs(2 * noise(5, nx * 1.6, ny * 1.6) - 1)) ** 2.5;
+      const range = ridge * 5.5 * smoothstep(0.4, 0.62, noise(6, nx * 1.1, ny * 1.1));
+      let e = lowland + range;
+      for (const b of basins) {
+        const d = Math.hypot((nx - b.x) * 1.4, ny - b.y) / b.r;
+        const angle = Math.atan2(ny - b.y, (nx - b.x) * 1.4);
+        const off = Math.atan2(Math.sin(angle - b.notch), Math.cos(angle - b.notch));
+        const notch = Math.exp(-(off * off) / 0.15);
+        const bowl = d < 1 ? b.floor - 1.1 + 0.6 * d * d : b.floor + (1.6 - 1.4 * notch) * Math.exp(-(((d - 1.3) / 0.45) ** 2));
+        e += (bowl - e) * smoothstep(2.3, 1.5, d);
+      }
+      e = clamp(e + (noise(7, nx * 4, ny * 4) - 0.5) * 0.6, 0.3, MAX_ELEVATION);
+      elevation.push(e);
+      cover.push({
+        grass: e >= 6 ? 0 : level((land - 0.3) * 8 + (noise(1, nx * 3, ny * 3) - 0.5) * 6 - Math.max(0, e - 3.5) * 2),
+        trees: e <= 4.5 ? level((noise(2, nx * 3.5, ny * 3.5) - 0.42) * 14 + (land - 0.3) * 4 - Math.max(0, e - 3) * 2) : 0,
+      });
+    }
+  }
+  return { grid: fillLakes(cols, rows, elevation, cover), labels: [] };
 }
 
 /** Every hex random: a stress test for how well arbitrary neighbours fuse. */
@@ -169,6 +238,7 @@ export const DEMO_MAPS: readonly DemoMapDef[] = [
   { id: 'levels', name: 'Levels showcase', build: levelsShowcase },
   { id: 'island', name: 'Island', build: island },
   { id: 'highlands', name: 'Highlands', build: highlands },
+  { id: 'mountains', name: 'Mountains (random)', build: mountains },
   { id: 'random', name: 'Random mix', build: randomMix },
 ];
 
