@@ -2,6 +2,7 @@ import { fbm2D } from '../math/noise';
 import { clamp, smoothstep } from '../math/scalar';
 import { mix, shade, type RGB } from '../rendering/palette';
 import { MAX_ELEVATION } from './levels';
+import { waterfallColor } from './pools';
 import { createRaster, getPixel, sampleRaster, setPixel, type Raster } from './raster';
 
 /**
@@ -10,9 +11,16 @@ import { createRaster, getPixel, sampleRaster, setPixel, type Raster } from './r
  * continuous height field: neighbouring mountain hexes merge into a single
  * wall with ridges, and basins between them hold lakes at their own level.
  */
+/**
+ * 'relief': mountains are part of the height field. 'sprites': all land stays
+ * flat, mountains are sprites, and only high water rises, as a pool on rock.
+ */
+export type MountainStyle = 'relief' | 'sprites';
+
 export interface ReliefOptions {
   /** Height of the highest ground, in screen pixels (about one hex row). */
   height: number;
+  style?: MountainStyle;
 }
 
 /** Elevation (terrace steps) from which land turns into mountain and gets ridges. */
@@ -34,6 +42,19 @@ export function terrainHeight(e: number, ridge: number, o: ReliefOptions): numbe
 /** A lake lies flat at the lowest ridge height of its elevation, so its rim always rises above it. */
 export function lakeHeight(e: number, o: ReliefOptions): number {
   return o.height * curve(e) * (1 - RIDGE_AMP * 0.5 * mountainness(e));
+}
+
+/** Share of the relief height a pool at the top elevation rises to, in sprite style. */
+const POOL = 0.55;
+
+/** Height of land in the chosen style. */
+export function landHeight(e: number, ridge: number, o: ReliefOptions): number {
+  return o.style === 'sprites' ? 0 : terrainHeight(e, ridge, o);
+}
+
+/** Height of a water surface at elevation `e` in the chosen style. */
+export function waterHeight(e: number, o: ReliefOptions): number {
+  return o.style === 'sprites' ? o.height * POOL * curve(e) : lakeHeight(e, o);
 }
 
 /** Sharp-crested ridge noise in [0, 1]; crests are thin, valleys broad. */
@@ -107,9 +128,17 @@ export interface Slice {
  * map) so the renderer can interleave props between slices.
  * Every ground pixel paints a vertical span from its raised position down to
  * where the next pixel toward the viewer starts; steep spans become cliff
- * faces textured with `wall`. Later (nearer) pixels paint over earlier ones.
+ * faces textured with `wall`, or a waterfall where `falls` marks the pixel.
+ * Later (nearer) pixels paint over earlier ones.
  */
-export function sliceTerrain(ground: Raster, heights: Float32Array, groups: Int16Array, squash: number, wall?: Raster): Slice[] {
+export function sliceTerrain(
+  ground: Raster,
+  heights: Float32Array,
+  groups: Int16Array,
+  squash: number,
+  wall?: Raster,
+  falls?: Uint8Array,
+): Slice[] {
   const { width: W, height: H } = ground;
   const span = (x: number, y: number): [number, number] => {
     const i = y * W + x;
@@ -144,12 +173,15 @@ export function sliceTerrain(ground: Raster, heights: Float32Array, groups: Int1
       const [t, b] = span(x, y);
       const t0 = Math.floor(t);
       const cliff = b - t > 2.5;
+      const falling = falls?.[y * W + x] === 1;
       const [cr, cg, cb] = getPixel(ground, x, y);
       const slice = slices[g];
       for (let py = t0; py < Math.ceil(b); py++) {
         const k = py - t0;
         let c: RGB = [cr, cg, cb];
-        if (cliff && k >= 1) {
+        if (cliff && k >= 1 && falling) {
+          c = waterfallColor(x, py, k);
+        } else if (cliff && k >= 1) {
           const snowy = cr + cg + cb > 3 * 215;
           c = shade(c, snowy ? 0.88 : 0.78);
           if (wall && !snowy) c = mix(c, shade(sampleRaster(wall, x, py), 0.9), smoothstep(0, 4, k) * 0.85);

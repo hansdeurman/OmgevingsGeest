@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_ELEVATION } from '../levels';
-import { MOUNTAIN_FROM, blurHeights, lakeHeight, shadeSlopes, sliceTerrain, terrainHeight, type Slice } from '../relief';
+import {
+  MOUNTAIN_FROM,
+  blurHeights,
+  lakeHeight,
+  landHeight,
+  shadeSlopes,
+  sliceTerrain,
+  terrainHeight,
+  waterHeight,
+  type Slice,
+} from '../relief';
 import { getPixel, paintRaster, setPixel, createRaster, type Raster } from '../raster';
 
 const OPTS = { height: 40 };
@@ -27,6 +37,26 @@ describe('terrainHeight', () => {
     for (let e = 0; e <= MAX_ELEVATION; e++) {
       for (const ridge of [0, 0.5, 1]) expect(lakeHeight(e, OPTS)).toBeLessThanOrEqual(terrainHeight(e, ridge, OPTS));
     }
+  });
+});
+
+describe('sprite style', () => {
+  const SPRITES = { height: 40, style: 'sprites' as const };
+
+  it('keeps all land flat: mountains are drawn as sprites instead', () => {
+    for (let e = 0; e <= MAX_ELEVATION; e++) expect(landHeight(e, 1, SPRITES)).toBe(0);
+  });
+
+  it('still raises high water above the floor, more for higher lakes', () => {
+    expect(waterHeight(0, SPRITES)).toBe(0);
+    expect(waterHeight(5, SPRITES)).toBeGreaterThan(0);
+    expect(waterHeight(7, SPRITES)).toBeGreaterThan(waterHeight(5, SPRITES));
+    expect(waterHeight(MAX_ELEVATION, SPRITES)).toBeLessThan(SPRITES.height);
+  });
+
+  it('matches the relief functions in relief style', () => {
+    expect(landHeight(6, 0.3, OPTS)).toBe(terrainHeight(6, 0.3, OPTS));
+    expect(waterHeight(6, OPTS)).toBe(lakeHeight(6, OPTS));
   });
 });
 
@@ -107,6 +137,19 @@ describe('sliceTerrain', () => {
     expect(getPixel(sliceTerrain(ground, heights, rows, squash)[0].raster, 2, 0)[3]).toBe(255);
     expect(sliceTerrain(ground, heights, rows, squash)[0].top).toBeLessThan(0);
     expect(getPixel(img, 2, 4)[0]).toBe(180);
+  });
+
+  it('paints a waterfall instead of rock where a raised edge is marked as falling water', () => {
+    const red = paintRaster(W, H, () => [200, 0, 0]);
+    const heights = new Float32Array(W * H);
+    heights[(H - 1) * W + 3] = 3;
+    const falls = new Uint8Array(W * H);
+    falls[(H - 1) * W + 3] = 1;
+    const dry = sliceTerrain(red, heights, rows, squash)[1];
+    const wet = sliceTerrain(red, heights, rows, squash, undefined, falls)[1];
+    const y = Math.ceil(H * squash) - 1 - wet.top;
+    expect(getPixel(dry.raster, 3, y)[0]).toBeGreaterThan(getPixel(dry.raster, 3, y)[2]);
+    expect(getPixel(wet.raster, 3, y)[2]).toBeGreaterThan(getPixel(wet.raster, 3, y)[0]);
   });
 
   it('extends a raised front edge down to the floor', () => {

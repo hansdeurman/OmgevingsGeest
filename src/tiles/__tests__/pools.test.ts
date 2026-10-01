@@ -1,0 +1,97 @@
+import { describe, expect, it } from 'vitest';
+import { fillPoolHoles, markFalls, paintPoolRims, paintSplash } from '../pools';
+import { getPixel, paintRaster } from '../raster';
+
+const W = 12;
+/** A pool raised 5px over the square 3..8. */
+const inSquare = (i: number) => i % W >= 3 && i % W <= 8 && Math.floor(i / W) >= 3 && Math.floor(i / W) <= 8;
+const squarePool = () => Uint8Array.from({ length: W * W }, (_, i) => (inSquare(i) ? 1 : 0));
+const raise = (pool: Uint8Array) => Float32Array.from(pool, (p) => p * 5);
+
+describe('fillPoolHoles', () => {
+  it('raises dry pockets enclosed by raised water to the water level', () => {
+    const pool = squarePool();
+    const heights = raise(pool);
+    pool[5 * W + 5] = 0;
+    heights[5 * W + 5] = 0;
+    fillPoolHoles(pool, heights, W, W);
+    expect(pool[5 * W + 5]).toBe(1);
+    expect(heights[5 * W + 5]).toBe(5);
+  });
+
+  it('leaves land that reaches the open map alone, and never lowers ground', () => {
+    const pool = squarePool();
+    const heights = raise(pool);
+    pool[5 * W + 3] = 0; // a bay open to the outside
+    heights[5 * W + 3] = 0;
+    heights[0] = 9;
+    fillPoolHoles(pool, heights, W, W);
+    expect(pool[5 * W + 3]).toBe(0);
+    expect(heights[0]).toBe(9);
+  });
+});
+
+describe('markFalls', () => {
+  it('marks the stretch of pool nearest each outlet, however far away the outlet lies', () => {
+    for (const x of [10.5, 40.5]) {
+      const falls = markFalls(squarePool(), W, W, [{ x, y: 5.5 }], 1.5);
+      const marked = [...falls.keys()].filter((i) => falls[i]);
+      expect(falls[5 * W + 8]).toBe(1);
+      expect(marked.every((i) => i % W >= 7 && Math.abs(Math.floor(i / W) - 5) <= 1)).toBe(true);
+    }
+  });
+
+  it('marks nothing without a pool', () => {
+    expect(markFalls(new Uint8Array(W * W), W, W, [{ x: 1, y: 1 }], 2).some(Boolean)).toBe(false);
+  });
+});
+
+describe('paintSplash', () => {
+  const sand = () => paintRaster(W, W, () => [220, 190, 120]);
+  const pool = squarePool();
+  const falls = new Uint8Array(W * W);
+  falls[8 * W + 5] = 1; // pours over the front (bottom) edge
+
+  it('foams up the land right at the foot of a waterfall', () => {
+    const g = sand();
+    paintSplash(g, pool, falls, 2);
+    const [r, , b] = getPixel(g, 5, 9);
+    expect(b).toBeGreaterThan(r);
+  });
+
+  it('leaves the pool itself and land away from the fall untouched', () => {
+    const g = sand();
+    paintSplash(g, pool, falls, 2);
+    expect(getPixel(g, 5, 7)).toEqual([220, 190, 120, 255]);
+    expect(getPixel(g, 1, 1)).toEqual([220, 190, 120, 255]);
+  });
+});
+
+describe('paintPoolRims', () => {
+  const blue = () => paintRaster(W, W, () => [40, 120, 220]);
+  const pool = squarePool();
+  const heights = raise(pool);
+  const falls = new Uint8Array(W * W);
+  falls[5 * W + 8] = 1;
+
+  it('rings raised water with a stone lip and leaves its middle and the land alone', () => {
+    const g = blue();
+    paintPoolRims(g, heights, pool, falls, 1);
+    const [r, , b] = getPixel(g, 3, 5);
+    expect(r).toBeGreaterThan(b); // stone, not water
+    expect(getPixel(g, 5, 5)).toEqual([40, 120, 220, 255]);
+    expect(getPixel(g, 1, 5)).toEqual([40, 120, 220, 255]);
+  });
+
+  it('turns the lip to foam where the water pours over', () => {
+    const g = blue();
+    paintPoolRims(g, heights, pool, falls, 1);
+    expect(Math.min(...getPixel(g, 8, 5).slice(0, 3))).toBeGreaterThan(230);
+  });
+
+  it('paints no lip where the water is not raised', () => {
+    const g = blue();
+    paintPoolRims(g, new Float32Array(W * W), pool, falls, 1);
+    expect(getPixel(g, 3, 5)).toEqual([40, 120, 220, 255]);
+  });
+});

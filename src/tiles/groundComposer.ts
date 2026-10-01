@@ -7,7 +7,19 @@ import { shadeGround } from './groundShader';
 import { MAX_ELEVATION, zeroAmounts } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { createRaster, sampleVariants, setPixel, type Raster } from './raster';
-import { MOUNTAIN_FROM, RELIEF_BLEND, blurHeights, lakeHeight, ridgeNoise, shadeSlopes, terrainHeight, type ReliefOptions } from './relief';
+import type { Pixel } from '../math/hex';
+import { lakeOutlets } from './hydrology';
+import { fillPoolHoles, markFalls, paintPoolRims, paintSplash } from './pools';
+import {
+  MOUNTAIN_FROM,
+  RELIEF_BLEND,
+  blurHeights,
+  landHeight,
+  ridgeNoise,
+  shadeSlopes,
+  waterHeight,
+  type ReliefOptions,
+} from './relief';
 
 /** Size of the patches in which one texture variant dominates, in hex radii. */
 const VARIANT_PATCH = 2.5;
@@ -23,6 +35,30 @@ export interface Terrain {
   heights: Float32Array;
   /** Hex row each ground pixel belongs to, or -1 off the map. */
   rows: Int16Array;
+  /** 1 where water pours over a lake's outlet edge: its drop is drawn as a waterfall. */
+  falls: Uint8Array;
+}
+
+/** Width of the waterfall along a pool's rim, in hex radii. */
+const FALL_WIDTH = 0.5;
+/** Width of the stone lip around raised water, in hex radii. */
+const RIM_WIDTH = 0.06;
+/** Reach of the foam at a waterfall's foot, in hex radii. */
+const SPLASH_RADIUS = 0.3;
+
+/**
+ * Where each raised lake pours out: the midpoint of the edge between its
+ * basin and the lowest neighbour it overflows into (grid-local pixels).
+ */
+function outletPoints(grid: CoverGrid, size: number): Pixel[] {
+  const isLake = (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] > 0.5;
+  const centre = (i: number) => offsetToPixel(i % grid.cols, Math.floor(i / grid.cols), size);
+  return lakeOutlets(grid, isLake)
+    .filter(({ from }) => from >= 0)
+    .map(({ from, to }) => {
+      const [a, b] = [centre(from), centre(to)];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    });
 }
 
 /** Surface elevation of the nearest open-water hex (this one or a neighbour), if any. */
@@ -42,8 +78,9 @@ function lakeLevelNear(grid: CoverGrid, col: number, row: number, x: number, y: 
 
 /**
  * Paint the whole map's ground as one continuous top-down image, and work out
- * each pixel's height: almost flat floor, continuous mountains with ridges,
- * and lakes lying flat at their own level. Slopes are then shaded by the light.
+ * each pixel's height: almost flat floor, continuous mountains with ridges
+ * (relief style only), and lakes lying flat at their own level, pouring over
+ * their outlet as a waterfall. Slopes are then shaded by the light.
  * Because it is one image, identical neighbours join without seams and fuse
  * zones run freely across hex edges. Pixels off the map stay transparent.
  */
@@ -60,6 +97,7 @@ export function composeTerrain(
   const ground = createRaster(W, H);
   const heights = new Float32Array(W * H);
   const rows = new Int16Array(W * H).fill(-1);
+  const pool = new Uint8Array(W * H);
   const a = zeroAmounts();
   const r = zeroAmounts();
   const reliefField = createCoverField(grid, size, RELIEF_BLEND);
@@ -77,14 +115,25 @@ export function composeTerrain(
       setPixel(ground, x, y, shadeGround(a, (kind) => sampleVariants(textures[kind], x, y, t)));
 
       const lake = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
+      if (lake !== undefined) {
+        heights[i] = waterHeight(lake, relief);
+        pool[i] = heights[i] > 0 ? 1 : 0; // sea level water is not a pool
+        continue;
+      }
+      if (relief.style === 'sprites') continue; // flat land: mountains are sprites
       const e = reliefField.sample(lx, ly, r).alt * MAX_ELEVATION;
-      heights[i] =
-        lake !== undefined
-          ? lakeHeight(lake, relief)
-          : terrainHeight(e, e > MOUNTAIN_FROM - 0.5 ? ridgeNoise(lx, ly, size, seed) : 0.5, relief);
+      heights[i] = landHeight(e, e > MOUNTAIN_FROM - 0.5 ? ridgeNoise(lx, ly, size, seed) : 0.5, relief);
     }
   }
-  blurHeights(heights, W, H, Math.max(1, Math.round(size * 0.08)));
-  shadeSlopes(ground, heights, SLOPE_SHADING);
-  return { ground, heights, rows };
+  fillPoolHoles(pool, heights, W, H);
+  const outlets = outletPoints(grid, size).map((p) => ({ x: p.x + frame.ox, y: p.y + frame.oy }));
+  const falls = markFalls(pool, W, H, outlets, FALL_WIDTH * size);
+  if (relief.style !== 'sprites') {
+    // Sprite style keeps land flat and pool edges crisp: nothing to smooth or shade.
+    blurHeights(heights, W, H, Math.max(1, Math.round(size * 0.08)));
+    shadeSlopes(ground, heights, SLOPE_SHADING);
+  }
+  paintPoolRims(ground, heights, pool, falls, Math.max(1, Math.round(size * RIM_WIDTH)));
+  paintSplash(ground, pool, falls, Math.round(size * SPLASH_RADIUS));
+  return { ground, heights, rows, falls };
 }

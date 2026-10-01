@@ -108,3 +108,52 @@ export function spillPoint(map: ElevationMap, level: readonly number[], lakeCell
   }
   return best;
 }
+
+/**
+ * A lake (connected lake cells) and where it pours out: from a cell of its
+ * basin into the lowest cell around it. The basin is the lake plus the land
+ * lying at its surface level (its shore), since water spreads over that first.
+ */
+export interface LakeOutlet {
+  cells: number[];
+  from: number;
+  to: number;
+}
+
+const LEVEL_EPS = 1e-6;
+
+/** Connected cells from `start` that pass `inside`, plus the lowest outside neighbour as the way out. */
+function floodRegion(map: ElevationMap, start: number, inside: (i: number) => boolean, seen: Set<number>) {
+  const cells: number[] = [];
+  const stack = [start];
+  seen.add(start);
+  let best = { from: -1, to: -1, level: Infinity };
+  while (stack.length) {
+    const i = stack.pop()!;
+    cells.push(i);
+    for (const j of neighbourIndices(map, i)) {
+      if (seen.has(j)) continue;
+      if (inside(j)) {
+        seen.add(j);
+        stack.push(j);
+      } else if (map.elevation[j] < best.level) {
+        best = { from: i, to: j, level: map.elevation[j] };
+      }
+    }
+  }
+  return { cells, from: best.from, to: best.to };
+}
+
+export function lakeOutlets(map: ElevationMap, isLake: (i: number) => boolean): LakeOutlet[] {
+  const seen = new Set<number>();
+  const out: LakeOutlet[] = [];
+  for (let start = 0; start < map.cols * map.rows; start++) {
+    if (seen.has(start) || !isLake(start)) continue;
+    const { cells } = floodRegion(map, start, isLake, seen);
+    const level = map.elevation[start];
+    const atLevel = (i: number) => isLake(i) || Math.abs(map.elevation[i] - level) < LEVEL_EPS;
+    const { from, to } = floodRegion(map, start, atLevel, new Set());
+    out.push({ cells, from, to });
+  }
+  return out;
+}

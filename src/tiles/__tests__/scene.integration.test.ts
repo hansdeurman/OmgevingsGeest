@@ -135,3 +135,23 @@ describe('buildScene (highlands)', () => {
     });
   });
 });
+
+describe('buildScene (highlands, sprite mountains)', () => {
+  const { grid: hg } = demoMap('highlands', 1);
+  const scene = buildScene(hg, textures, { hexSize: SIZE, seed: 3, blend: 0.6, view, relief: { height: 30, style: 'sprites' } });
+  const lakeTiles = scene.tiles.filter((t) => coverAt(hg, t.col, t.row)!.water >= 3 && t.elevation >= 3);
+  const dryTiles = scene.tiles.filter((t) => coverAt(hg, t.col, t.row)!.water === 0);
+
+  it('keeps the land flat and raises only the high lake', () => {
+    expect(dryTiles.every((t) => t.lift === 0)).toBe(true);
+    expect(lakeTiles.length).toBeGreaterThan(0);
+    expect(lakeTiles.every((t) => t.lift > 0)).toBe(true);
+  });
+
+  it('shows the mountains as peak sprites on the highest ground', () => {
+    const peaks = scene.bands.flatMap((b) => b.props).filter((p) => p.kind === 'peak');
+    expect(peaks.length).toBeGreaterThan(0);
+    for (const p of peaks) expect(elevationAt(hg, p.col, p.row)).toBeGreaterThanOrEqual(6.5);
+  });
+
+});

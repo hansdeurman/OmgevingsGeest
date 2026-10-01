@@ -7,6 +7,7 @@ import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
 import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadWalls } from '../../tiles/imageTextures';
 import type { Raster } from '../../tiles/raster';
+import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, tileAt, type Scene } from '../../tiles/scene';
 
@@ -23,6 +24,7 @@ const showGrid = ref(false);
 const useArt = ref(true);
 /** Height of the highest ground, as a percentage of one hex row's offset. */
 const relief = ref(100);
+const mountainStyle = ref<MountainStyle>('sprites');
 const HEX_ROW = 1.5 * HEX * SQUASH;
 
 const placeholders = createPlaceholderTextures(128);
@@ -47,7 +49,7 @@ function rebuild(): void {
     seed: seed.value,
     blend: blend.value,
     view: { squash: SQUASH, thickness: THICKNESS },
-    relief: { height: (relief.value / 100) * HEX_ROW },
+    relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value },
     cliff: useArt.value ? artCliff : undefined,
   });
   draw();
@@ -99,7 +101,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => resizeObs?.disconnect());
 
-watch([mapId, seed, blend, useArt, relief], rebuild);
+watch([mapId, seed, blend, useArt, relief, mountainStyle], rebuild);
 watch(showGrid, draw);
 </script>
 
@@ -121,6 +123,13 @@ watch(showGrid, draw);
       <label>
         Edge blend {{ blend.toFixed(2) }}
         <input v-model.number="blend" type="range" min="0.3" max="1" step="0.05" />
+      </label>
+      <label>
+        Mountains
+        <select v-model="mountainStyle">
+          <option value="sprites">Sprites, flat land</option>
+          <option value="relief">Relief</option>
+        </select>
       </label>
       <label>
         Relief {{ relief }}%

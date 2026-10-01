@@ -18,16 +18,16 @@ export const SPRITE_COUNTS: Partial<Record<PropKind, number>> = {
 
 /** In-game height of a kind's median variant, in hex radii. */
 export const SPRITE_HEIGHTS: Record<PropKind, number> = {
-  tree: 1.05,
-  bush: 0.34,
+  tree: 0.75,
+  bush: 0.27,
   tuft: 0.2,
   reed: 0.38,
   flower: 0.15,
   pebble: 0.09,
-  boulder: 0.55,
-  hill: 0.7,
-  crag: 1.35,
-  peak: 1.75,
+  boulder: 0.45,
+  hill: 0.65,
+  crag: 1.2,
+  peak: 1.55,
 };
 
 /** Generated art carries no shadow; the renderer adds one this wide (share of sprite width). */

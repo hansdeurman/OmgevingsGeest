@@ -6,7 +6,7 @@ import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, ty
 import { composeTerrain } from './groundComposer';
 import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
-import { PROP_RULES, type PropRule } from './propRules';
+import { rulesFor, type PropRule } from './propRules';
 import { getPixel, type Raster } from './raster';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
 import { scatterProps, type PropInstance } from './scatter';
@@ -132,14 +132,14 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const { hexSize: size, seed, view } = opts;
   const frame = gridFrame(grid.cols, grid.rows, size);
   const terrain = createTerrainSampler(grid, size, opts.blend, seed);
-  const { ground, heights, rows: rowOf } = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief);
+  const { ground, heights, rows: rowOf, falls } = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief);
   const bandOf = rowOf.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
-  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, opts.cliff).map((slice) => ({ slice, props: [] }));
+  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, opts.cliff, falls).map((slice) => ({ slice, props: [] }));
 
   const tiles: TileDraw[] = [];
   forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
 
-  for (const p of scatterProps(grid, terrain, opts.rules ?? PROP_RULES, size, seed)) {
+  for (const p of scatterProps(grid, terrain, opts.rules ?? rulesFor(opts.relief.style), size, seed)) {
     const fx = p.x + frame.ox;
     const fy = p.y + frame.oy;
     const iso = toIso({ x: fx, y: fy }, view);
