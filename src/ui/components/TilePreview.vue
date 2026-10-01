@@ -4,7 +4,8 @@ import { DEMO_MAPS, demoMap, type MapLabel } from '../../tiles/demoMaps';
 import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform } from '../../tiles/IsoRenderer';
 import { createPlaceholderSprites } from '../../tiles/placeholderSprites';
-import { createPlaceholderTextures } from '../../tiles/placeholderTextures';
+import { TEXTURE_FILES, loadGroundTextures } from '../../tiles/imageTextures';
+import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, type Scene } from '../../tiles/scene';
 
 const HEX = 40;
@@ -16,8 +17,10 @@ const mapId = ref(DEMO_MAPS[0].id);
 const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
+const useArt = ref(true);
 
-const textures = createPlaceholderTextures(128);
+const placeholders = createPlaceholderTextures(128);
+let art: Partial<GroundTextures> = {};
 const renderer = new IsoRenderer(createPlaceholderSprites(HEX));
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
@@ -26,6 +29,7 @@ let resizeObs: ResizeObserver | null = null;
 function rebuild(): void {
   const map = demoMap(mapId.value, seed.value);
   labels = map.labels;
+  const textures = useArt.value ? { ...placeholders, ...art } : placeholders;
   scene = buildScene(map.grid, textures, { hexSize: HEX, seed: seed.value, blend: blend.value, view: VIEW });
   draw();
 }
@@ -62,12 +66,18 @@ function draw(): void {
 
 onMounted(() => {
   rebuild();
+  loadGroundTextures(TEXTURE_FILES)
+    .then((loaded) => {
+      art = loaded;
+      rebuild();
+    })
+    .catch((e) => console.error('Tile art failed to load', e));
   resizeObs = new ResizeObserver(draw);
   if (host.value) resizeObs.observe(host.value);
 });
 onBeforeUnmount(() => resizeObs?.disconnect());
 
-watch([mapId, seed, blend], rebuild);
+watch([mapId, seed, blend, useArt], rebuild);
 watch(showGrid, draw);
 </script>
 
@@ -91,6 +101,7 @@ watch(showGrid, draw);
         <input v-model.number="blend" type="range" min="0.3" max="1" step="0.05" />
       </label>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
+      <label class="check"><input v-model="useArt" type="checkbox" /> Generated art</label>
       <p v-if="mapId === 'levels'" class="hint">Rows: water · grass · trees, levels 0 → 4</p>
     </div>
   </div>
