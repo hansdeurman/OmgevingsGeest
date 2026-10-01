@@ -27,7 +27,7 @@ export interface PropRule {
 }
 
 export const byLevel = (layer: Layer, counts: readonly number[]) => (c: Cover) => counts[c[layer]] ?? 0;
-export const byElevation = (counts: readonly number[]) => (_: Cover, e: number) => counts[e] ?? 0;
+export const byElevation = (counts: readonly number[]) => (_: Cover, e: number) => counts[Math.round(e)] ?? 0;
 
 const dry = (a: Amounts) => a.water < 0.34;
 /** Below the rock line: soil that can hold plants. */
@@ -55,11 +55,8 @@ export const PROP_RULES: readonly PropRule[] = [
     kind: 'pebble',
     count: (c) => (c.grass + c.trees === 0 && c.water <= 1 ? 2 : 0),
     spacing: 0.3,
-    fits: (a) => a.water < 0.3 && a.grass < 0.28,
+    fits: (a) => a.water < 0.3 && a.grass < 0.28 && a.alt < 0.35,
   },
-  // Relief: foothills, then crags, then snowy peaks as the land rises.
-  { kind: 'boulder', count: byElevation([0, 0, 0, 1, 1, 1]), chance: 0.3, spacing: 0.4, fits: dry },
-  { kind: 'hill', count: byElevation([0, 0, 0, 0, 1, 1]), chance: 0.5, centred: true, spacing: 0.5, fits: dry },
-  { kind: 'crag', count: byElevation([0, 0, 0, 0, 0, 0, 1]), chance: 0.6, centred: true, spacing: 0.5, fits: dry },
-  { kind: 'peak', count: byElevation([0, 0, 0, 0, 0, 0, 0, 1, 1]), chance: 0.8, centred: true, spacing: 0.5, fits: dry },
+  // Foothills get scattered boulders; the mountains themselves are relief, not sprites.
+  { kind: 'boulder', count: byElevation([0, 0, 0, 1, 1]), chance: 0.35, spacing: 0.4, fits: dry },
 ];

@@ -2,6 +2,7 @@ import { fbm2D } from '../math/noise';
 import { mulberry32 } from '../math/rng';
 import { clamp, smoothstep } from '../math/scalar';
 import { createCoverGrid, type CellInit, type CoverGrid } from './coverGrid';
+import { fillDepressions } from './hydrology';
 import { LEVEL_NAMES, MAX_ELEVATION, MAX_LEVEL, type Cover, type Layer, type Level } from './levels';
 
 export interface MapLabel {
@@ -90,7 +91,67 @@ function landscape(seed: number, shape: LandscapeShape): CoverGrid {
 }
 
 const island = (seed: number): DemoMap => ({ grid: landscape(seed, { cols: 22, rows: 16, land: 0.12, ridges: 2 }), labels: [] });
-const highlands = (seed: number): DemoMap => ({ grid: landscape(seed, { cols: 22, rows: 16, land: 0.22, ridges: 7 }), labels: [] });
+
+/**
+ * Lowlands in front, then a ring of mountains around a high basin, with one
+ * notch toward the valley and the tallest peaks behind it. Rain fills the
+ * basin (priority-flood) up to the notch: a high lake that would spill into
+ * the valley if it rose any further.
+ */
+function highlands(seed: number): DemoMap {
+  const cols = 22;
+  const rows = 16;
+  const rng = mulberry32(seed * 977 + 13);
+  const noise = (s: number, x: number, y: number) =>
+    fbm2D(x, y, { seed: seed * 11 + s, octaves: 4, persistence: 0.5, lacunarity: 2 });
+  const basin = { x: (rng() - 0.5) * 0.5, y: -0.35 + (rng() - 0.5) * 0.2 };
+  const notch = Math.PI / 2 + (rng() - 0.5) * 1.2; // facing roughly toward the viewer
+  const RING = 0.36;
+
+  const elevation: number[] = [];
+  const cover: Partial<Cover>[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const nx = ((col + (row & 1) * 0.5) / (cols - 0.5)) * 2 - 1;
+      const ny = (row / (rows - 1)) * 2 - 1;
+      const land = noise(0, nx * 2, ny * 2) * 0.8 + (1 - Math.hypot(nx * 0.9, ny)) * 0.8 - 0.25;
+      if (land < 0.3) {
+        elevation.push(0);
+        cover.push({ water: land < 0.12 ? 4 : land < 0.2 ? 3 : land < 0.26 ? 2 : 1 });
+        continue;
+      }
+      const dx = (nx - basin.x) * 1.4;
+      const dy = ny - basin.y;
+      const d = Math.hypot(dx, dy);
+      const angle = Math.atan2(dy, dx);
+      const off = Math.atan2(Math.sin(angle - notch), Math.cos(angle - notch)); // angular distance to the notch
+      const notchDip = Math.exp(-(off * off) / 0.12);
+      const backBoost = Math.max(0, -Math.sin(angle)) * 1.5;
+      const ring = Math.exp(-(((d - RING) / 0.14) ** 2)) * (3.6 + backBoost - 2.4 * notchDip);
+      const floor = d < RING ? 4.2 : Math.min(3.2, (land - 0.3) * 6);
+      const e = clamp(floor + ring + (noise(5, nx * 4, ny * 4) - 0.5) * 1.2, 0, MAX_ELEVATION);
+      elevation.push(e);
+      cover.push({
+        grass: e >= 6 ? 0 : level((land - 0.3) * 8 + (noise(1, nx * 3, ny * 3) - 0.5) * 6 - Math.max(0, e - 3.5) * 2),
+        trees: e <= 4.5 && d > RING + 0.1 ? level((noise(2, nx * 3.5, ny * 3.5) - 0.42) * 14 + (land - 0.3) * 4) : 0,
+      });
+    }
+  }
+
+  // Fill basins: cells that would hold water deeper than a third of a step become lake, flat at
+  // its level; shallower ones become a damp, level shore.
+  const waterLevel = fillDepressions({ cols, rows, elevation });
+  const grid = createCoverGrid(cols, rows, (col, row): CellInit => {
+    const i = row * cols + col;
+    const depth = waterLevel[i] - elevation[i];
+    if (depth > 0.35 && elevation[i] > 0) {
+      return { water: depth > 1.2 ? 4 : depth > 0.7 ? 3 : 2, elevation: waterLevel[i] };
+    }
+    if (depth > 0) return { ...cover[i], water: 1, elevation: waterLevel[i] }; // damp, level shore
+    return { ...cover[i], elevation: elevation[i] };
+  });
+  return { grid, labels: [] };
+}
 
 /** Every hex random: a stress test for how well arbitrary neighbours fuse. */
 function randomMix(seed: number): DemoMap {

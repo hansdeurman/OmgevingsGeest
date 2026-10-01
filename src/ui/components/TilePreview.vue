@@ -5,7 +5,8 @@ import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
-import { TEXTURE_FILES, loadGroundTextures, loadWalls } from '../../tiles/imageTextures';
+import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadWalls } from '../../tiles/imageTextures';
+import type { Raster } from '../../tiles/raster';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, type Scene } from '../../tiles/scene';
 
@@ -20,14 +21,16 @@ const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
 const useArt = ref(true);
-/** Terrace height in pixels per elevation step. */
-const step = ref(7);
+/** Height of the highest mountains, in pixels. */
+const mountain = ref(90);
+const HILL = 2;
 
 const placeholders = createPlaceholderTextures(128);
 let art: Partial<GroundTextures> = {};
 const placeholderSprites = createPlaceholderSprites(HEX);
 let artSprites: Partial<SpriteSet> = {};
 let artWalls: WallImages = {};
+let artCliff: Raster | undefined;
 const renderer = new IsoRenderer(placeholderSprites);
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
@@ -39,8 +42,14 @@ function rebuild(): void {
   const textures = useArt.value ? { ...placeholders, ...art } : placeholders;
   renderer.sprites = useArt.value ? { ...placeholderSprites, ...artSprites } : placeholderSprites;
   renderer.walls = useArt.value ? artWalls : {};
-  const view = { squash: SQUASH, thickness: THICKNESS, step: step.value };
-  scene = buildScene(map.grid, textures, { hexSize: HEX, seed: seed.value, blend: blend.value, view });
+  scene = buildScene(map.grid, textures, {
+    hexSize: HEX,
+    seed: seed.value,
+    blend: blend.value,
+    view: { squash: SQUASH, thickness: THICKNESS },
+    relief: { mountain: mountain.value, hill: HILL },
+    cliff: useArt.value ? artCliff : undefined,
+  });
   draw();
 }
 
@@ -76,11 +85,12 @@ function draw(): void {
 
 onMounted(() => {
   rebuild();
-  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls()])
-    .then(([textures, sprites, walls]) => {
+  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX)])
+    .then(([textures, sprites, walls, cliff]) => {
       art = textures;
       artSprites = sprites;
       artWalls = walls;
+      artCliff = cliff;
       rebuild();
     })
     .catch((e) => console.error('Tile art failed to load', e));
@@ -89,7 +99,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => resizeObs?.disconnect());
 
-watch([mapId, seed, blend, useArt, step], rebuild);
+watch([mapId, seed, blend, useArt, mountain], rebuild);
 watch(showGrid, draw);
 </script>
 
@@ -113,8 +123,8 @@ watch(showGrid, draw);
         <input v-model.number="blend" type="range" min="0.3" max="1" step="0.05" />
       </label>
       <label>
-        Height step {{ step }}px
-        <input v-model.lazy.number="step" type="range" min="0" max="14" step="1" />
+        Mountain height {{ mountain }}px
+        <input v-model.lazy.number="mountain" type="range" min="0" max="180" step="10" />
       </label>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
       <label class="check"><input v-model="useArt" type="checkbox" /> Generated art</label>

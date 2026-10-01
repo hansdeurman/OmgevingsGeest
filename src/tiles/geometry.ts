@@ -1,16 +1,14 @@
 import { gridPixelBounds, hexCorners, offsetToPixel, type Pixel } from '../math/hex';
 
 /**
- * Isometric-style view: the flat top-down map is squashed vertically and each
- * hex becomes a slab whose two front faces show below it.
+ * Isometric-style view: the flat top-down map is squashed vertically and the
+ * map sits on a slab whose front faces show below it.
  */
 export interface IsoView {
   /** Vertical scale applied to the top-down map (1 = top-down). */
   squash: number;
-  /** Height of the slab's front faces at sea level, in output pixels. */
+  /** Height of the slab's front faces, in output pixels. */
   thickness: number;
-  /** Vertical lift per elevation step (terrace height), in output pixels. */
-  step: number;
 }
 
 /** Top-down pixel frame of a grid; (ox, oy) is where hex (0,0)'s centre lands. */

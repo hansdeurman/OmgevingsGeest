@@ -26,14 +26,15 @@ export const WALL_FILES: Record<keyof WallImages, string> = {
   rock: 'wall-2.webp',
 };
 
-async function loadRaster(url: string, size: number): Promise<Raster> {
+async function loadRaster(url: string, width: number, height = width): Promise<Raster> {
   const img = await loadImage(url);
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, size, size);
-  return { width: size, height: size, data: ctx.getImageData(0, 0, size, size).data };
+  ctx.drawImage(img, 0, 0, width, height);
+  return { width, height, data: ctx.getImageData(0, 0, width, height).data };
 }
 
 /** Load, downscale and seam-fix every listed texture, then derive missing fuse textures. */
@@ -52,4 +53,10 @@ export async function loadWalls(files = WALL_FILES): Promise<WallImages> {
   const base = `${import.meta.env.BASE_URL}tiles/`;
   const entries = await Promise.all(Object.entries(files).map(async ([kind, name]) => [kind, await loadImage(base + name)] as const));
   return Object.fromEntries(entries);
+}
+
+/** The rock wall as a raster for steep mountain faces; it repeats about every 2.6 hex radii. */
+export async function loadCliff(hexSize: number, file = WALL_FILES.rock): Promise<Raster> {
+  const width = Math.round(2.6 * hexSize);
+  return loadRaster(`${import.meta.env.BASE_URL}tiles/${file}`, width, width);
 }

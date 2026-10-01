@@ -5,7 +5,7 @@ import { createCoverField, type CoverField } from './coverField';
 import { FIELDS, type Amounts } from './levels';
 
 /** Maximum noise added per field; this is what makes boundaries organic. */
-export const WOBBLE: Readonly<Amounts> = { water: 0.25, grass: 0.32, trees: 0.25, alt: 0.1 };
+export const WOBBLE: Readonly<Amounts> = { water: 0.25, grass: 0.32, trees: 0.25, alt: 0.05 };
 
 /**
  * The cover field plus a little noise per layer. Noise fades out where a

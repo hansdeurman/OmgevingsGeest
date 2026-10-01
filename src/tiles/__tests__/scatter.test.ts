@@ -115,9 +115,10 @@ describe('PROP_RULES', () => {
     expect(kinds).toEqual(['pebble']);
   });
 
-  it('raises snowy peaks only on the highest ground', () => {
-    expect(rule('peak').count(empty, MAX_ELEVATION)).toBe(1);
-    expect(rule('peak').count(empty, 3)).toBe(0);
+  it('leaves mountains to the relief: no peak sprites, boulders only on the foothills', () => {
+    expect(PROP_RULES.some((r) => r.kind === 'peak')).toBe(false);
+    expect(rule('boulder').count(empty, 3.2)).toBe(1);
+    expect(rule('boulder').count(empty, MAX_ELEVATION)).toBe(0);
   });
 
   it('keeps trees off bare rock', () => {

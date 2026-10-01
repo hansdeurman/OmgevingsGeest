@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { coverAt, elevationAt, type CoverGrid } from '../coverGrid';
 import { DEMO_MAPS, ELEVATION_BAND_ROW, LEVEL_BANDS, demoMap } from '../demoMaps';
 import { LAYERS, MAX_ELEVATION, MAX_LEVEL } from '../levels';
+import { offsetNeighbours } from '../../math/hex';
 
 const count = (grid: CoverGrid, pred: (c: CoverGrid['cells'][number]) => boolean) => grid.cells.filter(pred).length;
 
@@ -47,17 +48,38 @@ describe('island', () => {
 });
 
 describe('highlands', () => {
-  const { grid } = demoMap('highlands', 5);
-  const cells = grid.cells.map((c, i) => ({ ...c, elevation: grid.elevation[i] }));
+  for (const seed of [1, 5, 9]) {
+    const { grid } = demoMap('highlands', seed);
+    const cells = grid.cells.map((c, i) => ({ ...c, elevation: grid.elevation[i], i }));
+    const lake = cells.filter((c) => c.water >= 2 && c.elevation >= 3);
 
-  it('climbs to snowy heights', () => {
-    expect(Math.max(...grid.elevation)).toBeGreaterThanOrEqual(MAX_ELEVATION - 1);
-  });
+    it(`climbs to snowy heights (seed ${seed})`, () => {
+      expect(Math.max(...grid.elevation)).toBeGreaterThanOrEqual(MAX_ELEVATION - 1);
+    });
 
-  it('keeps open water at sea level and forests below the tree line', () => {
-    expect(cells.filter((c) => c.water >= 2 && c.elevation > 0)).toHaveLength(0);
-    expect(cells.filter((c) => c.trees > 0 && c.elevation > 4)).toHaveLength(0);
-  });
+    it(`holds a high lake in a mountain basin, with a notch where it overflows (seed ${seed})`, () => {
+      expect(lake.length).toBeGreaterThanOrEqual(2);
+      const surface = lake[0].elevation;
+      const inLake = new Set(lake.filter((c) => c.elevation === surface).map((c) => c.i));
+      const rim = [...inLake].flatMap((i) => {
+        const col = i % grid.cols;
+        const row = Math.floor(i / grid.cols);
+        return offsetNeighbours(row)
+          .map((d) => [col + d.dc, row + d.dr])
+          .filter(([c, r]) => c >= 0 && r >= 0 && c < grid.cols && r < grid.rows)
+          .map(([c, r]) => r * grid.cols + c)
+          .filter((j) => !inLake.has(j))
+          .map((j) => grid.elevation[j]);
+      });
+      expect(Math.min(...rim)).toBeGreaterThanOrEqual(surface - 1e-6);
+      expect(Math.min(...rim)).toBeLessThan(surface + 0.75);
+      expect(Math.max(...rim)).toBeGreaterThan(surface + 1.5);
+    });
+
+    it(`keeps forests below the tree line (seed ${seed})`, () => {
+      expect(cells.filter((c) => c.trees > 0 && c.elevation > 4.5)).toHaveLength(0);
+    });
+  }
 });
 
 describe('DEMO_MAPS', () => {

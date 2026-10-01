@@ -5,17 +5,19 @@ import { frameCentre } from '../geometry';
 import { createPlaceholderTextures } from '../placeholderTextures';
 import { getPixel } from '../raster';
 import { buildScene } from '../scene';
+import { lakeHeight } from '../relief';
 
 /**
  * End-to-end: demo map → terrain sampler → ground image + scattered props +
  * lifted tiles with walls. Checks the composed result the way a viewer would read it.
  */
 const SIZE = 16;
-const view = { squash: 0.7, thickness: 4, step: 5 };
+const view = { squash: 0.7, thickness: 4 };
+const relief = { mountain: 60, hill: 2 };
 const textures = createPlaceholderTextures(32);
 const build = (id: string) => {
   const { grid } = demoMap(id, 1);
-  return { grid, scene: buildScene(grid, textures, { hexSize: SIZE, seed: 3, blend: 0.6, view }) };
+  return { grid, scene: buildScene(grid, textures, { hexSize: SIZE, seed: 3, blend: 0.6, view, relief }) };
 };
 const { grid, scene } = build('levels');
 const props = scene.rows.flatMap((r) => r.props);
@@ -81,28 +83,42 @@ describe('buildScene (levels showcase)', () => {
 describe('buildScene (highlands)', () => {
   const hl = build('highlands');
   const tiles = hl.scene.rows.flatMap((r) => r.tiles);
+  const { frame, heights } = hl.scene;
+  const heightAt = (x: number, y: number) => heights[Math.round(y) * frame.width + Math.round(x)];
 
-  it('lifts every tile by its elevation in terrace steps', () => {
-    for (const t of tiles) expect(t.lift).toBe(elevationAt(hl.grid, t.col, t.row) * view.step);
-    expect(Math.max(...tiles.map((t) => t.lift))).toBeGreaterThanOrEqual(7 * view.step);
+  it('keeps the floor nearly flat away from the mountains', () => {
+    for (const t of tiles.filter((t) => t.elevation <= 3)) expect(t.lift).toBeLessThanOrEqual(3.5 * relief.hill + 1);
   });
 
-  it('builds rock walls under high tiles and earth walls under low land', () => {
-    const high = tiles.find((t) => t.elevation >= 6)!;
-    expect(high.faces.every((f) => f.wall === 'rock')).toBe(true);
-    const low = tiles.find((t) => t.elevation === 1)!;
-    expect(low.faces.every((f) => f.wall === 'earth')).toBe(true);
+  it('joins neighbouring mountain hexes into one wall, with no gap between them', () => {
+    let pairs = 0;
+    forEachCell(hl.grid, (_, col, row, e) => {
+      if (e < 6 || col + 1 >= hl.grid.cols || elevationAt(hl.grid, col + 1, row) < 6) return;
+      const a = frameCentre(col, row, SIZE, frame);
+      const b = frameCentre(col + 1, row, SIZE, frame);
+      expect(heightAt((a.x + b.x) / 2, (a.y + b.y) / 2)).toBeGreaterThan(0.4 * relief.mountain);
+      pairs++;
+    });
+    expect(pairs).toBeGreaterThan(0);
   });
 
-  it('crowns the highest ground with peaks, standing on their lifted tile', () => {
-    const peaks = hl.scene.rows.flatMap((r) => r.props).filter((p) => p.kind === 'peak');
-    expect(peaks.length).toBeGreaterThan(0);
-    for (const p of peaks) {
-      const tile = tiles.find((t) => t.col === p.col && t.row === p.row)!;
-      const top = Math.min(...tile.top.map((q) => q.y));
-      const bottom = Math.max(...tile.top.map((q) => q.y));
-      expect(p.y).toBeGreaterThanOrEqual(top);
-      expect(p.y).toBeLessThanOrEqual(bottom);
+  it('lays the high lake flat at its own level, above the floor', () => {
+    const lake = tiles.filter((t) => coverAt(hl.grid, t.col, t.row)!.water >= 3 && t.elevation >= 3);
+    expect(lake.length).toBeGreaterThan(0);
+    for (const t of lake) expect(t.lift).toBeCloseTo(lakeHeight(t.elevation, relief), 4);
+  });
+
+  it('stands props on the terrain surface', () => {
+    for (const r of hl.scene.rows) {
+      for (const p of r.props) {
+        const c = frameCentre(p.col, p.row, SIZE, frame);
+        expect(Math.abs(p.x - c.x)).toBeLessThan(SIZE);
+        expect(p.y).toBeLessThanOrEqual(c.y * view.squash + SIZE);
+      }
     }
+  });
+
+  it('gives every row a terrain slice', () => {
+    hl.scene.rows.forEach((r, i) => expect(r.slice.row).toBe(i));
   });
 });
