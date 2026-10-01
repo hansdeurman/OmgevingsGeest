@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue';
 import WorldView from './components/WorldView.vue';
 import DevPanel from './components/DevPanel.vue';
 import BuildBadge from './components/BuildBadge.vue';
+import TilePreview from './components/TilePreview.vue';
 
 const PANEL_STORAGE_KEY = 'omgevingsgeest:panel-open';
 
@@ -16,6 +17,11 @@ function readStored(): boolean | null {
 }
 
 const open = ref(true);
+
+// '#tiles' in the URL opens the tile-art preview instead of the simulation.
+type Mode = 'sim' | 'tiles';
+const mode = ref<Mode>(location.hash === '#tiles' ? 'tiles' : 'sim');
+watch(mode, (m) => history.replaceState(null, '', m === 'tiles' ? '#tiles' : location.pathname + location.search));
 
 onMounted(() => {
   const stored = readStored();
@@ -38,25 +44,32 @@ watch(open, (v) => {
 
 <template>
   <div class="app">
-    <div class="world-wrap">
-      <WorldView class="world" />
-      <BuildBadge />
-    </div>
+    <TilePreview v-if="mode === 'tiles'" />
+    <template v-else>
+      <div class="world-wrap">
+        <WorldView class="world" />
+      </div>
 
-    <aside class="panel" :class="{ closed: !open }" aria-label="Developer panel">
-      <DevPanel />
-    </aside>
+      <aside class="panel" :class="{ closed: !open }" aria-label="Developer panel">
+        <DevPanel />
+      </aside>
 
-    <button
-      class="toggle"
-      :class="{ pushed: open }"
-      type="button"
-      :aria-expanded="open"
-      :aria-label="open ? 'Hide settings' : 'Show settings'"
-      :title="open ? 'Hide settings' : 'Show settings'"
-      @click="open = !open"
-    >
-      <span class="arrow" :class="{ flip: !open }">›</span>
+      <button
+        class="toggle"
+        :class="{ pushed: open }"
+        type="button"
+        :aria-expanded="open"
+        :aria-label="open ? 'Hide settings' : 'Show settings'"
+        :title="open ? 'Hide settings' : 'Show settings'"
+        @click="open = !open"
+      >
+        <span class="arrow" :class="{ flip: !open }">›</span>
+      </button>
+    </template>
+
+    <BuildBadge />
+    <button class="mode" type="button" @click="mode = mode === 'tiles' ? 'sim' : 'tiles'">
+      {{ mode === 'tiles' ? '← Simulation' : 'Tiles →' }}
     </button>
   </div>
 </template>
@@ -127,6 +140,22 @@ html, body, #app {
 .toggle.pushed { transform: translateY(-50%) translateX(-320px); }
 .toggle:hover { background: rgba(34, 34, 46, 0.95); color: #fff; }
 .toggle:focus-visible { outline: 2px solid #6a8cff; outline-offset: 2px; }
+
+.mode {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  background: rgba(20, 20, 28, 0.85);
+  border: 1px solid #1f1f28;
+  border-radius: 999px;
+  color: #c2c2cc;
+  font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  z-index: 6;
+}
+.mode:hover { background: rgba(34, 34, 46, 0.95); color: #fff; }
 
 .arrow {
   display: inline-block;

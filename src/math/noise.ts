@@ -2,7 +2,10 @@
  * Hash-based value noise + fBm. No lookup tables, fully deterministic from seed.
  */
 
-function hash2(x: number, y: number, seed: number): number {
+import { lerp } from './scalar';
+
+/** Deterministic hash of an integer pair to [0, 1]. */
+export function hash2(x: number, y: number, seed: number): number {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 982451653);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   h = h ^ (h >>> 16);
@@ -13,22 +16,32 @@ function smootherstep(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
+export function valueNoise2D(x: number, y: number, seed: number): number {
+  return latticeNoise(x, y, seed, (i) => i);
 }
 
-export function valueNoise2D(x: number, y: number, seed: number): number {
+/**
+ * Value noise that repeats every `period` units on both axes, for seamless
+ * textures. `period` must be a positive integer.
+ */
+export function tileableValueNoise2D(x: number, y: number, period: number, seed: number): number {
+  return latticeNoise(x, y, seed, (i) => ((i % period) + period) % period);
+}
+
+function latticeNoise(x: number, y: number, seed: number, wrap: (i: number) => number): number {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
-  const xf = x - xi;
-  const yf = y - yi;
-  const v00 = hash2(xi, yi, seed);
-  const v10 = hash2(xi + 1, yi, seed);
-  const v01 = hash2(xi, yi + 1, seed);
-  const v11 = hash2(xi + 1, yi + 1, seed);
-  const u = smootherstep(xf);
-  const v = smootherstep(yf);
-  return lerp(lerp(v00, v10, u), lerp(v01, v11, u), v);
+  const u = smootherstep(x - xi);
+  const v = smootherstep(y - yi);
+  const x0 = wrap(xi);
+  const x1 = wrap(xi + 1);
+  const y0 = wrap(yi);
+  const y1 = wrap(yi + 1);
+  return lerp(
+    lerp(hash2(x0, y0, seed), hash2(x1, y0, seed), u),
+    lerp(hash2(x0, y1, seed), hash2(x1, y1, seed), u),
+    v,
+  );
 }
 
 export interface FbmOptions {
