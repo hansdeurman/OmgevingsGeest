@@ -1,8 +1,8 @@
 import { fbm2D } from '../math/noise';
 import { mulberry32 } from '../math/rng';
-import { clamp } from '../math/scalar';
-import { createCoverGrid, type CoverGrid } from './coverGrid';
-import { LEVEL_NAMES, MAX_LEVEL, type Cover, type Layer, type Level } from './levels';
+import { clamp, smoothstep } from '../math/scalar';
+import { createCoverGrid, type CellInit, type CoverGrid } from './coverGrid';
+import { LEVEL_NAMES, MAX_ELEVATION, MAX_LEVEL, type Cover, type Layer, type Level } from './levels';
 
 export interface MapLabel {
   col: number;
@@ -30,40 +30,67 @@ export const LEVEL_BANDS: ReadonlyArray<{ layer: Layer; row: number }> = [
   { layer: 'trees', row: 8 },
 ];
 const GROUP = 3;
+/** Last band: meadow raised in steps of two terraces, from sea level to the snow line. */
+export const ELEVATION_BAND_ROW = 12;
 
 function levelsShowcase(): DemoMap {
   const bandAt = (row: number) => LEVEL_BANDS.find((b) => row >= b.row && row < b.row + GROUP);
-  const grid = createCoverGrid(GROUP * (MAX_LEVEL + 1), 11, (col, row) => {
+  const grid = createCoverGrid(GROUP * (MAX_LEVEL + 1), ELEVATION_BAND_ROW + GROUP, (col, row): CellInit => {
+    const group = Math.floor(col / GROUP);
+    if (row >= ELEVATION_BAND_ROW) return { grass: 3, elevation: group * 2 };
     const band = bandAt(row);
-    return band ? { [band.layer]: level(Math.floor(col / GROUP)) } : {};
+    return band ? { [band.layer]: level(group) } : {};
   });
-  const labels = LEVEL_BANDS.flatMap(({ layer, row }) =>
-    LEVEL_NAMES[layer].map((name, l) => ({ col: l * GROUP + 1, row, text: `${l} · ${name}` })),
-  );
+  const labels = [
+    ...LEVEL_BANDS.flatMap(({ layer, row }) =>
+      LEVEL_NAMES[layer].map((name, l) => ({ col: l * GROUP + 1, row, text: `${l} · ${name}` })),
+    ),
+    ...Array.from({ length: MAX_LEVEL + 1 }, (_, g) => ({
+      col: g * GROUP + 1,
+      row: ELEVATION_BAND_ROW,
+      text: `height ${g * 2}`,
+    })),
+  ];
   return { grid, labels };
 }
 
-/** Noise-driven island: deep sea outside, beaches, meadows and forest patches inland. */
-function island(seed: number): DemoMap {
-  const cols = 22;
-  const rows = 16;
+interface LandscapeShape {
+  cols: number;
+  rows: number;
+  /** Raises the land so less of the map is sea. */
+  land: number;
+  /** Extra terraces added along ridge lines: 0 = rolling hills, 8 = a full range. */
+  ridges: number;
+}
+
+/**
+ * Natural terrain: sea around the edges, beaches, meadows and forest patches
+ * inland, and relief that climbs along ridge lines. Forests stay below the
+ * tree line and grass thins out toward the peaks.
+ */
+function landscape(seed: number, shape: LandscapeShape): CoverGrid {
+  const { cols, rows, land, ridges } = shape;
   const noise = (s: number, x: number, y: number) =>
     fbm2D(x, y, { seed: seed * 7 + s, octaves: 4, persistence: 0.5, lacunarity: 2 });
-  const grid = createCoverGrid(cols, rows, (col, row): Partial<Cover> => {
+  return createCoverGrid(cols, rows, (col, row): CellInit => {
     const nx = ((col + (row & 1) * 0.5) / (cols - 0.5)) * 2 - 1;
     const ny = (row / (rows - 1)) * 2 - 1;
-    const e = noise(0, nx * 2.2, ny * 2.2) * 0.9 + (1 - Math.hypot(nx, ny)) * 0.8 - 0.33;
+    const e = noise(0, nx * 2.2, ny * 2.2) * 0.9 + (1 - Math.hypot(nx, ny)) * 0.8 - 0.45 + land;
     if (e < 0.3) {
       const water = e < 0.1 ? 4 : e < 0.18 ? 3 : e < 0.25 ? 2 : 1;
       return water >= 2 ? { water } : { water, grass: level(noise(1, nx * 3, ny * 3) * 2 - 0.5) };
     }
     const h = e - 0.3;
-    const grass = level(h * 9 + (noise(1, nx * 3, ny * 3) - 0.5) * 6);
-    const trees = h > 0.06 ? level((noise(2, nx * 3.5, ny * 3.5) - 0.42) * 14 + h * 4) : 0;
-    return { grass, trees };
+    const ridge = (1 - Math.abs(2 * noise(5, nx * 1.5 + 4, ny * 1.5) - 1)) ** 4;
+    const elevation = clamp(Math.round(h * 7 + ridge * ridges * smoothstep(0.03, 0.2, h)), 0, MAX_ELEVATION);
+    const grass = elevation >= 6 ? 0 : level(h * 9 + (noise(1, nx * 3, ny * 3) - 0.5) * 6 - Math.max(0, elevation - 3));
+    const trees = h > 0.06 && elevation <= 4 ? level((noise(2, nx * 3.5, ny * 3.5) - 0.42) * 14 + h * 4) : 0;
+    return { grass, trees, elevation };
   });
-  return { grid, labels: [] };
 }
+
+const island = (seed: number): DemoMap => ({ grid: landscape(seed, { cols: 22, rows: 16, land: 0.12, ridges: 2 }), labels: [] });
+const highlands = (seed: number): DemoMap => ({ grid: landscape(seed, { cols: 22, rows: 16, land: 0.22, ridges: 7 }), labels: [] });
 
 /** Every hex random: a stress test for how well arbitrary neighbours fuse. */
 function randomMix(seed: number): DemoMap {
@@ -79,6 +106,7 @@ function randomMix(seed: number): DemoMap {
 export const DEMO_MAPS: readonly DemoMapDef[] = [
   { id: 'levels', name: 'Levels showcase', build: levelsShowcase },
   { id: 'island', name: 'Island', build: island },
+  { id: 'highlands', name: 'Highlands', build: highlands },
   { id: 'random', name: 'Random mix', build: randomMix },
 ];
 

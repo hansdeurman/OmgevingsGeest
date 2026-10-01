@@ -1,4 +1,6 @@
 import { withDerivedFuses } from './derivedTextures';
+import type { WallImages } from './IsoRenderer';
+import { loadImage } from './imageSprites';
 import type { GroundKind } from './groundShader';
 import type { GroundTextures } from './placeholderTextures';
 import type { Raster } from './raster';
@@ -11,15 +13,21 @@ export const TEXTURE_FILES: TextureFiles = {
   sand: ['sand-1.webp'],
   grass: ['grass-1.webp'],
   water: ['water-1.webp'],
+  rock: ['rock-1.webp'],
+  snow: ['snow-1.webp', 'snow-2.webp'],
 };
 
 /** Pixel size textures are scaled to; at hex radius 40 one texture spans ~2.3 hexes. */
 export const TEXTURE_SIZE = 160;
 
+/** Wall art in public/tiles/: seamless left to right, seen from the front. */
+export const WALL_FILES: Record<keyof WallImages, string> = {
+  earth: 'wall-1.webp',
+  rock: 'wall-2.webp',
+};
+
 async function loadRaster(url: string, size: number): Promise<Raster> {
-  const img = new Image();
-  img.src = url;
-  await img.decode();
+  const img = await loadImage(url);
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
@@ -38,4 +46,10 @@ export async function loadGroundTextures(files: TextureFiles, size = TEXTURE_SIZ
     }),
   );
   return withDerivedFuses(Object.fromEntries(entries));
+}
+
+export async function loadWalls(files = WALL_FILES): Promise<WallImages> {
+  const base = `${import.meta.env.BASE_URL}tiles/`;
+  const entries = await Promise.all(Object.entries(files).map(async ([kind, name]) => [kind, await loadImage(base + name)] as const));
+  return Object.fromEntries(entries);
 }

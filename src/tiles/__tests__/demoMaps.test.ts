@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { coverAt, type CoverGrid } from '../coverGrid';
-import { DEMO_MAPS, LEVEL_BANDS, demoMap } from '../demoMaps';
-import { LAYERS, MAX_LEVEL } from '../levels';
+import { coverAt, elevationAt, type CoverGrid } from '../coverGrid';
+import { DEMO_MAPS, ELEVATION_BAND_ROW, LEVEL_BANDS, demoMap } from '../demoMaps';
+import { LAYERS, MAX_ELEVATION, MAX_LEVEL } from '../levels';
 
 const count = (grid: CoverGrid, pred: (c: CoverGrid['cells'][number]) => boolean) => grid.cells.filter(pred).length;
 
@@ -17,8 +17,12 @@ describe('levels showcase', () => {
     }
   });
 
+  it('raises the last band in steps of two terraces', () => {
+    for (let g = 0; g <= MAX_LEVEL; g++) expect(elevationAt(grid, g * 3 + 1, ELEVATION_BAND_ROW + 1)).toBe(g * 2);
+  });
+
   it('labels each level once', () => {
-    expect(labels).toHaveLength(LEVEL_BANDS.length * (MAX_LEVEL + 1));
+    expect(labels).toHaveLength((LEVEL_BANDS.length + 1) * (MAX_LEVEL + 1));
   });
 });
 
@@ -39,6 +43,20 @@ describe('island', () => {
   it('never grows grass or trees in open water', () => {
     const { grid } = demoMap('island', 5);
     expect(count(grid, (c) => c.water >= 2 && c.grass + c.trees > 0)).toBe(0);
+  });
+});
+
+describe('highlands', () => {
+  const { grid } = demoMap('highlands', 5);
+  const cells = grid.cells.map((c, i) => ({ ...c, elevation: grid.elevation[i] }));
+
+  it('climbs to snowy heights', () => {
+    expect(Math.max(...grid.elevation)).toBeGreaterThanOrEqual(MAX_ELEVATION - 1);
+  });
+
+  it('keeps open water at sea level and forests below the tree line', () => {
+    expect(cells.filter((c) => c.water >= 2 && c.elevation > 0)).toHaveLength(0);
+    expect(cells.filter((c) => c.trees > 0 && c.elevation > 4)).toHaveLength(0);
   });
 });
 

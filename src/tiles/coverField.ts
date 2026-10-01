@@ -1,6 +1,6 @@
 import { offsetNeighbours, offsetToPixel, pixelToOffset } from '../math/hex';
-import { coverAt, inGrid, type CoverGrid } from './coverGrid';
-import { LAYERS, levelAmount, zeroAmounts, type Amounts } from './levels';
+import { coverAt, elevationAt, inGrid, type CoverGrid } from './coverGrid';
+import { FIELDS, LAYERS, MAX_ELEVATION, levelAmount, zeroAmounts, type Amounts } from './levels';
 
 /** Continuous view of a cover grid, in grid-local pixels (hex (0,0) at origin). */
 export interface CoverField {
@@ -17,7 +17,7 @@ export function createCoverField(grid: CoverGrid, size: number, blend: number): 
   const invSigma2 = 1 / (blend * size) ** 2;
 
   function sample(x: number, y: number, out: Amounts = zeroAmounts()): Amounts {
-    for (const l of LAYERS) out[l] = 0;
+    for (const f of FIELDS) out[f] = 0;
     const { col, row } = pixelToOffset(x, y, size);
     let total = 0;
     const visit = (c: number, r: number) => {
@@ -27,10 +27,11 @@ export function createCoverField(grid: CoverGrid, size: number, blend: number): 
       const w = Math.exp(-((x - p.x) ** 2 + (y - p.y) ** 2) * invSigma2);
       total += w;
       for (const l of LAYERS) out[l] += w * levelAmount(cover[l]);
+      out.alt += (w * elevationAt(grid, c, r)) / MAX_ELEVATION;
     };
     visit(col, row);
     for (const d of offsetNeighbours(row)) visit(col + d.dc, row + d.dr);
-    if (total > 0) for (const l of LAYERS) out[l] /= total;
+    if (total > 0) for (const f of FIELDS) out[f] /= total;
     return out;
   }
 

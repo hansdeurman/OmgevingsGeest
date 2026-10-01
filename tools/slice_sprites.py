@@ -37,11 +37,19 @@ def cells(rgb: np.ndarray, rows: int) -> list:
     return sorted(found, key=lambda s: (int(centre(s)[0] * rows / h), centre(s)[1]))
 
 
+def local_key(cell: np.ndarray, key: np.ndarray) -> np.ndarray:
+    """Per-pixel key: magenta-hued pixels are treated as shaded background (drawn shadows)."""
+    r, g, b = cell[..., 0], cell[..., 1], cell[..., 2]
+    magenta_hue = ((r + b) / 2 - g > 50) & (np.abs(r - b) < 60)
+    shade = np.where(magenta_hue, np.clip((r + b) / (key[0] + key[2]), 0.2, 1), 1.0)
+    return key * shade[..., None]
+
+
 def key_out(cell: np.ndarray) -> np.ndarray:
     """RGBA with magenta removed: alpha from colour distance, colour un-mixed from the key."""
     flat = cell.reshape(-1, 3)
     magenta = flat[(flat[:, 0] > 200) & (flat[:, 1] < 110) & (flat[:, 2] > 200)]
-    key = np.median(magenta, axis=0) if len(magenta) else np.array([255.0, 0, 255])
+    key = local_key(cell, np.median(magenta, axis=0) if len(magenta) else np.array([255.0, 0, 255]))
     dist = np.linalg.norm(cell - key, axis=2)
     alpha = np.clip((dist - KEY_SOFT[0]) / (KEY_SOFT[1] - KEY_SOFT[0]), 0, 1)
     a = alpha[..., None]

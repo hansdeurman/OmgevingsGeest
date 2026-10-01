@@ -63,6 +63,19 @@ export function createPlaceholderTextures(size = 128): GroundTextures {
     };
   };
 
+  const rock = (seed: number, base: RGB): Painter => {
+    const n = noise(seed);
+    return (u, v) => {
+      const crack = (1 - Math.abs(2 * n(u, v, 6) - 1)) ** 10;
+      return shade(mix(base, shade(base, 0.75), crack), 0.9 + n(u, v, 24) * 0.2);
+    };
+  };
+
+  const snow = (seed: number, base: RGB): Painter => {
+    const n = noise(seed);
+    return (u, v) => mix(base, [208, 226, 242], smoothstep(0.55, 0.8, n(u, v, 5)) * 0.6);
+  };
+
   const paint = (p: Painter) => paintRaster(size, size, p);
   return {
     sand: [paint(sand(1, [242, 214, 158])), paint(sand(2, [236, 204, 148]))],
@@ -71,5 +84,7 @@ export function createPlaceholderTextures(size = 128): GroundTextures {
     grass: [paint(grass(7, [120, 194, 72])), paint(grass(8, [108, 184, 70]))],
     forestFloor: [paint(forestFloor(9, [76, 136, 58])), paint(forestFloor(10, [68, 126, 56]))],
     water: [paint(water(11, [72, 184, 228])), paint(water(12, [64, 174, 222]))],
+    rock: [paint(rock(13, [168, 156, 142])), paint(rock(14, [156, 148, 138]))],
+    snow: [paint(snow(15, [248, 250, 253])), paint(snow(16, [242, 246, 252]))],
   };
 }

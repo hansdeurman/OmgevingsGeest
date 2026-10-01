@@ -4,7 +4,8 @@ import { createCoverGrid, inGrid } from '../coverGrid';
 import { PROP_KINDS, PROP_RULES, byLevel, type PropRule } from '../propRules';
 import { scatterProps } from '../scatter';
 import { createTerrainSampler } from '../terrainSampler';
-import type { Cover } from '../levels';
+import { MAX_ELEVATION, type Cover } from '../levels';
+import { ROCK_LINE } from '../groundShader';
 
 const SIZE = 30;
 const TREE: PropRule = {
@@ -72,14 +73,55 @@ describe('scatterProps', () => {
   });
 });
 
+describe('scatterProps rule options', () => {
+  const flat = createCoverGrid(3, 1, () => ({ elevation: 6 }));
+  const s = createTerrainSampler(flat, SIZE, 0.6, 7);
+  const ONE: PropRule = { kind: 'peak', count: () => 1, spacing: 0.5, fits: () => true };
+
+  it('records the hex each prop belongs to', () => {
+    const props = scatterProps(flat, s, [ONE], SIZE, 1);
+    expect(props.map((p) => p.col)).toEqual([0, 1, 2]);
+    expect(props.every((p) => p.row === 0)).toBe(true);
+  });
+
+  it('skips a hex entirely when its chance roll fails', () => {
+    expect(scatterProps(flat, s, [{ ...ONE, chance: 0 }], SIZE, 1)).toHaveLength(0);
+  });
+
+  it('keeps centred props close to the hex centre', () => {
+    for (const p of scatterProps(flat, s, [{ ...ONE, centred: true }], SIZE, 1)) {
+      const c = offsetToPixel(p.col, p.row, SIZE);
+      expect(Math.hypot(p.x - c.x, p.y - c.y)).toBeLessThanOrEqual(0.2 * SIZE);
+    }
+  });
+
+  it('passes elevation to the count', () => {
+    const byHeight: PropRule = { ...ONE, count: (_, e) => (e >= 6 ? 1 : 0) };
+    expect(scatterProps(flat, s, [byHeight], SIZE, 1)).toHaveLength(3);
+    expect(scatterProps(grid, sampler, [byHeight], SIZE, 1)).toHaveLength(0);
+  });
+});
+
 describe('PROP_RULES', () => {
   it('only uses known prop kinds', () => {
     for (const rule of PROP_RULES) expect(PROP_KINDS).toContain(rule.kind);
   });
 
+  const empty: Cover = { water: 0, grass: 0, trees: 0 };
+  const rule = (kind: string) => PROP_RULES.find((r) => r.kind === kind)!;
+
   it('places nothing on a completely empty hex except beach pebbles', () => {
-    const empty: Cover = { water: 0, grass: 0, trees: 0 };
-    const kinds = PROP_RULES.filter((r) => r.count(empty) > 0).map((r) => r.kind);
+    const kinds = PROP_RULES.filter((r) => r.count(empty, 0) > 0).map((r) => r.kind);
     expect(kinds).toEqual(['pebble']);
+  });
+
+  it('raises snowy peaks only on the highest ground', () => {
+    expect(rule('peak').count(empty, MAX_ELEVATION)).toBe(1);
+    expect(rule('peak').count(empty, 3)).toBe(0);
+  });
+
+  it('keeps trees off bare rock', () => {
+    expect(rule('tree').fits({ water: 0, grass: 1, trees: 1, alt: ROCK_LINE[1] })).toBe(false);
+    expect(rule('tree').fits({ water: 0, grass: 1, trees: 1, alt: 0.2 })).toBe(true);
   });
 });

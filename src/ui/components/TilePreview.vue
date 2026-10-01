@@ -2,15 +2,16 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { DEMO_MAPS, demoMap, type MapLabel } from '../../tiles/demoMaps';
 import { frameCentre } from '../../tiles/geometry';
-import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform } from '../../tiles/IsoRenderer';
+import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
-import { TEXTURE_FILES, loadGroundTextures } from '../../tiles/imageTextures';
+import { TEXTURE_FILES, loadGroundTextures, loadWalls } from '../../tiles/imageTextures';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, type Scene } from '../../tiles/scene';
 
 const HEX = 40;
-const VIEW = { squash: 0.65, thickness: 0.26 * HEX };
+const SQUASH = 0.65;
+const THICKNESS = 0.26 * HEX;
 
 const host = ref<HTMLDivElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -19,11 +20,14 @@ const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
 const useArt = ref(true);
+/** Terrace height in pixels per elevation step. */
+const step = ref(7);
 
 const placeholders = createPlaceholderTextures(128);
 let art: Partial<GroundTextures> = {};
 const placeholderSprites = createPlaceholderSprites(HEX);
 let artSprites: Partial<SpriteSet> = {};
+let artWalls: WallImages = {};
 const renderer = new IsoRenderer(placeholderSprites);
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
@@ -34,7 +38,9 @@ function rebuild(): void {
   labels = map.labels;
   const textures = useArt.value ? { ...placeholders, ...art } : placeholders;
   renderer.sprites = useArt.value ? { ...placeholderSprites, ...artSprites } : placeholderSprites;
-  scene = buildScene(map.grid, textures, { hexSize: HEX, seed: seed.value, blend: blend.value, view: VIEW });
+  renderer.walls = useArt.value ? artWalls : {};
+  const view = { squash: SQUASH, thickness: THICKNESS, step: step.value };
+  scene = buildScene(map.grid, textures, { hexSize: HEX, seed: seed.value, blend: blend.value, view });
   draw();
 }
 
@@ -46,7 +52,7 @@ function drawLabels(ctx: CanvasRenderingContext2D, s: Scene, t: ViewTransform): 
   ctx.fillStyle = '#fff';
   for (const l of labels) {
     const c = frameCentre(l.col, l.row, HEX, s.frame);
-    const p = projectToScreen(s, t, { x: c.x, y: c.y - HEX * 1.05 });
+    const p = projectToScreen(s, t, { x: c.x, y: c.y - HEX * 1.05 }, s.rows[l.row].tiles[l.col].lift);
     ctx.strokeText(l.text, p.x, p.y);
     ctx.fillText(l.text, p.x, p.y);
   }
@@ -70,10 +76,11 @@ function draw(): void {
 
 onMounted(() => {
   rebuild();
-  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX)])
-    .then(([textures, sprites]) => {
+  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls()])
+    .then(([textures, sprites, walls]) => {
       art = textures;
       artSprites = sprites;
+      artWalls = walls;
       rebuild();
     })
     .catch((e) => console.error('Tile art failed to load', e));
@@ -82,7 +89,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => resizeObs?.disconnect());
 
-watch([mapId, seed, blend, useArt], rebuild);
+watch([mapId, seed, blend, useArt, step], rebuild);
 watch(showGrid, draw);
 </script>
 
@@ -105,9 +112,13 @@ watch(showGrid, draw);
         Edge blend {{ blend.toFixed(2) }}
         <input v-model.number="blend" type="range" min="0.3" max="1" step="0.05" />
       </label>
+      <label>
+        Height step {{ step }}px
+        <input v-model.lazy.number="step" type="range" min="0" max="14" step="1" />
+      </label>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
       <label class="check"><input v-model="useArt" type="checkbox" /> Generated art</label>
-      <p v-if="mapId === 'levels'" class="hint">Rows: water · grass · trees, levels 0 → 4</p>
+      <p v-if="mapId === 'levels'" class="hint">Rows: water · grass · trees (levels 0 → 4) · height</p>
     </div>
   </div>
 </template>

@@ -10,6 +10,10 @@ export const SPRITE_COUNTS: Partial<Record<PropKind, number>> = {
   reed: 2,
   flower: 4,
   pebble: 4,
+  peak: 3,
+  crag: 1,
+  hill: 1,
+  boulder: 1,
 };
 
 /** In-game height of a kind's median variant, in hex radii. */
@@ -20,12 +24,16 @@ export const SPRITE_HEIGHTS: Record<PropKind, number> = {
   reed: 0.38,
   flower: 0.15,
   pebble: 0.09,
+  boulder: 0.55,
+  hill: 0.7,
+  crag: 1.35,
+  peak: 1.75,
 };
 
 /** Generated art carries no shadow; the renderer adds one this wide (share of sprite width). */
 const SHADOW = 0.36;
 
-async function loadImage(url: string): Promise<HTMLImageElement> {
+export async function loadImage(url: string): Promise<HTMLImageElement> {
   const img = new Image();
   img.src = url;
   await img.decode();

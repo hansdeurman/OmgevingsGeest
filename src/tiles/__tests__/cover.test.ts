@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LAYERS, LEVEL_NAMES, MAX_LEVEL, levelAmount } from '../levels';
-import { coverAt, createCoverGrid, forEachCell } from '../coverGrid';
+import { coverAt, createCoverGrid, elevationAt, forEachCell } from '../coverGrid';
 
 describe('levels', () => {
   it('maps levels linearly onto [0, 1]', () => {
@@ -19,6 +19,14 @@ describe('coverGrid', () => {
 
   it('fills cells from the initialiser and defaults the rest to 0', () => {
     expect(coverAt(grid, 2, 1)).toEqual({ water: 0, grass: 2, trees: 1 });
+  });
+
+  it('stores elevation per cell, defaulting to sea level', () => {
+    const hilly = createCoverGrid(2, 1, (col) => (col ? { elevation: 5 } : {}));
+    expect(elevationAt(hilly, 0, 0)).toBe(0);
+    expect(elevationAt(hilly, 1, 0)).toBe(5);
+    expect(elevationAt(hilly, 9, 9)).toBe(0);
+    expect(coverAt(hilly, 1, 0)).toEqual({ water: 0, grass: 0, trees: 0 });
   });
 
   it('returns undefined outside the grid', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { offsetToPixel } from '../../math/hex';
 import { createCoverGrid } from '../coverGrid';
 import { createCoverField } from '../coverField';
+import { MAX_ELEVATION } from '../levels';
 
 const SIZE = 10;
 // Two hexes side by side: dry sand on the left, a full meadow on the right.
@@ -35,8 +36,15 @@ describe('createCoverField', () => {
     expect(field.inside(-SIZE * 2, 0)).toBe(false);
   });
 
+  it('blends elevation into a normalised altitude', () => {
+    const hills = createCoverGrid(2, 1, (col) => ({ elevation: col ? MAX_ELEVATION : 0 }));
+    const f = createCoverField(hills, SIZE, 0.6);
+    expect(f.sample(right.x, right.y).alt).toBeCloseTo(1, 3);
+    expect(f.sample((left.x + right.x) / 2, 0).alt).toBeCloseTo(0.5, 6);
+  });
+
   it('writes into a supplied output object', () => {
-    const out = { water: 9, grass: 9, trees: 9 };
+    const out = { water: 9, grass: 9, trees: 9, alt: 9 };
     expect(field.sample(right.x, right.y, out)).toBe(out);
     expect(out.water).toBe(0);
   });

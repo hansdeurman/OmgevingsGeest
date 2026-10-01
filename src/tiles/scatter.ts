@@ -11,6 +11,9 @@ export interface PropInstance {
   variant: number;
   x: number;
   y: number;
+  /** The hex it stands on. */
+  col: number;
+  row: number;
 }
 
 const CANDIDATES = 40;
@@ -18,12 +21,19 @@ const CANDIDATES = 40;
 const JITTER = 0.25;
 /** Keep prop feet slightly inside the hex so they don't straddle the edge. */
 const INSET = 0.85;
+/** How far a centred prop may drift from the hex centre, in hex radii. */
+const CENTRE_JITTER = 0.15;
 
 /** Deterministic seed per (hex, rule, map seed). */
 const cellSeed = (col: number, row: number, salt: number) => Math.floor(hash2(col, row, salt) * 0xffffffff);
 
-function candidates(col: number, row: number, size: number, rng: () => number): Pixel[] {
+function candidates(col: number, row: number, size: number, rng: () => number, centred = false): Pixel[] {
   const c = offsetToPixel(col, row, size);
+  if (centred) {
+    const a = rng() * Math.PI * 2;
+    const r = rng() * CENTRE_JITTER * size;
+    return [{ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r }];
+  }
   const hw = (Math.sqrt(3) / 2) * size * INSET;
   const hh = size * INSET;
   const out: Pixel[] = [];
@@ -60,13 +70,14 @@ export function scatterProps(
   seed: number,
 ): PropInstance[] {
   const out: PropInstance[] = [];
-  forEachCell(grid, (cover, col, row) => {
+  forEachCell(grid, (cover, col, row, elevation) => {
     rules.forEach((rule, i) => {
-      const n = rule.count(cover);
+      const n = rule.count(cover, elevation);
       if (n <= 0) return;
       const rng = mulberry32(cellSeed(col, row, seed * 31 + i));
-      for (const p of pickSpots(candidates(col, row, size, rng), n, rule, field, size, rng)) {
-        out.push({ kind: rule.kind, variant: Math.floor(rng() * 0xffff), x: p.x, y: p.y });
+      if (rng() >= (rule.chance ?? 1)) return;
+      for (const p of pickSpots(candidates(col, row, size, rng, rule.centred), n, rule, field, size, rng)) {
+        out.push({ kind: rule.kind, variant: Math.floor(rng() * 0xffff), x: p.x, y: p.y, col, row });
       }
     });
   });

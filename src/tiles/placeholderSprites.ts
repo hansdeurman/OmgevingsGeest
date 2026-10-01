@@ -157,7 +157,40 @@ export function createPlaceholderSprites(s: number, res = 3): SpriteSet {
       ctx.fill();
     });
 
+  const mountain = (w: number, h: number, base: RGB, cap: number): Sprite =>
+    sprite(w * s, h * s, res, (ctx, cw, ch) => {
+      const g = ctx.createLinearGradient(0, 0, cw, 0);
+      g.addColorStop(0, rgbToCss(shade(base, 1.2)));
+      g.addColorStop(1, rgbToCss(shade(base, 0.7)));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(0, ch);
+      ctx.lineTo(cw / 2, 0);
+      ctx.lineTo(cw, ch);
+      ctx.closePath();
+      ctx.fill();
+      if (cap <= 0) return;
+      ctx.fillStyle = '#f4f8fc';
+      ctx.beginPath();
+      ctx.moveTo(cw / 2, 0);
+      ctx.lineTo(cw / 2 - (cw / 2) * cap, ch * cap);
+      ctx.lineTo(cw / 2 + (cw / 2) * cap, ch * cap);
+      ctx.closePath();
+      ctx.fill();
+    });
+
+  const mound = (w: number, h: number, base: RGB): Sprite =>
+    sprite(w * s, h * s, res, (ctx, cw, ch) => {
+      blob(ctx, cw * 0.32, ch * 0.62, ch * 0.38, shade(base, 0.9));
+      blob(ctx, cw * 0.68, ch * 0.64, ch * 0.36, shade(base, 0.8));
+      blob(ctx, cw * 0.5, ch * 0.5, ch * 0.48, base);
+    });
+
   return {
+    peak: [mountain(1.6, 1.5, [140, 128, 116], 0.35), mountain(1.4, 1.3, [128, 120, 110], 0.25)],
+    crag: [mountain(1.3, 1.2, [150, 138, 124], 0)],
+    hill: [mound(1.2, 0.6, [150, 160, 110])],
+    boulder: [mound(0.6, 0.42, [160, 152, 140])],
     tree: [
       roundTree([86, 178, 72], 1),
       roundTree([72, 160, 64], 0.9),
