@@ -4,7 +4,7 @@ import { LEVEL_BANDS, demoMap } from '../demoMaps';
 import { frameCentre } from '../geometry';
 import { createPlaceholderTextures } from '../placeholderTextures';
 import { getPixel } from '../raster';
-import { BAND_ROWS, buildScene } from '../scene';
+import { BAND_ROWS, buildScene, paintLakes } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
@@ -162,25 +162,36 @@ describe('buildScene (highlands, flat map)', () => {
     expect(ridge.some(at(outlet.to))).toBe(false);
   });
 
-  it('draws the high lake as one object: rocks on the far shore, the lifted water, banks along the near shore', () => {
-    const lakes = props.filter((p) => p.surface);
-    expect(lakes).toHaveLength(1);
-    const [lake] = lakes;
-    expect(lake.parts!.length).toBeGreaterThan(0);
-    expect(lake.parts!.every((p) => p.kind === 'backRock')).toBe(true);
-    expect(lake.front!.length).toBeGreaterThan(0);
-    expect(lake.front!.every((p) => /^(bank|fall|spray)/.test(p.kind))).toBe(true);
+  const [lake] = props.filter((p) => p.surface);
+  const lakeRaster = lake.surface!.raster;
+  /** Rows of the lake image that are drawn at frame column x. */
+  const paintedRows = (x: number) =>
+    Array.from({ length: lakeRaster.height }, (_, y) => y).filter((y) => getPixel(lakeRaster, Math.round(x - lake.surface!.x), y)[3] > 200);
+
+  it('draws the high lake as one painted object', () => {
+    expect(props.filter((p) => p.surface)).toHaveLength(1);
+    expect(lake.surface!.height).toBe(lakeRaster.height); // painted in scene pixels, not squashed again
   });
 
-  it('lifts the water above the shore it lies on', () => {
-    const [lake] = props.filter((p) => p.surface);
-    const lowestBank = Math.max(...lake.front!.map((p) => p.y));
-    expect(lake.surface!.y + lake.surface!.height).toBeLessThan(lowestBank);
+  it('lifts the water above the land and walls it in down to the floor', () => {
+    const lakeCells = [...hg.cells.keys()].filter(isLake).map((i) => frameCentre(i % hg.cols, Math.floor(i / hg.cols), SIZE, scene.frame));
+    const c = lakeCells.reduce((a, b) => (b.y > a.y ? b : a)); // the nearest lake cell
+    const rows = paintedRows(c.x);
+    expect(rows.length).toBeGreaterThan(0);
+    // The painted column reaches the floor in front of the lake, and rises above the land it covers.
+    expect(lake.surface!.y + Math.max(...rows)).toBeGreaterThan(c.y * view.squash);
+    expect(lake.surface!.y + Math.min(...rows)).toBeLessThan(c.y * view.squash - SIZE * 0.25);
   });
 
-  it('turns the bank toward the outlet into a waterfall', () => {
-    const [lake] = props.filter((p) => p.surface);
-    expect(lake.front!.some((p) => p.kind.startsWith('fall'))).toBe(true);
+  it('repaints only the lakes when only the water changes, keeping the land and its props', () => {
+    const low = paintLakes(scene, textures, { hexSize: SIZE, view, water: { fill: 0.5, warmth: 0, wind: { strength: 0, direction: 0 } } });
+    expect(low.tiles).toBe(scene.tiles);
+    expect(low.ground).toBe(scene.ground);
+    const others = (s: typeof scene) => s.bands.flatMap((b) => b.props.filter((p) => !p.surface));
+    expect(others(low)).toEqual(others(scene));
+    const [lowLake] = low.bands.flatMap((b) => b.props.filter((p) => p.surface));
+    expect(lowLake.surface!.raster).not.toBe(lakeRaster);
+    expect(scene.bands.flatMap((b) => b.props).filter((p) => p.surface)[0]).toBe(lake); // the original scene is untouched
   });
 
   it('paints no open water on the ground under the mountain lake: the water is in the sprites', () => {

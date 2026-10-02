@@ -17,15 +17,7 @@ export interface PropInstance {
   row: number;
   /** Drawn height in scene pixels, overriding the sprite's own (e.g. a waterfall fitted to its drop). */
   height?: number;
-  /** Stretch the sprite's height only, keeping its width (e.g. a lower lake rim). */
-  heightScale?: number;
-  /** Mirror the sprite left-right. */
-  flip?: boolean;
-  /** Sprites drawn together as one object, back to front (e.g. the pieces of one mountain lake). */
-  parts?: PropInstance[];
-  /** Parts drawn after the surface: in front of it (the banks along a lake's near shore). */
-  front?: PropInstance[];
-  /** An image drawn over the parts, its top-left at (x, y) in scene pixels, squashed to `height` (a lake's water surface). */
+  /** An image drawn instead of a sprite, its top-left at (x, y) in scene pixels, squashed to `height` (a painted high lake). */
   surface?: { raster: Raster; x: number; y: number; height: number };
 }
 

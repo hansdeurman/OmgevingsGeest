@@ -1,5 +1,5 @@
 import type { Pixel } from '../math/hex';
-import { mix, shade, type RGB } from '../rendering/palette';
+import { shade, type RGB } from '../rendering/palette';
 import { forEachCell, inGrid, type CoverGrid } from './coverGrid';
 import { offsetNeighbours, pixelToOffset } from '../math/hex';
 import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, type IsoView } from './geometry';
@@ -8,14 +8,11 @@ import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { PROP_RULES, type PropRule } from './propRules';
 import { ridgeProps } from './ridges';
-import { HIGH_LAKE_FROM, lakeLift, lakeShapes, shoreProps, type LakeShape } from './shores';
-import { blurHeights } from './relief';
+import { DEFAULT_WATER, lakeArt, lakeState, placeholderLakeKit, type LakeKit, type WaterOptions } from './highLakes';
+import { paintLake, type LakeImage } from './lakePainter';
+import { lakeShapes, type LakeShape } from './shores';
 import type { River } from './rivers';
-import { clamp } from '../math/scalar';
-import { MAX_ELEVATION } from './levels';
-import { valueNoise2D } from '../math/noise';
-import { smoothstep } from '../math/scalar';
-import { createRaster, getPixel, setPixel, type Raster } from './raster';
+import { getPixel, type Raster } from './raster';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
 import { scatterProps, type PropInstance } from './scatter';
 import { createTerrainSampler } from './terrainSampler';
@@ -32,6 +29,10 @@ export interface SceneOptions {
   /** Painted cliff under raised water, stretched from the rim to the floor. */
   poolFace?: Raster;
   rules?: readonly PropRule[];
+  /** Art for high lakes on the flat map; plain stand-ins if absent. */
+  lakes?: LakeKit;
+  /** How full, warm and windswept the high lakes are. */
+  water?: WaterOptions;
 }
 
 /** Which wall texture a face shows; 'none' keeps the plain ground colour (open water). */
@@ -88,7 +89,18 @@ export interface Scene {
   /** Per hex, row-major. */
   tiles: TileDraw[];
   bands: SceneBand[];
+  /** The high lakes, kept so their water can be repainted without rebuilding the map. */
+  lakes: SceneLake[];
 }
+
+/** A high lake on the flat map: its shape (frame px) and where it pours out. */
+export interface SceneLake {
+  shape: LakeShape;
+  outlet?: Pixel;
+}
+
+/** What painting the high lakes needs from the scene options. */
+export type LakeOptions = Pick<SceneOptions, 'hexSize' | 'view' | 'lakes' | 'water'>;
 
 export const tileAt = (scene: Scene, col: number, row: number): TileDraw | undefined =>
   scene.tiles.find((t) => t.col === col && t.row === row);
@@ -152,41 +164,16 @@ function cascadeProp(c: Cascade, variant: number, frame: GridFrame, view: IsoVie
   return { kind: 'fall', variant, x: iso.x, y: iso.y, col: hex.col, row: hex.row, height: c.height };
 }
 
-/**
- * A mountain lake's water, as painted in its sprites: lighter in the shallows,
- * deep blue in the middle; a lake on the foothills is a fresher, greener blue.
- */
-const LAKE_SHALLOW: RGB = [66, 118, 148];
-const LAKE_DEEP: RGB = [36, 82, 114];
-const HILL_SHALLOW: RGB = [84, 150, 160];
-const HILL_DEEP: RGB = [46, 112, 138];
-
-/**
- * Colour a high lake's water and place it in scene pixels: squashed by the
- * view and lifted by the lake's height. Deeper away from the shore, with soft
- * ripples of light; colder and darker the higher the lake.
- */
-function paintSurface(shape: LakeShape, size: number, view: IsoView) {
-  const { width: W, height: H } = shape;
-  const soft = Float32Array.from(shape.mask);
-  const deep = Float32Array.from(shape.mask);
-  blurHeights(soft, W, H, 1);
-  blurHeights(deep, W, H, Math.max(1, Math.round(size * 0.3)));
-  const cold = smoothstep(HIGH_LAKE_FROM, MAX_ELEVATION - 1, shape.level);
-  const [shallow, deepest] = [mix(HILL_SHALLOW, LAKE_SHALLOW, cold), mix(HILL_DEEP, LAKE_DEEP, cold)];
-  const raster = createRaster(W, H);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      if (!shape.mask[i]) continue;
-      const ripple = valueNoise2D((shape.x0 + x) * 0.08, (shape.y0 + y) * 0.22, 41) - 0.5;
-      const c = shade(mix(shallow, deepest, smoothstep(0.5, 0.95, deep[i])), 1 + 0.16 * ripple);
-      setPixel(raster, x, y, c, Math.round(clamp(soft[i] * 2 - 0.2, 0, 1) * 255));
-    }
-  }
-  const top = toIso({ x: shape.x0, y: shape.y0 }, view);
-  return { raster, x: top.x, y: top.y - lakeLift(shape.level) * size, height: H * view.squash };
-}
+/** A painted high lake as a prop whose foot is its nearest shore, frame row `footY`. */
+const lakeProp = (img: LakeImage, footY: number, squash: number): PropInstance => ({
+  kind: 'boulder',
+  variant: 0,
+  x: img.x,
+  y: footY * squash,
+  col: -1,
+  row: -1,
+  surface: { raster: img.raster, x: img.x, y: img.y, height: img.raster.height },
+});
 
 /** Where a high lake pours out (frame pixels): between the lake cell its river starts from and the cell it falls into. */
 function outletOf(shape: LakeShape, rivers: readonly River[], grid: CoverGrid, size: number, frame: GridFrame) {
@@ -228,16 +215,29 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
     const { fy, prop } = toScene(p);
     bands[bandIndex(bands, fy)].props.push(prop);
   }
-  // Each high lake is one prop where its nearest bank stands: far-shore rocks, then the lifted water, then the banks.
-  for (const shape of flat ? lakeShapes(t.highWater, frame.width, frame.height, (MIN_LAKE * size) ** 2) : []) {
-    const { back, front, lift } = shoreProps(shape, size, seed, outletOf(shape, t.rivers, grid, size, frame));
-    const iso = (p: PropInstance, raise = 0) => ({ ...p, x: p.x, y: p.y * view.squash - raise });
-    const footY = Math.max(shape.y0 + shape.height, ...front.map((p) => p.y));
-    const lake: PropInstance = { kind: 'backRock', variant: 0, x: shape.x0, y: footY * view.squash, col: -1, row: -1 };
-    bands[bandIndex(bands, footY)].props.push({ ...lake, parts: back.map((p) => iso(p, lift)), surface: paintSurface(shape, size, view), front: front.map((p) => iso(p)) });
-  }
   t.cascades.forEach((c, i) => bands[bandIndex(bands, c.at.y)].props.push(cascadeProp(c, i, frame, view, size)));
   for (const b of bands) b.props.sort((a, c) => a.y - c.y);
 
-  return { frame, view, hexSize: size, ground, heights, tiles, bands };
+  const shapes = flat ? lakeShapes(t.highWater, frame.width, frame.height, (MIN_LAKE * size) ** 2) : [];
+  const lakes = shapes.map((shape) => ({ shape, outlet: outletOf(shape, t.rivers, grid, size, frame) }));
+  return paintLakes({ frame, view, hexSize: size, ground, heights, tiles, bands, lakes }, textures, opts);
+}
+
+/**
+ * The scene with its high lakes (re)painted for `opts.water`, each one object
+ * drawn where its near shore stands. The land is shared, not rebuilt, so this
+ * is quick enough to follow a slider.
+ */
+export function paintLakes(scene: Scene, ground: GroundTextures, opts: LakeOptions): Scene {
+  const { hexSize: size, view } = opts;
+  const kit = opts.lakes ?? placeholderLakeKit(size);
+  const bands = scene.bands.map((b) => ({ ...b, props: b.props.filter((p) => !p.surface) }));
+  for (const { shape, outlet } of scene.lakes) {
+    const state = lakeState(shape.level, size, opts.water ?? DEFAULT_WATER, outlet);
+    const img = paintLake(shape, state, lakeArt(kit, shape.level, state.spill, ground), view.squash, size);
+    const footY = shape.y0 + shape.height;
+    const band = bands[bandIndex(bands, footY)];
+    band.props = [...band.props, lakeProp(img, footY, view.squash)].sort((a, c) => a.y - c.y);
+  }
+  return { ...scene, bands };
 }

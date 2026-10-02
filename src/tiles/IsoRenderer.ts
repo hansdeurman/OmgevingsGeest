@@ -67,8 +67,8 @@ function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number):
  * Nearer terrain is drawn later and so hides what lies behind it.
  */
 export class IsoRenderer {
-  private readonly slices = new WeakMap<Scene, HTMLCanvasElement[]>();
-  private readonly surfaces = new WeakMap<Raster, HTMLCanvasElement>();
+  /** Canvases per raster (terrain slices, painted lakes), shared by scenes that share the raster. */
+  private readonly canvases = new WeakMap<Raster, HTMLCanvasElement>();
   private readonly patterns = new Map<HTMLImageElement, CanvasPattern>();
 
   constructor(
@@ -77,7 +77,6 @@ export class IsoRenderer {
   ) {}
 
   draw(ctx: CanvasRenderingContext2D, scene: Scene, t: ViewTransform, opts: { grid?: boolean } = {}): void {
-    const slices = this.sliceCanvases(scene);
     ctx.save();
     ctx.translate(t.x, t.y);
     ctx.scale(t.scale, t.scale);
@@ -86,21 +85,12 @@ export class IsoRenderer {
     for (const tile of scene.tiles) {
       for (const face of tile.faces) this.drawFace(ctx, scene.hexSize, face, FACE_SHADE[face.side]);
     }
-    scene.bands.forEach((band, b) => {
-      ctx.drawImage(slices[b], 0, band.slice.top);
+    scene.bands.forEach((band) => {
+      ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
       for (const p of band.props) this.drawProp(ctx, p);
     });
     if (opts.grid) for (const tile of scene.tiles) this.outline(ctx, tile.top);
     ctx.restore();
-  }
-
-  private sliceCanvases(scene: Scene): HTMLCanvasElement[] {
-    let canvases = this.slices.get(scene);
-    if (!canvases) {
-      canvases = scene.bands.map((b) => rasterCanvas(b.slice.raster));
-      this.slices.set(scene, canvases);
-    }
-    return canvases;
   }
 
   private drawFace(ctx: CanvasRenderingContext2D, hexSize: number, face: SideFace, darken: number): void {
@@ -137,30 +127,21 @@ export class IsoRenderer {
     return p;
   }
 
-  /**
-   * One prop, or a group drawn as one object: its parts back to front, then
-   * its surface (a lake's water), then the parts in front of it.
-   */
+  /** One prop: its sprite with a contact shadow, or its painted surface (a high lake). */
   private drawProp(ctx: CanvasRenderingContext2D, p: PropInstance): void {
-    this.drawParts(ctx, p.parts ?? [p]);
     if (p.surface) {
       const { raster, x, y, height } = p.surface;
-      ctx.drawImage(this.surfaceCanvas(raster), x, y, raster.width, height);
+      ctx.drawImage(this.canvasOf(raster), x, y, raster.width, height);
+      return;
     }
-    this.drawParts(ctx, p.front ?? []);
+    const { s, k } = this.sized(p);
+    if (s.shadow) drawShadow(ctx, p, s.shadow * k);
+    ctx.drawImage(s.image, p.x - (s.width * k) / 2, p.y - s.height * k, s.width * k, s.height * k);
   }
 
-  private drawParts(ctx: CanvasRenderingContext2D, parts: readonly PropInstance[]): void {
-    for (const part of parts) {
-      const { s, k } = this.sized(part);
-      if (s.shadow) drawShadow(ctx, part, s.shadow * k);
-      this.drawSprite(ctx, part, s.image, s.width * k, s.height * k * (part.heightScale ?? 1));
-    }
-  }
-
-  private surfaceCanvas(r: Raster): HTMLCanvasElement {
-    let canvas = this.surfaces.get(r);
-    if (!canvas) this.surfaces.set(r, (canvas = rasterCanvas(r)));
+  private canvasOf(r: Raster): HTMLCanvasElement {
+    let canvas = this.canvases.get(r);
+    if (!canvas) this.canvases.set(r, (canvas = rasterCanvas(r)));
     return canvas;
   }
 
@@ -169,19 +150,6 @@ export class IsoRenderer {
     const variants = this.sprites[p.kind];
     const s = variants[p.variant % variants.length];
     return { s, k: p.height ? p.height / s.height : 1 };
-  }
-
-  /** Draw an image with its bottom-centre on the prop's foot, mirrored if the prop says so. */
-  private drawSprite(ctx: CanvasRenderingContext2D, p: PropInstance, image: CanvasImageSource, w: number, h: number): void {
-    if (!p.flip) {
-      ctx.drawImage(image, p.x - w / 2, p.y - h, w, h);
-      return;
-    }
-    ctx.save();
-    ctx.translate(p.x, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(image, -w / 2, p.y - h, w, h);
-    ctx.restore();
   }
 
   private outline(ctx: CanvasRenderingContext2D, points: Pixel[]): void {

@@ -14,15 +14,6 @@ export const PROP_KINDS = [
   'crag',
   'peak',
   'fall',
-  // High lakes: banks in three heights, rocks on the far shore, waterfalls in three heights, spray.
-  'bankLow',
-  'bankMid',
-  'bankHigh',
-  'backRock',
-  'fallLow',
-  'fallMid',
-  'fallHigh',
-  'spray',
 ] as const;
 export type PropKind = (typeof PROP_KINDS)[number];
 

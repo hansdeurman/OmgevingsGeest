@@ -5,11 +5,12 @@ import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
-import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadPoolFace, loadWalls } from '../../tiles/imageTextures';
+import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadLakeKit, loadPoolFace, loadWalls } from '../../tiles/imageTextures';
+import type { LakeKit } from '../../tiles/highLakes';
 import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
-import { buildScene, tileAt, type Scene } from '../../tiles/scene';
+import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
 
 const HEX = 40;
 const SQUASH = 0.65;
@@ -26,6 +27,11 @@ const useArt = ref(true);
 /** Height of the highest ground, as a percentage of one hex row's offset. */
 const relief = ref(100);
 const mountainStyle = ref<MountainStyle>('sprites');
+/** High lakes: how full (100 = brim-full, above spills), the season (-100 winter … 100 summer), the wind. */
+const fill = ref(100);
+const season = ref(0);
+const wind = ref(25);
+const windDir = ref(30);
 const HEX_ROW = 1.5 * HEX * SQUASH;
 
 const placeholders = createPlaceholderTextures(128);
@@ -35,26 +41,43 @@ let artSprites: Partial<SpriteSet> = {};
 let artWalls: WallImages = {};
 let artCliff: Raster | undefined;
 let artPoolFace: Raster | undefined;
+let artLakes: LakeKit | undefined;
 const renderer = new IsoRenderer(placeholderSprites);
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
 let resizeObs: ResizeObserver | null = null;
 
+const groundTextures = () => (useArt.value ? { ...placeholders, ...art } : placeholders);
+
+function lakeOptions(): LakeOptions {
+  return {
+    hexSize: HEX,
+    view: { squash: SQUASH, thickness: THICKNESS },
+    lakes: useArt.value ? artLakes : undefined,
+    water: { fill: fill.value / 100, warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
+  };
+}
+
 function rebuild(): void {
   const map = demoMap(mapId.value, seed.value);
   labels = map.labels;
-  const textures = useArt.value ? { ...placeholders, ...art } : placeholders;
   renderer.sprites = useArt.value ? { ...placeholderSprites, ...artSprites } : placeholderSprites;
   renderer.walls = useArt.value ? artWalls : {};
-  scene = buildScene(map.grid, textures, {
-    hexSize: HEX,
+  scene = buildScene(map.grid, groundTextures(), {
+    ...lakeOptions(),
     seed: seed.value,
     blend: blend.value,
-    view: { squash: SQUASH, thickness: THICKNESS },
     relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value },
     cliff: useArt.value ? artCliff : undefined,
     poolFace: useArt.value ? artPoolFace : undefined,
   });
+  draw();
+}
+
+/** Only the water changed: repaint the lakes, keep the land. */
+function repaintWater(): void {
+  if (!scene) return;
+  scene = paintLakes(scene, groundTextures(), lakeOptions());
   draw();
 }
 
@@ -90,13 +113,14 @@ function draw(): void {
 
 onMounted(() => {
   rebuild();
-  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX)])
-    .then(([textures, sprites, walls, cliff, poolFace]) => {
+  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX), loadLakeKit(HEX)])
+    .then(([textures, sprites, walls, cliff, poolFace, lakes]) => {
       art = textures;
       artSprites = sprites;
       artWalls = walls;
       artCliff = cliff;
       artPoolFace = poolFace;
+      artLakes = lakes;
       rebuild();
     })
     .catch((e) => console.error('Tile art failed to load', e));
@@ -106,6 +130,7 @@ onMounted(() => {
 onBeforeUnmount(() => resizeObs?.disconnect());
 
 watch([mapId, seed, blend, useArt, relief, mountainStyle, contours], rebuild);
+watch([fill, season, wind, windDir], repaintWater);
 watch(showGrid, draw);
 </script>
 
@@ -138,6 +163,19 @@ watch(showGrid, draw);
       <label>
         Relief {{ relief }}%
         <input v-model.lazy.number="relief" type="range" min="0" max="150" step="10" />
+      </label>
+      <label>
+        Lake water {{ fill }}%
+        <input v-model.number="fill" type="range" min="20" max="120" step="5" />
+      </label>
+      <label>
+        Season {{ season < 0 ? 'winter' : season > 0 ? 'summer' : 'spring' }}
+        <input v-model.number="season" type="range" min="-100" max="100" step="10" />
+      </label>
+      <label>
+        Wind {{ wind }}%
+        <input v-model.number="wind" type="range" min="0" max="100" step="5" />
+        <input v-model.number="windDir" type="range" min="0" max="360" step="15" title="Wind direction" class="dir" />
       </label>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
       <label class="check"><input v-model="contours" type="checkbox" /> Height lines</label>
@@ -172,5 +210,6 @@ canvas { display: block; width: 100%; height: 100%; }
 }
 .controls label { display: flex; align-items: center; gap: 6px; }
 .controls input[type='number'] { width: 64px; }
+.controls input.dir { width: 60px; }
 .controls .hint { margin: 0; font-size: 12px; color: #8a8a99; }
 </style>

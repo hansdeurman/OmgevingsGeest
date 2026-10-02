@@ -195,30 +195,7 @@ export function createPlaceholderSprites(s: number, res = 3): SpriteSet {
       ctx.fillRect(cw * 0.2, 0, cw * 0.6, ch);
     });
 
-  /** A block of rock for the shore pieces: `aspect` is height per width, `water` adds a blue fall down its front. */
-  const rock = (h: number, aspect: number, water = false): Sprite =>
-    sprite((h / aspect) * s, h * s, res, (ctx, cw, ch) => {
-      const g = ctx.createLinearGradient(0, 0, cw, 0);
-      g.addColorStop(0, '#a89c8c');
-      g.addColorStop(1, '#6e665c');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, ch * 0.15, cw, ch * 0.85);
-      ctx.fillStyle = '#b8ad9e';
-      ctx.fillRect(0, 0, cw, ch * 0.2);
-      if (!water) return;
-      ctx.fillStyle = '#7fb8e0';
-      ctx.fillRect(cw * 0.4, 0, cw * 0.2, ch);
-    });
-
   return {
-    bankLow: [rock(0.4, 0.6)],
-    bankMid: [rock(0.7, 0.6)],
-    bankHigh: [rock(1.1, 1.6)],
-    backRock: [rock(0.5, 0.6)],
-    fallLow: [rock(0.4, 0.6, true)],
-    fallMid: [rock(0.7, 0.6, true)],
-    fallHigh: [rock(1.1, 1.6, true)],
-    spray: [fall(0.5, 0.3)],
     fall: [fall(0.6, 0.8)],
     peak: [mountain(1.6, 1.5, [140, 128, 116], 0.35), mountain(1.4, 1.3, [128, 120, 110], 0.25)],
     crag: [mountain(1.3, 1.2, [150, 138, 124], 0)],

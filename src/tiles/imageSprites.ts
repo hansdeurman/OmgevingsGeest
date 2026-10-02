@@ -15,16 +15,7 @@ export const SPRITE_COUNTS: Partial<Record<PropKind, number>> = {
   hill: 1,
   boulder: 1,
   fall: 2,
-  bankLow: 2,
-  bankMid: 3,
-  bankHigh: 3,
-  backRock: 3,
-  fallLow: 1,
-  fallMid: 1,
-  fallHigh: 2,
-  spray: 3,
 };
-
 
 /** In-game height of a kind's median variant, in hex radii. */
 export const SPRITE_HEIGHTS: Record<PropKind, number> = {
@@ -39,15 +30,6 @@ export const SPRITE_HEIGHTS: Record<PropKind, number> = {
   crag: 0.7,
   peak: 0.95,
   fall: 0.7,
-  // Shore pieces are sized per lake (each instance carries its height); these are only defaults.
-  bankLow: 0.4,
-  bankMid: 0.7,
-  bankHigh: 1.1,
-  backRock: 0.5,
-  fallLow: 0.4,
-  fallMid: 0.7,
-  fallHigh: 1.1,
-  spray: 0.45,
 };
 
 /** Generated art carries no shadow; the renderer adds one this wide (share of sprite width). */
