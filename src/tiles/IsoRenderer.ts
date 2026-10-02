@@ -3,6 +3,7 @@ import { rgbToCss } from '../rendering/palette';
 import type { Sprite, SpriteSet } from './placeholderSprites';
 import type { Raster } from './raster';
 import type { PropInstance } from './scatter';
+import type { RiverSegment } from './riverLayer';
 import type { Scene, SideFace, WallKind } from './scene';
 
 /** Scene → screen mapping: screen = offset + scene * scale. */
@@ -61,6 +62,31 @@ function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number):
   ctx.fill();
 }
 
+/** A river: its wet banks, the water, a lighter current down its middle (colour, share of its width). */
+const RIVER: readonly [string, number][] = [
+  ['rgba(70, 82, 52, 0.35)', 1.5],
+  ['rgb(58, 118, 156)', 1],
+  ['rgba(150, 200, 226, 0.7)', 0.35],
+];
+
+/** Stretches of river as curves, round at their ends so they join where they meet. */
+function drawRivers(ctx: CanvasRenderingContext2D, rivers: readonly RiverSegment[]): void {
+  if (!rivers.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [colour, share] of RIVER) {
+    ctx.strokeStyle = colour;
+    for (const r of rivers) {
+      ctx.lineWidth = r.width * share;
+      ctx.beginPath();
+      ctx.moveTo(r.from.x, r.from.y);
+      ctx.quadraticCurveTo(r.via.x, r.via.y, r.to.x, r.to.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 /**
  * Draws a Scene: the slab faces under the map first, then band by band, back
  * to front, each band's terrain slice followed by the props standing in it.
@@ -87,6 +113,7 @@ export class IsoRenderer {
     }
     scene.bands.forEach((band) => {
       ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
+      drawRivers(ctx, band.rivers);
       for (const p of band.props) this.drawProp(ctx, p);
     });
     if (opts.grid) for (const tile of scene.tiles) this.outline(ctx, tile.top);

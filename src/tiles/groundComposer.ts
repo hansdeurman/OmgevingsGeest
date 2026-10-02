@@ -184,14 +184,14 @@ function texelAt(textures: GroundTextures, x: number, y: number, seed: number, f
  * sea, widening as it goes, with white water where it drops steeply; open
  * water it crosses stays as it is. Returns the rivers and their pixels.
  */
-function paintRivers(base: BaseTerrain, grid: CoverGrid, textures: GroundTextures, frame: GridFrame, size: number, seed: number, water: ArrayLike<number>) {
+function paintRivers(base: BaseTerrain, grid: CoverGrid, textures: GroundTextures, frame: GridFrame, size: number, seed: number, water: ArrayLike<number>, paint: boolean) {
   const { width: W, height: H } = frame;
   // Rivers leave the high basins as they are when rain has filled them.
   const full = { cols: grid.cols, rows: grid.rows, elevation: grid.elevation.map((e, i) => e + (water[i] ?? 0)) };
   const rivers = lakeRivers(full, (i) => isLakeCell(grid)(i) || (water[i] ?? 0) > LAKE_DEPTH, isSeaCell(grid));
   const mask = new Uint8Array(W * H);
   const [w0, w1] = RIVER_WIDTH;
-  for (const river of rivers) {
+  for (const river of paint ? rivers : []) {
     const path = smoothPath(river.cells.map((i) => cellCentre(grid, i, size, frame)), 2);
     const drops = river.cascades.map(([a, b]) => {
       const [p, q] = [cellCentre(grid, a, size, frame), cellCentre(grid, b, size, frame)];
@@ -235,7 +235,8 @@ function raiseRelief(base: BaseTerrain, grid: CoverGrid, frame: GridFrame, size:
  * Because it is one image, identical neighbours join without seams and fuse
  * zones run freely across hex edges. Pixels off the map stay transparent.
  * `water` is the water high basins hold when full (steps per cell), kept
- * apart from the map: rivers leave the basins as if they were full.
+ * apart from the map: rivers leave the basins as if they were full. Without
+ * `rivers` their routes are found but not painted (a water model draws them).
  */
 export function composeTerrain(
   terrain: CoverField,
@@ -246,10 +247,11 @@ export function composeTerrain(
   seed: number,
   relief: ReliefOptions,
   water: ArrayLike<number> = [],
+  rivers = true,
 ): Terrain {
   const { width: W, height: H } = frame;
   const base = paintBase(terrain, grid, textures, frame, size, seed, relief);
-  const rivers = paintRivers(base, grid, textures, frame, size, seed, water);
+  const routes = paintRivers(base, grid, textures, frame, size, seed, water, rivers);
   const flat = relief.style === 'sprites';
   const shown = flat
     ? (() => {
@@ -260,5 +262,5 @@ export function composeTerrain(
       })()
     : raiseRelief(base, grid, frame, size);
   if (relief.contours) paintContours(base.ground, base.elevation, 1);
-  return { ground: base.ground, rows: base.rows, rivers: rivers.rivers, river: rivers.mask, ...shown };
+  return { ground: base.ground, rows: base.rows, rivers: routes.rivers, river: routes.mask, ...shown };
 }

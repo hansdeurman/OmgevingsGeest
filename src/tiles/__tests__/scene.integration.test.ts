@@ -8,8 +8,8 @@ import { BAND_ROWS, buildScene, paintLakes } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
-import { createWaterWorld } from '../../water/hexWater';
-import { basinScript, runScript } from '../../water/waterScript';
+import { phaseEnd, runScript, seasonScript } from '../../water/waterScript';
+import { hydroWorldOf } from '../mapHydro';
 import type { PropInstance } from '../scatter';
 
 /**
@@ -192,7 +192,7 @@ describe('buildScene (highlands, flat map)', () => {
   });
 
   it('repaints the water without rebuilding the land, leaving the scene it came from as it was', () => {
-    const dry = paintLakes(scene, textures, { hexSize: SIZE, view }, new Array(hg.cols * hg.rows).fill(0));
+    const dry = paintLakes(scene, textures, { hexSize: SIZE, view }, { depth: new Array(hg.cols * hg.rows).fill(0) });
     expect(dry.tiles).toBe(scene.tiles);
     expect(dry.ground).toBe(scene.ground);
     expect(dry.bands.flatMap((b) => b.props).filter((p) => p.surface)).toHaveLength(0);
@@ -219,13 +219,15 @@ describe('buildScene (mountains, flat map, water from a simulation)', () => {
   const { grid: mg, water } = demoMap('mountains', 2);
   const scene = buildScene(mg, textures, { ...flatOptions, highWater: water });
   const cells = mg.cols * mg.rows;
-  const paint = (depth: ArrayLike<number>) => paintLakes(scene, textures, { hexSize: SIZE, view }, depth);
+  const world = hydroWorldOf(mg);
+  const script = seasonScript(mg.cols, mg.rows, mg.elevation, water!);
+  const states = runScript(world, script);
+  const paint = (depth: ArrayLike<number>, flux?: Float32Array) => paintLakes(scene, textures, { hexSize: SIZE, view }, { depth, flux, topo: world.topo });
   const lakesOf = (s: typeof scene) => s.bands.flatMap((b) => b.props).filter((p) => p.surface);
   const landOf = (s: typeof scene) => s.bands.flatMap((b) => b.props).filter((p) => !p.surface);
   const highest = scene.basins.reduce((a, b) => (b.full > a.full ? b : a));
   const inHighest = (p: PropInstance) => highest.cells.includes(p.row * mg.cols + p.col);
   const mountainsIn = (s: typeof scene) => landOf(s).filter((p) => p.elevation !== undefined && inHighest(p));
-  const states = runScript(createWaterWorld(mg.cols, mg.rows, mg.elevation), basinScript(mg.cols, mg.rows, water!));
 
   it('shows an empty basin as plain land: mountains where its ground is high, no lake', () => {
     const dry = paint(new Array(cells).fill(0));
@@ -245,7 +247,7 @@ describe('buildScene (mountains, flat map, water from a simulation)', () => {
   });
 
   it('stands every prop it keeps on dry land, and lifts the ones on a lake to its height', () => {
-    for (const k of [40, 90, 130, 200, 260]) {
+    for (const k of [40, 120, 200, 230, 300, 440]) {
       const s = paint(states[k].depth);
       for (const lake of lakesOf(s)) for (const r of lake.riders ?? []) expect(r.y).toBeLessThan(lake.y);
       const riders = lakesOf(s).flatMap((l) => l.riders ?? []);
@@ -253,5 +255,15 @@ describe('buildScene (mountains, flat map, water from a simulation)', () => {
       expect(land.length + riders.length).toBeLessThanOrEqual(landOf(paint(new Array(cells).fill(0))).length);
     }
   });
-});
 
+  it('draws rivers wherever the water runs, and none where it stands still', () => {
+    const rivers = (s: typeof scene) => s.bands.flatMap((b) => b.rivers);
+    const raining = states[phaseEnd(script, 'Spring rain')];
+    expect(rivers(paint(raining.depth, raining.flux)).length).toBeGreaterThan(5);
+    expect(rivers(paint(raining.depth))).toEqual([]);
+  });
+
+  it('paints no river into the ground of the flat map: they come and go with the water', () => {
+    expect(scene.bands.flatMap((b) => b.rivers)).toEqual([]);
+  });
+});

@@ -11,8 +11,10 @@ import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
-import { createWaterWorld, type WaterWorld } from '../../water/hexWater';
-import { basinScript, phaseAt, phaseEnd, runScript, type WaterScript } from '../../water/waterScript';
+import { hydroWorldOf } from '../../tiles/mapHydro';
+import type { HexTopology } from '../../water/hexTopology';
+import type { HydroSnapshot } from '../../water/hydroWorld';
+import { phaseAt, phaseEnd, runScript, seasonScript, type WaterScript } from '../../water/waterScript';
 
 const HEX = 40;
 const SQUASH = 0.65;
@@ -50,7 +52,7 @@ let resizeObs: ResizeObserver | null = null;
 let map: DemoMap = demoMap(mapId.value, seed.value);
 
 /** The scripted water run of the current map: every state, played back step by step. */
-let run: { script: WaterScript; states: WaterWorld[] } | null = null;
+let run: { script: WaterScript; states: HydroSnapshot[]; topo: HexTopology } | null = null;
 const step = ref(0);
 const steps = ref(0);
 const playing = ref(false);
@@ -60,14 +62,22 @@ let timer: ReturnType<typeof setInterval> | undefined;
 function startRun(): void {
   stopPlaying();
   const { grid, water } = map;
-  run = water?.some((d) => d > 0) ? { script: basinScript(grid.cols, grid.rows, water), states: [] } : null;
-  if (run) run.states = runScript(createWaterWorld(grid.cols, grid.rows, grid.elevation), run.script);
+  if (water?.some((d) => d > 0)) {
+    const world = hydroWorldOf(grid);
+    const script = seasonScript(grid.cols, grid.rows, grid.elevation, water);
+    run = { script, states: runScript(world, script), topo: world.topo };
+  } else run = null;
   steps.value = run ? run.states.length - 1 : 0;
-  step.value = run ? phaseEnd(run.script, 'Rain') : 0; // open with the lakes full
+  step.value = run ? phaseEnd(run.script, 'Spring rain') + 20 : 0; // open just after the cloudburst, rivers running
 }
 
 const phase = computed(() => (run && steps.value ? phaseAt(run.script, step.value).label : ''));
-const depthNow = () => run?.states[Math.min(step.value, steps.value)].depth;
+/** The water as the run has it now: what stands where and how it flows. */
+const waterNow = () => {
+  if (!run) return undefined;
+  const { depth, flux } = run.states[Math.min(step.value, steps.value)];
+  return { depth, flux, topo: run.topo };
+};
 
 function stopPlaying(): void {
   clearInterval(timer);
@@ -101,7 +111,7 @@ function rebuild(): void {
   scene = buildScene(flat ? map.grid : floodedGrid(map.grid, map.water), groundTextures(), {
     ...lakeOptions(),
     highWater: flat ? map.water : undefined,
-    depth: flat ? depthNow() : undefined,
+    water: flat ? waterNow() : undefined,
     seed: seed.value,
     blend: blend.value,
     relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value },
@@ -114,7 +124,7 @@ function rebuild(): void {
 /** Only the water changed: repaint the lakes, keep the land. */
 function repaintWater(): void {
   if (!scene || mountainStyle.value !== 'sprites') return;
-  scene = paintLakes(scene, groundTextures(), lakeOptions(), depthNow() ?? map.water ?? []);
+  scene = paintLakes(scene, groundTextures(), lakeOptions(), waterNow() ?? { depth: map.water ?? [] });
   draw();
 }
 

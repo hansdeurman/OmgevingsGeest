@@ -1,17 +1,18 @@
 import { neighbourIndices } from '../tiles/hydrology';
-import { stepWater, type Forcing, type WaterWorld } from './hexWater';
+import { snapshot, stepHydro, type HydroSnapshot, type HydroWorld } from './hydroWorld';
+import type { Weather } from './retention';
 
 /**
- * Scripted weather for the water model: phases of rain, a cloudburst,
- * drought, run step by step from a start, keeping every state so a view can
- * play it or jump to any moment.
+ * Scripted weather for the water model: phases of snow, rain, a cloudburst
+ * and drought, run step by step, keeping a snapshot of every step so a view
+ * can play it back or jump to any moment.
  */
 
-/** One stretch of weather: rain and evaporation per step (steps of water), for `steps` steps. */
-export interface WaterPhase extends Forcing {
+/** One stretch of weather, for `steps` steps. */
+export interface WaterPhase extends Weather {
   label: string;
   steps: number;
-  /** Water poured once at the start of the phase, per cell. */
+  /** Water poured once at the start of the phase, per hex. */
   burst?: ArrayLike<number>;
 }
 
@@ -32,31 +33,25 @@ export function phaseAt(script: WaterScript, step: number): WaterPhase {
   return script[script.length - 1];
 }
 
-/** The world with `amount` more water per cell (none on the sea and the map's edge). */
-export function pour(w: WaterWorld, amount: ArrayLike<number>): WaterWorld {
-  return { ...w, depth: w.depth.map((d, i) => (w.sink[i] ? d : d + amount[i])) };
+/** Pour `amount` more water on every hex, in place (none on the sea and the map's edge). */
+export function pour(w: HydroWorld, amount: ArrayLike<number>): void {
+  for (let i = 0; i < w.depth.length; i++) if (!w.sink[i]) w.depth[i] += amount[i];
 }
 
-/**
- * Every state of the run: index k is the world after k steps. Water flows
- * `rounds` times per step (rain and evaporation shared out over them), so a
- * full lake drains through its outlet without piling up far above it.
- */
-export function runScript(start: WaterWorld, script: WaterScript, rounds = ROUNDS): WaterWorld[] {
-  const states = [start];
-  let w = start;
+/** Run the script on `world` (which it changes): index k of the result is the moment after k steps. */
+export function runScript(world: HydroWorld, script: WaterScript): HydroSnapshot[] {
+  const states = [snapshot(world)];
   for (const phase of script) {
-    const share = { rain: typeof phase.rain === 'number' ? phase.rain / rounds : Float32Array.from(phase.rain, (r) => r / rounds), evaporation: phase.evaporation / rounds };
     for (let k = 0; k < phase.steps; k++) {
-      if (k === 0 && phase.burst) w = pour(w, phase.burst);
-      for (let r = 0; r < rounds; r++) w = stepWater(w, share);
-      states.push(w);
+      if (k === 0 && phase.burst) pour(world, phase.burst);
+      stepHydro(world, phase);
+      states.push(snapshot(world));
     }
   }
   return states;
 }
 
-/** Connected groups of cells holding water (`water[i] > 0`). */
+/** Connected groups of hexes holding water (`water[i] > 0`). */
 export function basins(cols: number, rows: number, water: ArrayLike<number>): number[][] {
   const map = { cols, rows, elevation: [] };
   const seen = new Uint8Array(cols * rows);
@@ -77,39 +72,34 @@ export function basins(cols: number, rows: number, water: ArrayLike<number>): nu
   return groups;
 }
 
-/** Flow rounds per step of a run. */
-const ROUNDS = 4;
-/** Steps per phase of the basin script, and how hard it rains, bursts and dries. */
-const PACE = { dry: 8, rain: 120, burst: 120, drought: 150 };
-/** Rain fills each basin this many times over in the rain phase, so it ends overflowing. */
-const OVERFILL = 1.25;
+/** Steps per phase of the season script. */
+const PACE = { winter: 40, spring: 160, burst: 80, summer: 220 };
+/** Rain per step on the lowlands; the mountains catch more, up to `mountains` times as much. */
+const RAIN = { lowland: 0.003, mountains: 3 };
 /** Water a cloudburst pours on one side of each basin, in steps. */
 const BURST = 1.2;
 
 /**
- * A run through the life of high lakes, given the water `full` basins hold
- * (per cell): dry, then rain fills every basin until it overflows, then a
- * cloudburst piles water up on one side of each lake and it levels out, then
- * a drought dries them all again.
+ * A year in the life of high lakes, given each hex's ground and the water
+ * `full` basins hold: a winter that lays snow on the heights, spring rain that
+ * soaks the land, runs off in streams and fills the basins until they
+ * overflow, a cloudburst that piles water up on one side of each lake until it
+ * levels out, and a dry summer in which the lakes sink while glaciers keep the
+ * rivers running.
  */
-export function basinScript(cols: number, rows: number, full: ArrayLike<number>): WaterScript {
+export function seasonScript(cols: number, rows: number, ground: ArrayLike<number>, full: ArrayLike<number>): WaterScript {
   const n = cols * rows;
-  const rain = new Float32Array(n);
+  const rain = Float32Array.from({ length: n }, (_, i) => RAIN.lowland * (1 + ((RAIN.mountains - 1) * Math.max(0, ground[i])) / 8));
   const burst = new Float32Array(n);
   const colOf = (i: number) => (i % cols) + (Math.floor(i / cols) & 1) * 0.5;
   for (const cells of basins(cols, rows, full)) {
-    const volume = cells.reduce((v, i) => v + full[i], 0);
     const middle = cells.reduce((x, i) => x + colOf(i), 0) / cells.length;
-    for (const i of cells) {
-      rain[i] = (OVERFILL * volume) / (cells.length * PACE.rain);
-      burst[i] = colOf(i) < middle ? BURST : 0;
-    }
+    for (const i of cells) burst[i] = colOf(i) < middle ? BURST : 0;
   }
-  const deepest = Math.max(0, ...Array.from(full)) * OVERFILL + BURST;
   return [
-    { label: 'Dry', steps: PACE.dry, rain: 0, evaporation: 0 },
-    { label: 'Rain', steps: PACE.rain, rain, evaporation: 0 },
-    { label: 'Cloudburst, one side', steps: PACE.burst, rain: 0, evaporation: 0, burst },
-    { label: 'Drought', steps: PACE.drought, rain: 0, evaporation: (1.2 * deepest) / PACE.drought },
+    { label: 'Winter', steps: PACE.winter, rain, warmth: -0.8, evaporation: 0 },
+    { label: 'Spring rain', steps: PACE.spring, rain: rain.map((r) => r * 1.5), warmth: 0.3, evaporation: 0.002 },
+    { label: 'Cloudburst, one side', steps: PACE.burst, rain: 0, warmth: 0.5, evaporation: 0.004, burst },
+    { label: 'Dry summer', steps: PACE.summer, rain: 0, warmth: 1, evaporation: 0.012 },
   ];
 }

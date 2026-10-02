@@ -12,6 +12,8 @@ import { DEFAULT_WEATHER, lakeArt, lakeState, placeholderLakeKit, type LakeKit, 
 import { paintLake, type LakeImage } from './lakePainter';
 import { getPixel, type Raster } from './raster';
 import { findBasins, lakesIn, settleProps, type Basin } from './waterLayer';
+import { riverSegments, type RiverSegment } from './riverLayer';
+import type { HexTopology } from '../water/hexTopology';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
 import { scatterProps, type PropInstance } from './scatter';
 import { createTerrainSampler } from './terrainSampler';
@@ -38,8 +40,15 @@ export interface SceneOptions {
    * and where their rivers run. Flat map only.
    */
   highWater?: readonly number[];
-  /** The water on each cell now (a simulation's state); full basins if absent. */
-  depth?: ArrayLike<number>;
+  /** The water now (a water model's state): it fills the basins and runs as rivers. Full basins, no rivers, if absent. */
+  water?: SceneWater;
+}
+
+/** The water on the map at one moment: per hex, and the flow per pipe (with the pipes it runs through). */
+export interface SceneWater {
+  depth: ArrayLike<number>;
+  flux?: Float32Array;
+  topo?: HexTopology;
 }
 
 /** Which wall texture a face shows; 'none' keeps the plain ground colour (open water). */
@@ -79,6 +88,8 @@ export interface SceneBand {
   props: PropInstance[];
   /** The props standing on the land, before any lake covers them. */
   land: PropInstance[];
+  /** Stretches of river on the ground here, in iso pixels; drawn over the terrain, under the props. */
+  rivers: RiverSegment[];
 }
 
 /**
@@ -182,17 +193,18 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const { hexSize: size, seed, view } = opts;
   const frame = gridFrame(grid.cols, grid.rows, size);
   const terrain = createTerrainSampler(grid, size, opts.blend, seed);
-  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater);
+  // On the flat map rivers come from the water model; the relief style paints them into the ground.
+  const flat = opts.relief.style === 'sprites';
+  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater, !flat);
   const { ground, heights } = t;
   const bandOf = t.rows.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
   const faces = { wall: opts.cliff, pool: opts.poolFace, pools: t.pool, falls: t.falls };
-  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, faces).map((slice) => ({ slice, props: [], land: [] }));
+  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, faces).map((slice) => ({ slice, props: [], land: [], rivers: [] }));
 
   const tiles: TileDraw[] = [];
   forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
 
   // On the flat map mountains are ridge sprites; rivers keep their cells free of them.
-  const flat = opts.relief.style === 'sprites';
   const riverCells = new Set(t.rivers.flatMap((r) => r.cells));
   const ridges = flat ? ridgeProps(grid, size, seed, riverCells) : [];
   const toScene = (p: PropInstance) => {
@@ -212,18 +224,19 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
 
   const full = opts.highWater ?? [];
   const basins = flat ? findBasins(grid, full, t.rivers, frame, size) : [];
-  return paintLakes({ frame, view, hexSize: size, ground, heights, tiles, bands, grid, basins }, textures, opts, opts.depth ?? full);
+  return paintLakes({ frame, view, hexSize: size, ground, heights, tiles, bands, grid, basins }, textures, opts, opts.water ?? { depth: full });
 }
 
 const byDepth = (a: PropInstance, b: PropInstance) => a.y - b.y;
 
 /**
- * The scene with the water of its high basins painted as it stands in `depth`
- * (steps per cell): each lake one object drawn where its near shore stands,
- * what the water covers hidden, peaks and islands standing on it. The land is
- * shared, not rebuilt, so this is quick enough to play a simulation.
+ * The scene with its water painted as it stands now: the high basins' water
+ * as lakes, each one object drawn where its near shore stands, what the water
+ * covers hidden, peaks and islands standing on it; and wherever water runs,
+ * rivers on the ground. The land is shared, not rebuilt, so this is quick
+ * enough to play a simulation.
  */
-export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, depth: ArrayLike<number>): Scene {
+export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, { depth, flux, topo }: SceneWater): Scene {
   const { hexSize: size, view } = opts;
   const kit = opts.lakes ?? placeholderLakeKit(size);
   const water = { cols: scene.grid.cols, rows: scene.grid.rows, ground: scene.grid.elevation, depth };
@@ -233,8 +246,12 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
   const bands = scene.bands.map((b) => {
     const settled = settleProps(b.land, shapes, view.squash, size);
     settled.riders.forEach((r, k) => riders[k].push(...r));
-    return { ...b, props: settled.kept };
+    return { ...b, props: settled.kept, rivers: [] as RiverSegment[] };
   });
+  for (const r of flux && topo ? riverSegments(topo, flux, depth, scene.frame, size) : []) {
+    const iso = (p: Pixel) => ({ x: p.x, y: p.y * view.squash });
+    bands[bandIndex(bands, Math.max(r.from.y, r.via.y, r.to.y))].rivers.push({ from: iso(r.from), via: iso(r.via), to: iso(r.to), width: r.width });
+  }
   lakes.forEach(({ shape, overflow }, k) => {
     const state = lakeState(shape, opts.weather ?? DEFAULT_WEATHER, overflow);
     const art = { ...lakeArt(kit, shape.level, state.spill, textures), floor: scene.ground };
