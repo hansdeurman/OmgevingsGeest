@@ -86,12 +86,6 @@ const LAKE_WALLS: Record<WallStyle, StripFile> = {
   grey: { file: 'wall-grey.webp', lip: 21, from: 143, to: 337 },
   snowy: { file: 'wall-snowy.webp', lip: 44, from: 164, to: 358 },
 };
-const SPILL_WALLS: StripFile[] = [
-  { file: 'overflow-1.webp', lip: 24, from: 142, to: 271 },
-  { file: 'overflow-2.webp', lip: 20, from: 142, to: 271 },
-  { file: 'overflow-3.webp', lip: 20, from: 142, to: 271 },
-];
-const OUTFALL: StripFile = { file: 'outfall.webp', lip: 20, from: 103, to: 277 };
 const WATER_FILES: Record<WaterKind, string> = { ice: 'water-ice.webp', cold: 'water-cold.webp', mild: 'water-mild.webp', warm: 'water-warm.webp' };
 /** Lake walls repeat about every this many hex radii; the art is about this wide. */
 const LAKE_WALL_REPEAT = 2.2;
@@ -111,11 +105,9 @@ const mapValues = async <K extends string, V, R>(rec: Record<K, V>, f: (v: V) =>
 
 export async function loadLakeKit(hexSize: number): Promise<LakeKit> {
   const k = (LAKE_WALL_REPEAT * hexSize) / LAKE_WALL_ART;
-  const [walls, spill, outfall, water] = await Promise.all([
+  const [walls, water] = await Promise.all([
     mapValues(LAKE_WALLS, (m) => loadStrip(m, k)),
-    Promise.all(SPILL_WALLS.map((m) => loadStrip(m, k))),
-    loadStrip(OUTFALL, k),
     mapValues(WATER_FILES, async (f) => makeSeamless(await loadRaster(`${import.meta.env.BASE_URL}tiles/lake/${f}`, WATER_SIZE))),
   ]);
-  return { walls, spill, outfall, water };
+  return { walls, water };
 }

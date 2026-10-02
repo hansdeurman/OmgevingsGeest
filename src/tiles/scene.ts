@@ -11,7 +11,7 @@ import { ridgeProps } from './ridges';
 import { DEFAULT_WEATHER, lakeArt, lakeState, placeholderLakeKit, type LakeKit, type Weather } from './highLakes';
 import { paintLake, type LakeImage } from './lakePainter';
 import { getPixel, type Raster } from './raster';
-import { findBasins, lakesIn, settleProps, type Basin } from './waterLayer';
+import { findBasins, fullOutflow, lakeOutflow, lakesIn, settleProps, type Basin } from './waterLayer';
 import { riverSegments, type RiverSegment } from './riverLayer';
 import type { HexTopology } from '../water/hexTopology';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
@@ -49,6 +49,8 @@ export interface SceneWater {
   depth: ArrayLike<number>;
   flux?: Float32Array;
   topo?: HexTopology;
+  /** The ground as the water has worn it, per hex (steps); the map's own if absent. */
+  ground?: ArrayLike<number>;
 }
 
 /** Which wall texture a face shows; 'none' keeps the plain ground colour (open water). */
@@ -236,29 +238,31 @@ const byDepth = (a: PropInstance, b: PropInstance) => a.y - b.y;
  * rivers on the ground. The land is shared, not rebuilt, so this is quick
  * enough to play a simulation.
  */
-export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, { depth, flux, topo }: SceneWater): Scene {
+export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, { depth, flux, topo, ground }: SceneWater): Scene {
   const { hexSize: size, view } = opts;
   const kit = opts.lakes ?? placeholderLakeKit(size);
-  const water = { cols: scene.grid.cols, rows: scene.grid.rows, ground: scene.grid.elevation, depth };
-  const lakes = scene.basins.flatMap((b) => lakesIn(b, water, scene.frame, size));
-  const shapes = lakes.map((l) => l.shape);
-  const riders = shapes.map((): PropInstance[] => []);
+  const water = { cols: scene.grid.cols, rows: scene.grid.rows, ground: ground ?? scene.grid.elevation, depth };
+  const lakes = scene.basins.flatMap((b) => lakesIn(b, water, scene.frame, size)).map(({ shape, basin }) => {
+    const outflow = flux && topo ? lakeOutflow(shape, topo, flux, scene.frame, size) : fullOutflow(shape, basin);
+    const state = lakeState(shape, opts.weather ?? DEFAULT_WEATHER, outflow);
+    const art = { ...lakeArt(kit, shape.level, textures), floor: scene.ground };
+    return paintLake(shape, state, art, view.squash, size);
+  });
+  const riders = lakes.map((): PropInstance[] => []);
   const bands = scene.bands.map((b) => {
-    const settled = settleProps(b.land, shapes, view.squash, size);
+    const settled = settleProps(b.land, lakes.map((l) => l.surface), view.squash);
     settled.riders.forEach((r, k) => riders[k].push(...r));
     return { ...b, props: settled.kept, rivers: [] as RiverSegment[] };
   });
-  for (const r of flux && topo ? riverSegments(topo, flux, depth, scene.frame, size) : []) {
+  const cut = ground && Array.from(scene.grid.elevation, (e, i) => e - ground[i]);
+  for (const r of flux && topo ? riverSegments(topo, flux, depth, scene.frame, size, cut) : []) {
     const iso = (p: Pixel) => ({ x: p.x, y: p.y * view.squash });
-    bands[bandIndex(bands, Math.max(r.from.y, r.via.y, r.to.y))].rivers.push({ from: iso(r.from), via: iso(r.via), to: iso(r.to), width: r.width });
+    bands[bandIndex(bands, Math.max(r.from.y, r.via.y, r.to.y))].rivers.push({ ...r, from: iso(r.from), via: iso(r.via), to: iso(r.to) });
   }
-  lakes.forEach(({ shape, overflow }, k) => {
-    const state = lakeState(shape, opts.weather ?? DEFAULT_WEATHER, overflow);
-    const art = { ...lakeArt(kit, shape.level, state.spill, textures), floor: scene.ground };
-    const footY = shape.y0 + shape.height;
+  lakes.forEach((img, k) => {
+    const footY = img.surface.y0 + img.surface.height;
     const band = bands[bandIndex(bands, footY)];
-    const lake = lakeProp(paintLake(shape, state, art, view.squash, size), footY, view.squash);
-    band.props = [...band.props, { ...lake, riders: riders[k].sort(byDepth) }].sort(byDepth);
+    band.props = [...band.props, { ...lakeProp(img, footY, view.squash), riders: riders[k].sort(byDepth) }].sort(byDepth);
   });
   return { ...scene, bands };
 }

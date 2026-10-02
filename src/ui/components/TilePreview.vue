@@ -56,15 +56,18 @@ let run: { script: WaterScript; states: HydroSnapshot[]; topo: HexTopology } | n
 const step = ref(0);
 const steps = ref(0);
 const playing = ref(false);
-const PLAY_MS = 120;
-let timer: ReturnType<typeof setInterval> | undefined;
+/** Steps played per second; when painting a step takes longer, playback skips ahead rather than slowing down. */
+const STEPS_PER_SECOND = 12;
+/** Years of weather in the water run. */
+const YEARS = 3;
+let frame = 0;
 
 function startRun(): void {
   stopPlaying();
   const { grid, water } = map;
   if (water?.some((d) => d > 0)) {
     const world = hydroWorldOf(grid);
-    const script = seasonScript(grid.cols, grid.rows, grid.elevation, water);
+    const script = seasonScript(grid.cols, grid.rows, grid.elevation, water, YEARS);
     run = { script, states: runScript(world, script), topo: world.topo };
   } else run = null;
   steps.value = run ? run.states.length - 1 : 0;
@@ -75,12 +78,12 @@ const phase = computed(() => (run && steps.value ? phaseAt(run.script, step.valu
 /** The water as the run has it now: what stands where and how it flows. */
 const waterNow = () => {
   if (!run) return undefined;
-  const { depth, flux } = run.states[Math.min(step.value, steps.value)];
-  return { depth, flux, topo: run.topo };
+  const { depth, flux, ground } = run.states[Math.min(step.value, steps.value)];
+  return { depth, flux, ground, topo: run.topo };
 };
 
 function stopPlaying(): void {
-  clearInterval(timer);
+  cancelAnimationFrame(frame);
   playing.value = false;
 }
 
@@ -88,7 +91,13 @@ function togglePlay(): void {
   if (playing.value) return stopPlaying();
   if (step.value >= steps.value) step.value = 0;
   playing.value = true;
-  timer = setInterval(() => (step.value < steps.value ? step.value++ : stopPlaying()), PLAY_MS);
+  const [from, start] = [step.value, performance.now()];
+  const tick = () => {
+    step.value = Math.min(steps.value, from + Math.floor(((performance.now() - start) / 1000) * STEPS_PER_SECOND));
+    if (step.value < steps.value) frame = requestAnimationFrame(tick);
+    else stopPlaying();
+  };
+  frame = requestAnimationFrame(tick);
 }
 
 const groundTextures = () => (useArt.value ? { ...placeholders, ...art } : placeholders);

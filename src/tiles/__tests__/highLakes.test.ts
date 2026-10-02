@@ -27,31 +27,27 @@ describe('lakeState', () => {
     expect(lakeState(lake(5), DEFAULT_WEATHER).wind).toBe(DEFAULT_WEATHER.wind);
   });
 
-  it('pours out of its outlet only once it has risen to its overflow level', () => {
-    expect(lakeState(lake(5), DEFAULT_WEATHER, { full: 5, outlet }).outlet).toBe(outlet);
-    expect(lakeState(lake(4.5), DEFAULT_WEATHER, { full: 5, outlet }).outlet).toBeUndefined();
+  it('pours out where its water really leaves it, as much as leaves, and not for a trickle', () => {
+    const pouring = lakeState(lake(5), DEFAULT_WEATHER, { amount: 0.05, at: outlet });
+    expect(pouring.outlet).toBe(outlet);
+    expect(pouring.outflow).toBe(0.05);
+    expect(lakeState(lake(5), DEFAULT_WEATHER, { amount: 0.001, at: outlet }).outlet).toBeUndefined();
     expect(lakeState(lake(5), DEFAULT_WEATHER).outlet).toBeUndefined();
   });
 
-  it('spills over its near rim when it stands well above its overflow level, harder the higher', () => {
-    expect(lakeState(lake(5.05), DEFAULT_WEATHER, { full: 5, outlet }).spill).toBe(0);
-    const some = lakeState(lake(5, 5.4), DEFAULT_WEATHER, { full: 5, outlet }).spill;
+  it('spills over its whole rim only when a great deal leaves it, harder the more', () => {
+    expect(lakeState(lake(5), DEFAULT_WEATHER, { amount: 0.1, at: outlet }).spill).toBe(0);
+    const some = lakeState(lake(5), DEFAULT_WEATHER, { amount: 0.5, at: outlet }).spill;
     expect(some).toBeGreaterThan(0);
-    expect(lakeState(lake(5, 6), DEFAULT_WEATHER, { full: 5, outlet }).spill).toBeGreaterThan(some);
+    expect(lakeState(lake(5), DEFAULT_WEATHER, { amount: 0.9, at: outlet }).spill).toBeGreaterThan(some);
   });
 });
 
 describe('lakeArt', () => {
-  it('walls each lake in the style of its height, with snow on the rim of the highest', () => {
-    expect(lakeArt(kit, 3, 0, ground).wall).toBe(kit.walls.mossy);
-    expect(lakeArt(kit, 7, 0, ground).wall).toBe(kit.walls.snowy);
-    expect(lakeArt(kit, 7, 0, ground).rim).toBe(ground.snow[0]);
-    expect(lakeArt(kit, 5, 0, ground).rim).toBe(ground.rock[0]);
-  });
-
-  it('only spills over the near wall when the lake spills, harder art for harder spills', () => {
-    expect(lakeArt(kit, 5, 0, ground).spillWall).toBeUndefined();
-    expect(lakeArt(kit, 5, 0.1, ground).spillWall).toBe(kit.spill[0]);
-    expect(lakeArt(kit, 5, 1, ground).spillWall).toBe(kit.spill[kit.spill.length - 1]);
+  it('rocks each lake in the style of its height, with snow on the rim of the highest', () => {
+    expect(lakeArt(kit, 3, ground).wall).toBe(kit.walls.mossy);
+    expect(lakeArt(kit, 7, ground).wall).toBe(kit.walls.snowy);
+    expect(lakeArt(kit, 7, ground).rim).toBe(ground.snow[0]);
+    expect(lakeArt(kit, 5, ground).rim).toBe(ground.rock[0]);
   });
 });

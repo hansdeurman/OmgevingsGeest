@@ -3,11 +3,13 @@ import { neighbourIndices } from './hydrology';
 import { smoothstep } from '../math/scalar';
 import { basins } from '../water/waterScript';
 import { frameCentre, type GridFrame } from './geometry';
-import type { Overflow } from './highLakes';
+import type { Outflow } from './highLakes';
+import { WATER, type LakeSurface } from './lakePainter';
+import { opposite, pipeTarget, type HexTopology } from '../water/hexTopology';
 import type { ElevationMap } from './hydrology';
 import type { River } from './rivers';
 import type { PropInstance } from './scatter';
-import { lakeLift, lakeShapes, type LakeShape } from './shores';
+import { lakeShapes, type LakeShape } from './shores';
 
 /**
  * From water per hex (a simulation's state) to lakes per pixel. The water's
@@ -37,12 +39,14 @@ export interface CellWater {
   depth: ArrayLike<number>;
 }
 
-/** A lake in a basin, and how it overflows. */
+/** A lake in a basin, and the basin it lies in. */
 export interface BasinLake {
   shape: LakeShape;
-  overflow: Overflow;
+  basin: Basin;
 }
 
+/** Water and ground are blended from the hexes every this many px, and smoothly in between. */
+const STEP = 2;
 /** Width of the blend between neighbouring hexes' water and ground, in hex radii. */
 const BLEND = 0.6;
 /** Water (steps) on a cell from which it starts to count as lake, and fully: thinner films run off and are not drawn. */
@@ -53,6 +57,9 @@ const MIN_DEPTH = 0.04;
 const MIN_LAKE = 0.6;
 /** How far from the middle of its nearest cell (hex radii) a basin's water may reach: up the slope of the land around it, never over its crest. */
 const REACH = 1.25;
+/** A lake reaching this close (steps) to its basin's overflow level pours out, this much per step, when no water model says how much. */
+const FULL_WITHIN = 0.05;
+const STILL_POURING = 0.05;
 /** Land around a basin this little (steps) below its overflow level still holds its shore; lower land is where it pours out. */
 const SPILL_EDGE = 0.05;
 /** A mountain sprite still shows while it stands this far (steps) above the water. */
@@ -94,43 +101,61 @@ export function findBasins(map: ElevationMap, full: ArrayLike<number>, rivers: r
 export function basinWater(basin: Basin, water: CellWater, frame: GridFrame, size: number) {
   const { x0, y0, x1, y1 } = basin.box;
   const [width, height] = [x1 - x0, y1 - y0];
-  const levels = new Float32Array(width * height).fill(NaN);
-  const ground = new Float32Array(width * height).fill(NaN);
-  const own = new Uint8Array(width * height);
-  const inBasin = new Set(basin.cells);
   const invSigma2 = 1 / (BLEND * size) ** 2;
   const reach2 = (REACH * size) ** 2;
   // Per cell, once: its centre, how wet it is, and the cells blended around it (itself first).
   // Only the basin's own water makes its lake: what stands on the land around it is running off.
   const map = { cols: water.cols, rows: water.rows, elevation: [] };
+  const inBasin = new Set(basin.cells);
   const centre = (i: number) => frameCentre(i % water.cols, Math.floor(i / water.cols), size, frame);
   const blended = (j: number) => ({ j, at: centre(j), own: inBasin.has(j), wet: inBasin.has(j) ? smoothstep(WET[0], WET[1], water.depth[j]) : 0 });
   const around = new Map([...basin.cells, ...basin.shore].map((i) => [i, [i, ...neighbourIndices(map, i)].map(blended)]));
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const [px, py] = [x0 + x + 0.5, y0 + y + 0.5];
+
+  // Surface, ground and wetness on a coarse grid of points (every STEP px), blended from the hexes around each point…
+  const [gw, gh] = [Math.ceil(width / STEP) + 1, Math.ceil(height / STEP) + 1];
+  const [S, G, drawn] = [new Float32Array(gw * gh).fill(NaN), new Float32Array(gw * gh).fill(NaN), new Uint8Array(gw * gh)];
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      const [px, py] = [x0 + gx * STEP + 0.5, y0 + gy * STEP + 0.5];
       const hex = pixelToOffset(px - frame.ox, py - frame.oy, size);
-      const cell = hex.row * water.cols + hex.col;
-      const cells = around.get(cell);
+      const cells = around.get(hex.row * water.cols + hex.col);
       if (!cells) continue;
-      let g = 0;
-      let gw = 0;
-      let s = 0;
-      let sw = 0;
-      let near = Infinity;
+      let [g, gs, sv, ss, near] = [0, 0, 0, 0, Infinity];
       for (const { j, at, own, wet } of cells) {
         const d2 = (px - at.x) ** 2 + (py - at.y) ** 2;
         const w = Math.exp(-d2 * invSigma2);
         if (own && d2 < near) near = d2;
         g += w * water.ground[j];
-        gw += w;
-        s += w * wet * (water.ground[j] + water.depth[j]);
-        sw += w * wet;
+        gs += w;
+        sv += w * wet * (water.ground[j] + water.depth[j]);
+        ss += w * wet;
       }
+      const k = gy * gw + gx;
+      G[k] = g / gs;
+      if (ss > 1e-9 && near <= reach2) S[k] = sv / ss;
+      drawn[k] = inBasin.has(hex.row * water.cols + hex.col) ? 2 : 1;
+    }
+  }
+  // …and per pixel, between the four points around it.
+  const levels = new Float32Array(width * height).fill(NaN);
+  const ground = new Float32Array(width * height).fill(NaN);
+  const own = new Uint8Array(width * height);
+  const lerp4 = (f: Float32Array, k: number, fx: number, fy: number) =>
+    (f[k] * (1 - fx) + f[k + 1] * fx) * (1 - fy) + (f[k + gw] * (1 - fx) + f[k + gw + 1] * fx) * fy;
+  for (let y = 0; y < height; y++) {
+    const [gy, fy] = [Math.floor(y / STEP), (y % STEP) / STEP];
+    for (let x = 0; x < width; x++) {
+      const [gx, fx] = [Math.floor(x / STEP), (x % STEP) / STEP];
+      const k = gy * gw + gx;
+      const nearest = fx < 0.5 ? (fy < 0.5 ? k : k + gw) : fy < 0.5 ? k + 1 : k + gw + 1;
+      if (!drawn[nearest]) continue;
       const i = y * width + x;
-      own[i] = inBasin.has(cell) ? 1 : 0;
-      ground[i] = g / gw;
-      if (sw > 1e-9 && near <= reach2 && s / sw - ground[i] > MIN_DEPTH) levels[i] = s / sw;
+      own[i] = drawn[nearest] === 2 ? 1 : 0;
+      const g = lerp4(G, k, fx, fy);
+      ground[i] = Number.isNaN(g) ? G[nearest] : g;
+      const sv = lerp4(S, k, fx, fy);
+      const surface = Number.isNaN(sv) ? S[nearest] : sv;
+      if (!Number.isNaN(surface) && surface - ground[i] > MIN_DEPTH) levels[i] = surface;
     }
   }
   return { levels, ground, own, width, height };
@@ -146,29 +171,65 @@ export function lakesIn(basin: Basin, water: CellWater, frame: GridFrame, size: 
   const inBasin = (s: LakeShape) => s.mask.some((m, i) => m === 1 && own[(s.y0 + Math.floor(i / s.width)) * width + s.x0 + (i % s.width)]);
   return lakeShapes(levels, width, height, (MIN_LAKE * size) ** 2, ground).filter(inBasin).map((shape) => ({
     shape: { ...shape, x0: shape.x0 + basin.box.x0, y0: shape.y0 + basin.box.y0 },
-    overflow: { full: basin.full, outlet: basin.outlet },
+    basin,
   }));
 }
 
 /**
- * Props (scene px, on the flat map) where lakes are: under water they are
- * hidden, unless they are mountains that still rise above it; those, and
- * whatever stands on an island, ride on their lake, lifted to its height.
+ * The water leaving a lake now: the net flow from its hexes (those whose
+ * middle lies in it) into any other hex, and where most of it leaves
+ * (halfway between the two hexes).
  */
-export function settleProps(props: readonly PropInstance[], shapes: readonly LakeShape[], squash: number, size: number) {
+export function lakeOutflow(shape: LakeShape, topo: HexTopology, flux: Float32Array, frame: GridFrame, size: number): Outflow {
+  const centre = (i: number) => frameCentre(i % topo.cols, Math.floor(i / topo.cols), size, frame);
+  const inLake = (i: number) => {
+    const c = centre(i);
+    const [x, y] = [Math.floor(c.x) - shape.x0, Math.floor(c.y) - shape.y0];
+    return x >= 0 && y >= 0 && x < shape.width && y < shape.height && shape.mask[y * shape.width + x] !== 0;
+  };
+  const cells = Array.from({ length: topo.n }, (_, i) => i).filter(inLake);
+  const lake = new Set(cells);
+  let [amount, most] = [0, { net: 0, at: undefined as Pixel | undefined }];
+  for (const i of cells) {
+    for (let d = 0; d < topo.dirs; d++) {
+      const j = pipeTarget(topo, i, d);
+      if (j < 0 || lake.has(j)) continue;
+      const net = flux[i * topo.dirs + d] - flux[j * topo.dirs + opposite(d)];
+      if (net <= 0) continue;
+      amount += net;
+      if (net <= most.net) continue;
+      const [a, b] = [centre(i), centre(j)];
+      most = { net, at: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    }
+  }
+  return { amount, at: most.at };
+}
+
+/** The outflow of a full basin when no water model says otherwise: it pours out where its river leaves once the lake reaches its overflow level. */
+export function fullOutflow(shape: LakeShape, basin: Basin): Outflow {
+  return shape.top >= basin.full - FULL_WITHIN && basin.outlet ? { amount: STILL_POURING, at: basin.outlet } : { amount: 0 };
+}
+
+/**
+ * Props (scene px, on the flat map) where lakes stand: under water they are
+ * hidden, unless they are mountains that still rise above it; those, and
+ * whatever stands on an island or on a lake's flank, ride on the lake,
+ * lifted to the height it is painted at there.
+ */
+export function settleProps(props: readonly PropInstance[], surfaces: readonly LakeSurface[], squash: number) {
   const kept: PropInstance[] = [];
-  const riders: PropInstance[][] = shapes.map(() => []);
+  const riders: PropInstance[][] = surfaces.map(() => []);
   for (const p of props) {
     const [fx, fy] = [Math.floor(p.x), Math.floor(p.y / squash)];
-    const k = shapes.findIndex((s) => fx >= s.x0 && fy >= s.y0 && fx < s.x0 + s.width && fy < s.y0 + s.height && s.mask[(fy - s.y0) * s.width + fx - s.x0]);
+    const k = surfaces.findIndex((s) => fx >= s.x0 && fy >= s.y0 && fx < s.x0 + s.width && fy < s.y0 + s.height && s.kind[(fy - s.y0) * s.width + fx - s.x0]);
     if (k < 0) {
       kept.push(p);
       continue;
     }
-    const s = shapes[k];
+    const s = surfaces[k];
     const i = (fy - s.y0) * s.width + fx - s.x0;
-    const above = s.mask[i] === 2 || (p.elevation ?? -Infinity) - PEAK_SHOWS > s.levels[i];
-    if (above) riders[k].push({ ...p, y: p.y - lakeLift(s.levels[i]) * size });
+    const above = s.kind[i] !== WATER || (p.elevation ?? -Infinity) - PEAK_SHOWS > s.level[i];
+    if (above) riders[k].push({ ...p, y: p.y - s.lift[i] });
   }
   return { kept, riders };
 }

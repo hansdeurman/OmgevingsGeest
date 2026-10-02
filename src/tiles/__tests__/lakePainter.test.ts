@@ -9,18 +9,11 @@ const SIZE = 20;
 const SQUASH = 0.5;
 const W = 60;
 const solid = (c: RGB) => paintRaster(4, 4, () => c);
-/** A wall whose capstone is yellow and whose face is `face`. */
-const strip = (face: RGB, width = 10): WallStrip => ({
-  image: paintRaster(width, 40, (_, y) => (y < 3 ? [250, 220, 0] : face)),
-  lip: 3,
-  from: 15,
-  to: 25,
-});
+const ROCK: RGB = [200, 0, 0];
 const FLOOR: RGB = [10, 200, 10];
+const rock: WallStrip = { image: paintRaster(10, 40, () => ROCK), lip: 3, from: 15, to: 25 };
 const art: LakeArt = {
-  wall: strip([200, 0, 0]),
-  spillWall: strip([0, 200, 0]),
-  outfall: strip([255, 255, 255], 20),
+  wall: rock,
   rim: solid([128, 128, 128]),
   floor: solid(FLOOR),
   water: { ice: solid([220, 240, 250]), cold: solid([0, 0, 200]), mild: solid([0, 0, 160]), warm: solid([0, 120, 60]) },
@@ -44,16 +37,11 @@ const paint = (shape: LakeShape, state: Partial<LakeState> = {}) => paintLake(sh
 /** The painted pixel where frame point (x, y), raised by h, lands. */
 const at = (img: LakeImage, x: number, y: number, h: number) => getPixel(img.raster, x - img.x, Math.round(y * SQUASH - h) - img.y);
 const isWater = ([r, , b, a]: number[]) => a === 255 && b > r + 50;
-const isWall = ([r, g, b, a]: number[]) => a === 255 && r > 150 && g < 60 && b < 60;
-/** The lowest frame row of column x that the lake's near wall hangs from. */
-const nearFoot = (img: LakeImage, x: number) => {
-  for (let y = W - 1; y >= 0; y--) if (isWall(at(img, x, y, 0))) return y;
-  return -1;
-};
-const wallRows = (img: LakeImage, x: number) => {
-  let n = 0;
-  for (let y = 0; y < img.raster.height; y++) if (isWall(getPixel(img.raster, x - img.x, y))) n++;
-  return n;
+/** How high the painted object stands at frame point (x, y), and what is there. */
+const surfaceAt = (img: LakeImage, x: number, y: number) => {
+  const s = img.surface;
+  const i = (y - s.y0) * s.width + (x - s.x0);
+  return { lift: s.lift[i], kind: s.kind[i] };
 };
 
 describe('paintLake', () => {
@@ -61,72 +49,75 @@ describe('paintLake', () => {
 
   it('lifts the water to its level', () => {
     expect(isWater(at(img, 30, 30, LIFT))).toBe(true);
+    expect(surfaceAt(img, 30, 30)).toEqual({ lift: expect.closeTo(LIFT, 3), kind: 1 });
   });
 
-  it('hangs a wall from the water\'s rim down to the floor along the near shore, capstone on top', () => {
-    const foot = nearFoot(img, 30);
-    expect(foot).toBeGreaterThan(42);
-    for (let h = 1; h < LIFT - 1; h++) expect(isWall(at(img, 30, foot, h))).toBe(true);
-    const capRow = Math.round(foot * SQUASH - LIFT) - img.y - 1;
-    expect(getPixel(img.raster, 30 - img.x, capRow).slice(0, 2)).toEqual([250, 220]);
+  it('runs the land down from the rim to the floor gradually, as a mountain flank, not a wall', () => {
+    const below = Array.from({ length: 22 }, (_, k) => surfaceAt(img, 30, 43 + k)).filter((s) => s.kind === 3);
+    expect(below.length).toBeGreaterThan(8); // the flank reaches out well in front of the lake
+    for (let k = 1; k < below.length; k++) {
+      expect(below[k].lift).toBeLessThanOrEqual(below[k - 1].lift + 1e-6);
+      expect(below[k - 1].lift - below[k].lift).toBeLessThan(LIFT / 3); // no sudden drop
+    }
+    expect(below[below.length - 1].lift).toBeLessThan(LIFT * 0.2);
   });
 
-  it('casts a soft shadow on the floor in front of the wall', () => {
-    const [, , , a] = at(img, 30, nearFoot(img, 30) + 3, 0);
-    expect(a).toBeGreaterThan(0);
-    expect(a).toBeLessThan(255);
+  it('paints the flank with the land under it, a band of rock just under the rim', () => {
+    const [r, g] = at(img, 30, 52, surfaceAt(img, 30, 52).lift);
+    expect(g).toBeGreaterThan(r); // the green floor
+    const rim = surfaceAt(img, 30, 45);
+    const [rr, rg] = at(img, 30, 45, rim.lift);
+    expect(rr).toBeGreaterThan(rg); // the rock
   });
 
-  it('rings the far shore with a rim at the water\'s height', () => {
+  it('fills the slope down to the floor without gaps', () => {
+    const column = Array.from({ length: img.raster.height }, (_, y) => getPixel(img.raster, 30 - img.x, y)[3]);
+    const first = column.findIndex((a) => a === 255);
+    const last = column.length - 1 - [...column].reverse().findIndex((a) => a === 255);
+    expect(column.slice(first, last + 1).every((a) => a === 255)).toBe(true);
+  });
+
+  it('rings the shore with a rim at the water\'s height', () => {
     const [r, g, b] = at(img, 30, 16, LIFT);
     expect(r).toBe(b);
     expect(g).toBe(b);
-    expect(r).toBeGreaterThanOrEqual(128); // the rim's top catches the light
   });
 
-  it('stands an uneven lake higher where its water is higher, with a taller wall there', () => {
+  it('stands an uneven lake higher where its water is higher', () => {
     const tilted = paint(shapeOf(inDisc(14), (x) => 4 + (x / W) * 3));
-    expect(wallRows(tilted, 40)).toBeGreaterThan(wallRows(tilted, 20) + 2);
+    expect(surfaceAt(tilted, 40, 30).lift).toBeGreaterThan(surfaceAt(tilted, 20, 30).lift + 2);
   });
 
   it('shows foam where an uneven lake still runs downhill, none on a level one', () => {
     const tilted = paint(shapeOf(inDisc(14), (x) => 4 + (x / W) * 6));
     const level = paint(shapeOf(inDisc(14), () => 7));
     const brightness = (l: LakeImage, h: number) => at(l, 30, 30, h).slice(0, 3).reduce((a, b) => a + b);
-    expect(brightness(tilted, lakeLift(4 + 0.5 * 6) * SIZE)).toBeGreaterThan(brightness(level, lakeLift(7) * SIZE) + 30);
+    expect(brightness(tilted, surfaceAt(tilted, 30, 30).lift)).toBeGreaterThan(brightness(level, lakeLift(7) * SIZE) + 30);
   });
 
   it('shows the land of an island at the water\'s height', () => {
     const island = paint(shapeOf((x, y) => inDisc(14)(x, y) && !inDisc(3)(x, y)));
     expect(at(island, 30, 30, LIFT).slice(0, 3)).toEqual(FLOOR);
+    expect(surfaceAt(island, 30, 30).kind).toBe(2);
   });
 
   it('lets the floor show through shallow water, not through deep water', () => {
-    const toFloor = (l: LakeImage, h: number) => at(l, 30, 30, h)[1]; // the floor is green, the water blue
-    const shallow = paint(shapeOf(inDisc(12), () => 6, 5.9));
-    const deep = paint(shapeOf(inDisc(12), () => 6, 3));
-    expect(toFloor(shallow, LIFT)).toBeGreaterThan(toFloor(deep, LIFT) + 40);
+    const toFloor = (l: LakeImage, h: number) => at(l, 30, 30, h)[1];
+    expect(toFloor(paint(shapeOf(inDisc(12), () => 6, 5.9)), LIFT)).toBeGreaterThan(toFloor(paint(shapeOf(inDisc(12), () => 6, 3)), LIFT) + 40);
   });
 
-  it('turns the near wall into a spilling wall when the lake overflows', () => {
-    const [r, g] = at(paint(disc, { spill: 0.5 }), 30, nearFoot(img, 30), 6);
-    expect(g).toBeGreaterThan(150);
-    expect(r).toBeLessThan(60);
+  it('runs a stream down the flank where the lake pours out, and only there', () => {
+    const pouring = paint(disc, { outlet: { x: 30, y: 43 }, outflow: 0.1 });
+    const y = 50;
+    expect(isWater(at(pouring, 30, y, surfaceAt(pouring, 30, y).lift))).toBe(true);
+    expect(isWater(at(img, 30, y, surfaceAt(img, 30, y).lift))).toBe(false);
+    expect(isWater(at(pouring, 20, y, surfaceAt(pouring, 20, y).lift))).toBe(false);
   });
 
-  it('pours a waterfall down the near wall at its outlet, only when the outlet faces the viewer', () => {
-    const white = (l: LakeImage) => at(l, 30, nearFoot(img, 30), 8).slice(0, 3).every((c) => c > 200);
-    expect(white(paint(disc, { outlet: { x: 30, y: 46 } }))).toBe(true);
-    expect(white(paint(disc))).toBe(false);
-    expect(white(paint(disc, { outlet: { x: 30, y: 14 } }))).toBe(false);
-  });
-
-  it('hangs the waterfall from a straight stretch of wall, never smeared along a bend', () => {
-    const side = paint(disc, { outlet: { x: 44, y: 32 } }).raster;
-    const rows: number[] = [];
-    for (let y = 0; y < side.height; y++) for (let x = 0; x < side.width; x++) if (getPixel(side, x, y).every((c) => c > 220)) rows.push(y);
-    expect(rows.length).toBeGreaterThan(0);
-    expect(Math.max(...rows) - Math.min(...rows)).toBeLessThanOrEqual(LIFT + 3 + 3); // one wall's height (rim + capstone), give or take a row
+  it('wets the rim all round when the lake spills over it', () => {
+    const spill = paint(disc, { spill: 1 });
+    const [r, , b] = at(spill, 30, 44, surfaceAt(spill, 30, 44).lift);
+    expect(b).toBeGreaterThan(r);
   });
 
   it('shows ice when frozen and warm water when warm', () => {
@@ -137,7 +128,7 @@ describe('paintLake', () => {
     expect(g).toBeGreaterThan(Math.max(r, b));
   });
 
-  it('draws a nearer arm of the lake over the wall of a farther one', () => {
+  it('draws a nearer arm of the lake over the land of a farther one', () => {
     const armed = paint(shapeOf((x, y) => inDisc(16)(x, y) && !(x < 34 && y >= 27 && y <= 33)));
     expect(isWater(at(armed, 25, 36, LIFT))).toBe(true);
   });

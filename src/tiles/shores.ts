@@ -53,6 +53,7 @@ function markIslands(mask: Uint8Array, W: number, H: number): void {
 
 /** Give every island pixel the level of the nearest water, spreading inward from the shore. */
 function levelIslands(mask: Uint8Array, levels: Float32Array, W: number, H: number): void {
+  if (!mask.includes(2)) return;
   let front = [...mask.keys()].filter((i) => mask[i] === 1);
   while (front.length) {
     const next: number[] = [];

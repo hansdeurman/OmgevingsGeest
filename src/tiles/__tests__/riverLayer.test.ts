@@ -65,6 +65,14 @@ describe('riverSegments', () => {
     expect(thinning.some((s) => s.via.x === centre(c).x && s.via.y === centre(c).y)).toBe(true);
   });
 
+  it('tells how deep the river has cut into its hex, so its gully can show', () => {
+    const cut = new Float32Array(COLS * ROWS);
+    cut[MIDDLE] = 0.4;
+    const river = riverSegments(topo, flowing([[MIDDLE, 0, 0.05]]), none, frame, SIZE, cut);
+    expect(river.find((s) => s.via.x === centre(MIDDLE).x && s.via.y === centre(MIDDLE).y)!.cut).toBeCloseTo(0.4, 6);
+    expect(segs([[MIDDLE, 0, 0.05]]).every((s) => s.cut === 0)).toBe(true);
+  });
+
   it('leaves out water moving about inside a lake: the lake is drawn by itself', () => {
     expect(segs([[MIDDLE, 0, 0.2]], Float32Array.from({ length: COLS * ROWS }, () => 1))).toEqual([]);
   });

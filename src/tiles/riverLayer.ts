@@ -18,6 +18,8 @@ export interface RiverSegment {
   to: Pixel;
   /** Width in frame pixels. */
   width: number;
+  /** How deep (steps) the water has cut into the hex's ground: the deeper, the wider and darker its gully. */
+  cut: number;
 }
 
 /** Water through a hex (steps per step) from which it may be a river… */
@@ -93,7 +95,14 @@ function riverHexes(topo: HexTopology, f: Flows): Uint8Array {
   return river;
 }
 
-export function riverSegments(topo: HexTopology, flux: Float32Array, depth: ArrayLike<number>, frame: GridFrame, size: number): RiverSegment[] {
+export function riverSegments(
+  topo: HexTopology,
+  flux: Float32Array,
+  depth: ArrayLike<number>,
+  frame: GridFrame,
+  size: number,
+  cut: ArrayLike<number> = [],
+): RiverSegment[] {
   const { n, dirs, cols } = topo;
   const centre = (i: number) => frameCentre(i % cols, Math.floor(i / cols), size, frame);
   const f = netFlows(topo, flux, depth);
@@ -110,7 +119,7 @@ export function riverSegments(topo: HexTopology, flux: Float32Array, depth: Arra
     const ways = (sign: 1 | -1) => Array.from({ length: dirs }, (_, d) => d).filter((d) => isWay(f, dirs, i, d, sign) && (sign > 0 || river[pipeTarget(topo, i, d)]));
     const [ins, outs] = [ways(-1).map(halfway), ways(1).map(halfway)];
     const width = clamp(WIDTH.perRootFlow * Math.sqrt(f.through[i]), WIDTH.min, WIDTH.max) * size;
-    for (const from of ins.length ? ins : [c]) for (const to of outs.length ? outs : [c]) segments.push({ from, via: c, to, width });
+    for (const from of ins.length ? ins : [c]) for (const to of outs.length ? outs : [c]) segments.push({ from, via: c, to, width, cut: Math.max(0, cut[i] ?? 0) });
   }
   return segments;
 }

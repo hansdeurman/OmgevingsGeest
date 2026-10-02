@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { offsetNeighbours } from '../../math/hex';
 import { frameCentre, gridFrame } from '../geometry';
-import { lakeLift } from '../shores';
-import { basinWater, findBasins, lakesIn, settleProps, type CellWater } from '../waterLayer';
+import { basinWater, findBasins, fullOutflow, lakeOutflow, lakesIn, settleProps, type CellWater } from '../waterLayer';
+import { ISLAND, LAND, WATER, type LakeSurface } from '../lakePainter';
+import { hexTopology, pipeTarget } from '../../water/hexTopology';
 import type { PropInstance } from '../scatter';
 
 const SIZE = 12;
@@ -113,35 +114,72 @@ describe('lakesIn', () => {
     expect(lakesIn(b, cells(ground, shoreOnly), frame, SIZE)).toEqual([]);
   });
 
-  it('tells each lake the level at which its basin overflows', () => {
+  it('tells each lake the basin it lies in', () => {
     const [lake] = lakes(cells(groundWith(1.5), (i) => (basinCells.includes(i) ? 3.5 - groundWith(1.5)[i] : 0)));
-    expect(lake.overflow.full).toBeCloseTo(3.5, 6);
+    expect(lake.basin).toBe(basin);
+  });
+});
+
+describe('lakeOutflow', () => {
+  const [lake] = lakes(cells(groundWith(1.5), (i) => (basinCells.includes(i) ? 3.5 - groundWith(1.5)[i] : 0)));
+  const topo = hexTopology(N, N, 12);
+  const flux = new Float32Array(N * N * 12);
+  const out = (i: number, d: number, f: number) => (flux[i * 12 + d] = f);
+
+  it('counts the water leaving the lake, and where most of it leaves', () => {
+    const edge = ring[0];
+    const d = Array.from({ length: 12 }, (_, k) => k).find((k) => { const j = pipeTarget(topo, edge, k); return j >= 0 && !basinCells.includes(j); })!;
+    out(edge, d, 0.04);
+    out(MIDDLE, 0, 0.5); // inside the lake: not leaving it
+    const o = lakeOutflow(lake.shape, topo, flux, frame, SIZE);
+    expect(o.amount).toBeCloseTo(0.04, 6);
+    const [a, b] = [centre(edge), centre(pipeTarget(topo, edge, d))];
+    expect(o.at).toEqual({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  });
+});
+
+describe('fullOutflow', () => {
+  it('pours out of a full basin where its river leaves, and not out of one below its overflow', () => {
+    const [full] = lakes(cells(groundWith(1.5), (i) => (basinCells.includes(i) ? 3.5 - groundWith(1.5)[i] : 0)));
+    const withOutlet = { ...basin, outlet: { x: 1, y: 2 } };
+    expect(fullOutflow(full.shape, withOutlet).at).toEqual({ x: 1, y: 2 });
+    expect(fullOutflow({ ...full.shape, top: 2 }, withOutlet).amount).toBe(0);
   });
 });
 
 describe('settleProps', () => {
-  const [lake] = lakes(cells(groundWith(4.5), (i) => (ring.includes(i) ? 1 : 0))); // water at 3, a peak in the middle
-  const prop = (i: number, extra: Partial<PropInstance> = {}): PropInstance => {
-    const c = centre(i);
-    return { kind: 'peak', variant: 0, x: c.x, y: c.y * SQUASH, col: i % N, row: Math.floor(i / N), ...extra };
+  /** A surface 10x10 at (100, 100): water at level 3 raised 20 px on its left half, land raised 8 px on its right half, an island at (102, 105). */
+  const surface: LakeSurface = {
+    x0: 100,
+    y0: 100,
+    width: 10,
+    height: 10,
+    lift: Float32Array.from({ length: 100 }, (_, i) => (i % 10 < 5 ? 20 : 8)),
+    kind: Uint8Array.from({ length: 100 }, (_, i) => (i === 52 ? ISLAND : i % 10 < 5 ? WATER : LAND)),
+    level: Float32Array.from({ length: 100 }, (_, i) => (i % 10 < 5 ? 3 : NaN)),
   };
+  const prop = (x: number, y: number, extra: Partial<PropInstance> = {}): PropInstance => ({ kind: 'peak', variant: 0, x, y: y * SQUASH, col: 0, row: 0, ...extra });
 
   it('stands a peak taller than the water on it, lifted to the water\'s height', () => {
-    const peak = prop(MIDDLE, { elevation: 4.5 });
-    const { kept, riders } = settleProps([peak], [lake.shape], SQUASH, SIZE);
+    const peak = prop(101, 101, { elevation: 4.5 });
+    const { kept, riders } = settleProps([peak], [surface], SQUASH);
     expect(kept).toEqual([]);
-    expect(riders[0]).toHaveLength(1);
-    expect(riders[0][0].y).toBeCloseTo(peak.y - lakeLift(3) * SIZE, 0); // the water around it stands at 3
+    expect(riders[0][0].y).toBeCloseTo(peak.y - 20, 6);
   });
 
   it('hides what the water covers: low hills and trees', () => {
-    const { kept, riders } = settleProps([prop(ring[1], { kind: 'hill', elevation: 2 }), prop(ring[2], { kind: 'tree' })], [lake.shape], SQUASH, SIZE);
+    const { kept, riders } = settleProps([prop(101, 101, { kind: 'hill', elevation: 2 }), prop(102, 103, { kind: 'tree' })], [surface], SQUASH);
     expect(kept).toEqual([]);
     expect(riders[0]).toEqual([]);
   });
 
-  it('leaves everything away from the water as it was', () => {
-    const far = prop(index(0, 0), { elevation: 6 });
-    expect(settleProps([far], [lake.shape], SQUASH, SIZE).kept).toEqual([far]);
+  it('stands what is on an island or on the lake\'s flank on it, at its height there', () => {
+    const { riders } = settleProps([prop(102, 105, { kind: 'tree' }), prop(107, 103, { kind: 'tree' })], [surface], SQUASH);
+    expect(riders[0].map((r) => r.y)).toEqual([105 * SQUASH - 20, 103 * SQUASH - 8]);
+  });
+
+  it('leaves everything away from the lake as it was', () => {
+    const far = prop(10, 10, { elevation: 6 });
+    expect(settleProps([far], [surface], SQUASH).kept).toEqual([far]);
   });
 });
