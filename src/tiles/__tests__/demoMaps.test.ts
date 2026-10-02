@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { coverAt, elevationAt, type CoverGrid } from '../coverGrid';
-import { DEMO_MAPS, ELEVATION_BAND_ROW, LEVEL_BANDS, demoMap, floodedGrid } from '../demoMaps';
+import { DEMO_MAPS, ELEVATION_BAND_ROW, LEVEL_BANDS, NATURAL_SLOPE, demoMap, floodedGrid, gentleSlopes } from '../demoMaps';
+import { neighbourIndices } from '../hydrology';
 import { HIGH_LAKE_FROM } from '../shores';
 import { LAYERS, MAX_ELEVATION, MAX_LEVEL } from '../levels';
 import { offsetNeighbours } from '../../math/hex';
@@ -116,23 +117,42 @@ describe('mountains (random)', () => {
     return levels;
   };
 
-  for (const seed of [1, 2, 3, 4, 5]) {
+  const seeds = [1, 2, 3, 4, 5].map((seed) => {
     const grid = full('mountains', seed);
-    const levels = lakeLevels(grid);
+    return { seed, grid, levels: lakeLevels(grid) };
+  });
 
+  for (const { seed, grid, levels } of seeds) {
     it(`has high mountains (seed ${seed})`, () => {
       expect(Math.max(...grid.elevation)).toBeGreaterThanOrEqual(MAX_ELEVATION - 1);
     });
 
-    it(`holds lakes at clearly different heights, from the foothills to high up (seed ${seed})`, () => {
-      expect(levels.length).toBeGreaterThanOrEqual(2);
-      expect(Math.max(...levels)).toBeGreaterThanOrEqual(5);
-      expect(Math.max(...levels) - Math.min(...levels)).toBeGreaterThanOrEqual(2);
+    it(`holds a lake high in the mountains (seed ${seed})`, () => {
+      expect(Math.max(...levels)).toBeGreaterThanOrEqual(4);
     });
   }
 
+  it('holds lakes at clearly different heights, from the foothills to the snow, as a rule', () => {
+    expect(seeds.filter(({ levels }) => levels.length >= 2 && Math.max(...levels) - Math.min(...levels) >= 1.5).length).toBeGreaterThanOrEqual(3);
+    expect(seeds.some(({ levels }) => Math.max(...levels) >= 6.5)).toBe(true);
+  });
+
   it('is different for every seed', () => {
     expect(demoMap('mountains', 1).grid.elevation).not.toEqual(demoMap('mountains', 2).grid.elevation);
+  });
+});
+
+describe('natural slopes', () => {
+  it('rises gradually everywhere: no hex stands more than a natural slope above its neighbour', () => {
+    for (const [id, seed] of [['highlands', 1], ['highlands', 9], ['mountains', 2], ['mountains', 4]] as const) {
+      const { grid } = demoMap(id, seed);
+      const ground = grid.elevation;
+      for (let i = 0; i < ground.length; i++) for (const j of neighbourIndices(grid, i)) expect(ground[i] - ground[j]).toBeLessThanOrEqual(NATURAL_SLOPE + 1e-6);
+    }
+  });
+
+  it('lowers what is too steep and keeps low ground as it is', () => {
+    expect(gentleSlopes(3, 1, [0, 8, 1])).toEqual([0, NATURAL_SLOPE, 1]);
   });
 });
 

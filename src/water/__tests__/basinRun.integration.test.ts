@@ -19,7 +19,7 @@ for (const [id, seed] of [['highlands', 1], ['mountains', 2]] as const) {
     const after = (label: string) => phaseEnd(script, label);
     const lakes = basins(grid.cols, grid.rows, water!);
     const fullLevel = (cells: number[]) => grid.elevation[cells[0]] + water![cells[0]];
-    const surfaces = (k: number, cells: number[]) => cells.map((i) => grid.elevation[i] + states[k].depth[i]);
+    const surfaces = (k: number, cells: number[]) => cells.map((i) => states[k].ground[i] + states[k].depth[i]);
     const held = (k: number) => lakes.flat().reduce((s, i) => s + states[k].depth[i], 0);
     const running = (k: number, min: number) => [...grid.cells.keys()].filter((i) => outflow(world.topo, states[k].flux, i) > min).length;
 

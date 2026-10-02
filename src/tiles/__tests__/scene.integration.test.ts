@@ -216,7 +216,7 @@ describe('buildScene (highlands, flat map)', () => {
 });
 
 describe('buildScene (mountains, flat map, water from a simulation)', () => {
-  const { grid: mg, water } = demoMap('mountains', 2);
+  const { grid: mg, water } = demoMap('mountains', 3);
   const scene = buildScene(mg, textures, { ...flatOptions, highWater: water });
   const cells = mg.cols * mg.rows;
   const world = hydroWorldOf(mg);

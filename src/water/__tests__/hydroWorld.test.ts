@@ -13,7 +13,8 @@ const bowlGround = (floor: number, notch?: number) =>
     return c === 0 || r === 0 || c >= N - 2 || r === N - 1 ? WALL : floor;
   });
 const at = (c: number, r: number) => r * N + c;
-const world = (ground: number[], grass = 0, trees = 0) => createHydroWorld({ cols: N, rows: N, ground, soak: () => soakOf(grass, trees, 1) });
+/** A world of hard rock (so it hardly wears in these tests), soaking water by its grass and trees. */
+const world = (ground: number[], grass = 0, trees = 0) => createHydroWorld({ cols: N, rows: N, ground, soak: () => soakOf(grass, trees, 1), hardness: () => 0.95 });
 const rain = (r: number): Weather => ({ rain: r, warmth: 0.3, evaporation: 0 });
 const run = (w: ReturnType<typeof world>, steps: number, weather: (k: number) => Weather) => {
   for (let k = 0; k < steps; k++) stepHydro(w, weather(k));
@@ -36,7 +37,7 @@ describe('a hydro world', () => {
   });
 
   it('melts a glacier into a stream that runs all summer', () => {
-    const ground = Array.from({ length: N * N }, (_, i) => (i % N === 0 || i % N === N - 1 ? 0 : 8 - (i % N) * 0.8));
+    const ground = Array.from({ length: N * N }, (_, i) => (i % N === 0 ? 9 : i % N === N - 1 ? 0 : 8 - (i % N) * 0.8)); // a high wall behind the glacier, the sea below
     const w = createHydroWorld({ cols: N, rows: N, ground, soak: (i) => soakOf(0, 0, ground[i]), snow: (i) => (ground[i] > 7 ? 3 : 0) });
     run(w, 200, () => ({ rain: 0, warmth: 1, evaporation: 0 }));
     const stream = Math.max(...Array.from({ length: N }, (_, r) => outflow(w.topo, w.flux, at(4, r))));

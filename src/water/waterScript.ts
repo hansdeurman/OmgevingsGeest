@@ -87,7 +87,7 @@ const BURST = 1.2;
  * levels out, and a dry summer in which the lakes sink while glaciers keep the
  * rivers running.
  */
-export function seasonScript(cols: number, rows: number, ground: ArrayLike<number>, full: ArrayLike<number>): WaterScript {
+export function seasonScript(cols: number, rows: number, ground: ArrayLike<number>, full: ArrayLike<number>, years = 1): WaterScript {
   const n = cols * rows;
   const rain = Float32Array.from({ length: n }, (_, i) => RAIN.lowland * (1 + ((RAIN.mountains - 1) * Math.max(0, ground[i])) / 8));
   const burst = new Float32Array(n);
@@ -96,10 +96,11 @@ export function seasonScript(cols: number, rows: number, ground: ArrayLike<numbe
     const middle = cells.reduce((x, i) => x + colOf(i), 0) / cells.length;
     for (const i of cells) burst[i] = colOf(i) < middle ? BURST : 0;
   }
-  return [
+  const year: WaterPhase[] = [
     { label: 'Winter', steps: PACE.winter, rain, warmth: -0.8, evaporation: 0 },
     { label: 'Spring rain', steps: PACE.spring, rain: rain.map((r) => r * 1.5), warmth: 0.3, evaporation: 0.002 },
     { label: 'Cloudburst, one side', steps: PACE.burst, rain: 0, warmth: 0.5, evaporation: 0.004, burst },
     { label: 'Dry summer', steps: PACE.summer, rain: 0, warmth: 1, evaporation: 0.012 },
   ];
+  return Array.from({ length: years }, (_, y) => year.map((p) => (y ? { ...p, label: `${p.label}, year ${y + 1}` } : p))).flat();
 }
