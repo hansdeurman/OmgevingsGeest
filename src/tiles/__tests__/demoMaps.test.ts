@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { coverAt, elevationAt, type CoverGrid } from '../coverGrid';
-import { DEMO_MAPS, ELEVATION_BAND_ROW, LEVEL_BANDS, demoMap } from '../demoMaps';
+import { DEMO_MAPS, ELEVATION_BAND_ROW, LEVEL_BANDS, demoMap, floodedGrid } from '../demoMaps';
+import { HIGH_LAKE_FROM } from '../shores';
 import { LAYERS, MAX_ELEVATION, MAX_LEVEL } from '../levels';
 import { offsetNeighbours } from '../../math/hex';
 
@@ -47,9 +48,15 @@ describe('island', () => {
   });
 });
 
+/** The map as it looks with rain filling its high basins. */
+const full = (id: string, seed: number) => {
+  const map = demoMap(id, seed);
+  return floodedGrid(map.grid, map.water);
+};
+
 describe('highlands', () => {
   for (const seed of [1, 5, 9]) {
-    const { grid } = demoMap('highlands', seed);
+    const grid = full('highlands', seed);
     const cells = grid.cells.map((c, i) => ({ ...c, elevation: grid.elevation[i], i }));
     const lake = cells.filter((c) => c.water >= 2 && c.elevation >= 3);
 
@@ -110,7 +117,7 @@ describe('mountains (random)', () => {
   };
 
   for (const seed of [1, 2, 3, 4, 5]) {
-    const { grid } = demoMap('mountains', seed);
+    const grid = full('mountains', seed);
     const levels = lakeLevels(grid);
 
     it(`has high mountains (seed ${seed})`, () => {
@@ -126,6 +133,31 @@ describe('mountains (random)', () => {
 
   it('is different for every seed', () => {
     expect(demoMap('mountains', 1).grid.elevation).not.toEqual(demoMap('mountains', 2).grid.elevation);
+  });
+});
+
+describe('high basins', () => {
+  const { grid, water } = demoMap('highlands', 1);
+  const basin = water!.map((d, i) => (d > 0 ? i : -1)).filter((i) => i >= 0);
+
+  it('keeps their water apart from the map, over dry ground at its true height', () => {
+    expect(basin.length).toBeGreaterThan(3);
+    for (const i of basin) expect(grid.cells[i].water).toBeLessThan(2);
+    const floor = basin.map((i) => grid.elevation[i]);
+    expect(Math.max(...floor) - Math.min(...floor)).toBeGreaterThan(0.5); // a bowl, not a flat lake bed
+  });
+
+  it('holds water up to one level over every cell of a basin', () => {
+    const surface = basin.map((i) => grid.elevation[i] + water![i]);
+    expect(Math.max(...surface) - Math.min(...surface)).toBeLessThan(1e-6);
+    expect(surface[0]).toBeGreaterThanOrEqual(HIGH_LAKE_FROM);
+  });
+
+  it('puts the water back as a level lake on the flooded map', () => {
+    const flooded = floodedGrid(grid, water);
+    const deepest = basin.reduce((a, b) => (water![b] > water![a] ? b : a));
+    expect(flooded.cells[deepest].water).toBeGreaterThanOrEqual(2);
+    expect(flooded.elevation[deepest]).toBeCloseTo(grid.elevation[deepest] + water![deepest], 6);
   });
 });
 

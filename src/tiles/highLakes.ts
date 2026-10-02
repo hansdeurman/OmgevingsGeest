@@ -4,14 +4,14 @@ import { shade, type RGB } from '../rendering/palette';
 import type { LakeArt, LakeState } from './lakePainter';
 import type { GroundTextures } from './placeholderTextures';
 import { paintRaster } from './raster';
-import { lakeLift } from './shores';
+import type { LakeShape } from './shores';
 import type { WallStrip } from './wallStrip';
 import { lakeTemperature, type WaterTextures, type Wind } from './waterLook';
 
 /**
- * From what the world knows about a high lake (its level, how full it is, the
- * season, the wind) to what the lake painter needs: heights in pixels, and
- * which walls and water to paint it with.
+ * From what the world knows about a high lake (its water, the level at which
+ * it overflows, the season, the wind) to what the lake painter needs: its
+ * temperature and outflow, and which walls and water to paint it with.
  */
 
 export const WALL_STYLES = ['mossy', 'grey', 'snowy'] as const;
@@ -26,35 +26,40 @@ export interface LakeKit {
   water: WaterTextures;
 }
 
-/** The water as the season (and later the players) set it; for now the same for every lake. */
-export interface WaterOptions {
-  /** 1 brim-full; lower, the water stands that share of the way up its walls; above 1 it spills. */
-  fill: number;
+/** The weather over the lakes; for now the same for every lake. */
+export interface Weather {
   /** -1 winter … 1 summer. */
   warmth: number;
   wind: Wind;
 }
 
-export const DEFAULT_WATER: WaterOptions = { fill: 1, warmth: 0, wind: { strength: 0.25, direction: 0.4 } };
+export const DEFAULT_WEATHER: Weather = { warmth: 0, wind: { strength: 0.25, direction: 0.4 } };
 
-/** How far above full (as a share) a lake spills hardest. */
-const SPILL_RANGE = 0.2;
+/** Where a lake overflows: the level (steps) at which it starts to pour out, and where (frame px). */
+export interface Overflow {
+  full: number;
+  outlet?: { x: number; y: number };
+}
+
+/** A lake pours out once it is this close to its overflow level (steps)… */
+const POURS_WITHIN = 0.05;
+/** …and spills over its whole near rim from this far above it, hardest this much further up. */
+const SPILL_FROM = 0.15;
+const SPILL_RANGE = 0.5;
 /** Elevation (steps) up to which lake walls are mossy, and from which they are snowy. */
 const MOSS_BELOW = 3.6;
 const SNOW_FROM = 6.6;
 
 export const wallStyle = (level: number): WallStyle => (level < MOSS_BELOW ? 'mossy' : level < SNOW_FROM ? 'grey' : 'snowy');
 
-/** One lake's heights (scene px, for hexes `size` px wide), spill, temperature and wind. */
-export function lakeState(level: number, size: number, water: WaterOptions, outlet?: { x: number; y: number }): LakeState {
-  const rim = lakeLift(level) * size;
+/** One lake's temperature, wind and outflow: it pours out of its outlet once it reaches its overflow level. */
+export function lakeState(shape: LakeShape, weather: Weather, overflow?: Overflow): LakeState {
+  const above = overflow ? shape.top - overflow.full : -Infinity;
   return {
-    rim,
-    water: rim * clamp(water.fill, 0, 1),
-    spill: clamp((water.fill - 1) / SPILL_RANGE, 0, 1),
-    temperature: lakeTemperature(level, water.warmth),
-    wind: water.wind,
-    outlet,
+    spill: clamp((above - SPILL_FROM) / SPILL_RANGE, 0, 1),
+    temperature: lakeTemperature(shape.level, weather.warmth),
+    wind: weather.wind,
+    outlet: above >= -POURS_WITHIN ? overflow?.outlet : undefined,
   };
 }
 

@@ -22,11 +22,31 @@ describe('lakeShapes', () => {
     expect(lakeShapes(lv, W, W, 20)).toHaveLength(1);
   });
 
-  it('fills islands and shallows inside a lake, so the water has no holes', () => {
+  it('marks dry land the water surrounds as island, not as a hole', () => {
     const lv = levels({ x: 30, y: 30, r: 15, level: 6 });
     lv[30 * W + 30] = NaN;
     const [shape] = lakeShapes(lv, W, W);
-    expect(shape.mask[(30 - shape.y0) * shape.width + (30 - shape.x0)]).toBe(1);
+    const at = (x: number, y: number) => (y - shape.y0) * shape.width + (x - shape.x0);
+    expect(shape.mask[at(30, 30)]).toBe(2);
+    expect(shape.mask[at(30, 20)]).toBe(1);
+    expect(shape.levels[at(30, 30)]).toBe(6); // an island stands in the water's level
+  });
+
+  it('keeps each pixel\'s own level, so an uneven lake shows its slope', () => {
+    const lv = levels({ x: 30, y: 30, r: 15, level: 0 }).map((l, i) => (Number.isNaN(l) ? l : 4 + (i % W) / W));
+    const [shape] = lakeShapes(lv, W, W);
+    const at = (x: number) => (30 - shape.y0) * shape.width + (x - shape.x0);
+    expect(shape.levels[at(40)]).toBeGreaterThan(shape.levels[at(20)]);
+    expect(shape.top).toBeGreaterThan(shape.level);
+    expect(shape.level).toBeCloseTo(4.5, 1);
+  });
+
+  it('measures the water\'s depth over the ground under it', () => {
+    const ground = Float32Array.from({ length: W * W }, (_, i) => 3 + (i % W) / W);
+    const [shape] = lakeShapes(levels({ x: 30, y: 30, r: 15, level: 5 }), W, W, 0, ground);
+    const at = (x: number) => (30 - shape.y0) * shape.width + (x - shape.x0);
+    expect(shape.depth[at(20)]).toBeCloseTo(5 - (3 + 20 / W), 5);
+    expect(shape.depth[at(20)]).toBeGreaterThan(shape.depth[at(40)]);
   });
 });
 

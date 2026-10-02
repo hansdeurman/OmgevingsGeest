@@ -13,7 +13,6 @@ import type { Pixel } from '../math/hex';
 import { lakeOutlets } from './hydrology';
 import { fallLips, fillPoolHoles, markFalls, paintPoolRims, paintSplash, shadePoolFoot } from './pools';
 import { lakeRivers, rapidsFoam, riverStroke, smoothPath, type River } from './rivers';
-import { HIGH_LAKE_FROM } from './shores';
 import {
   MOUNTAIN_FROM,
   RELIEF_BLEND,
@@ -58,8 +57,6 @@ export interface Terrain {
   river: Uint8Array;
   /** Waterfall sprites over raised lakes' outlets (relief style); the flat map paints rapids instead. */
   cascades: Cascade[];
-  /** Flat map: the level of the high lake on each of its water pixels (drawn lifted, apart from the ground), NaN elsewhere. */
-  highWater: Float32Array;
 }
 
 /** Width of the waterfall along a pool's rim, in hex radii. */
@@ -78,9 +75,8 @@ const RIVER_WIDTH: [number, number] = [0.22, 0.42];
 const RAPIDS_REACH = 0.9;
 const FOAM: RGB = [240, 248, 255];
 
-/** On the flat map a high lake is drawn lifted, apart from the ground: under it the ground is stone, wet just around it. */
-const WET_RIM = 0.3;
-const isHighLakeCell = (grid: CoverGrid, i: number) => grid.elevation[i] >= HIGH_LAKE_FROM && grid.cells[i].water >= 1;
+/** Depth (steps) from which water kept apart from the map (high basins) counts as lake for the rivers. */
+const LAKE_DEPTH = 0.35;
 const isLakeCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] > 0.5;
 const isSeaCell = (grid: CoverGrid) => (i: number) => grid.cells[i].water >= 2 && grid.elevation[i] <= 0.5;
 const cellCentre = (grid: CoverGrid, i: number, size: number, frame: GridFrame): Pixel => {
@@ -128,8 +124,6 @@ interface BaseTerrain {
   lake: Uint8Array;
   /** 1 on open water of any kind. */
   open: Uint8Array;
-  /** On the flat map: the level of the high lake on each of its water pixels, NaN elsewhere. */
-  highWater: Float32Array;
 }
 
 function paintBase(
@@ -148,11 +142,9 @@ function paintBase(
   const rows = new Int16Array(W * H).fill(-1);
   const lake = new Uint8Array(W * H);
   const open = new Uint8Array(W * H);
-  const highWater = new Float32Array(W * H).fill(NaN);
   const a = zeroAmounts();
   const r = zeroAmounts();
   const reliefField = createCoverField(grid, size, RELIEF_BLEND);
-  const flat = relief.style === 'sprites';
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const lx = x + 0.5 - frame.ox;
@@ -162,10 +154,7 @@ function paintBase(
       const i = y * W + x;
       rows[i] = hex.row;
       terrain.sample(lx, ly, a);
-      let level = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
-      if (flat && level !== undefined && level >= HIGH_LAKE_FROM) highWater[i] = level;
-      if (flat && isHighLakeCell(grid, hex.row * grid.cols + hex.col)) [a.water, level] = [0, undefined];
-      else if (flat && level !== undefined && level >= HIGH_LAKE_FROM) [a.water, level] = [Math.min(a.water, WET_RIM), undefined];
+      const level = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
       setPixel(ground, x, y, shadeGround(a, texelAt(textures, x, y, seed, frame, size)));
 
       if (level !== undefined) {
@@ -180,7 +169,7 @@ function paintBase(
       elevation[i] = e;
     }
   }
-  return { ground, field, elevation, rows, lake, open, highWater };
+  return { ground, field, elevation, rows, lake, open };
 }
 
 /** Texture lookup at a frame pixel, with variants chosen by slowly varying noise. */
@@ -195,9 +184,11 @@ function texelAt(textures: GroundTextures, x: number, y: number, seed: number, f
  * sea, widening as it goes, with white water where it drops steeply; open
  * water it crosses stays as it is. Returns the rivers and their pixels.
  */
-function paintRivers(base: BaseTerrain, grid: CoverGrid, textures: GroundTextures, frame: GridFrame, size: number, seed: number) {
+function paintRivers(base: BaseTerrain, grid: CoverGrid, textures: GroundTextures, frame: GridFrame, size: number, seed: number, water: ArrayLike<number>) {
   const { width: W, height: H } = frame;
-  const rivers = lakeRivers(grid, isLakeCell(grid), isSeaCell(grid));
+  // Rivers leave the high basins as they are when rain has filled them.
+  const full = { cols: grid.cols, rows: grid.rows, elevation: grid.elevation.map((e, i) => e + (water[i] ?? 0)) };
+  const rivers = lakeRivers(full, (i) => isLakeCell(grid)(i) || (water[i] ?? 0) > LAKE_DEPTH, isSeaCell(grid));
   const mask = new Uint8Array(W * H);
   const [w0, w1] = RIVER_WIDTH;
   for (const river of rivers) {
@@ -243,6 +234,8 @@ function raiseRelief(base: BaseTerrain, grid: CoverGrid, frame: GridFrame, size:
  * - 'relief': the heights are projected; raised lakes stand on a cliff.
  * Because it is one image, identical neighbours join without seams and fuse
  * zones run freely across hex edges. Pixels off the map stay transparent.
+ * `water` is the water high basins hold when full (steps per cell), kept
+ * apart from the map: rivers leave the basins as if they were full.
  */
 export function composeTerrain(
   terrain: CoverField,
@@ -252,10 +245,11 @@ export function composeTerrain(
   size: number,
   seed: number,
   relief: ReliefOptions,
+  water: ArrayLike<number> = [],
 ): Terrain {
   const { width: W, height: H } = frame;
   const base = paintBase(terrain, grid, textures, frame, size, seed, relief);
-  const rivers = paintRivers(base, grid, textures, frame, size, seed);
+  const rivers = paintRivers(base, grid, textures, frame, size, seed, water);
   const flat = relief.style === 'sprites';
   const shown = flat
     ? (() => {
@@ -266,5 +260,5 @@ export function composeTerrain(
       })()
     : raiseRelief(base, grid, frame, size);
   if (relief.contours) paintContours(base.ground, base.elevation, 1);
-  return { ground: base.ground, rows: base.rows, rivers: rivers.rivers, river: rivers.mask, highWater: base.highWater, ...shown };
+  return { ground: base.ground, rows: base.rows, rivers: rivers.rivers, river: rivers.mask, ...shown };
 }

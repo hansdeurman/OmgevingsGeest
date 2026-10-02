@@ -127,11 +127,12 @@ export class IsoRenderer {
     return p;
   }
 
-  /** One prop: its sprite with a contact shadow, or its painted surface (a high lake). */
+  /** One prop: its sprite with a contact shadow, or its painted surface (a high lake) and what stands on it. */
   private drawProp(ctx: CanvasRenderingContext2D, p: PropInstance): void {
     if (p.surface) {
       const { raster, x, y, height } = p.surface;
       ctx.drawImage(this.canvasOf(raster), x, y, raster.width, height);
+      for (const r of p.riders ?? []) this.drawProp(ctx, r);
       return;
     }
     const { s, k } = this.sized(p);

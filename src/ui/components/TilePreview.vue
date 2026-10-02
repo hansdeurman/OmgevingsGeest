@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { DEMO_MAPS, demoMap, type MapLabel } from '../../tiles/demoMaps';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { DEMO_MAPS, demoMap, floodedGrid, type DemoMap, type MapLabel } from '../../tiles/demoMaps';
 import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
@@ -11,6 +11,8 @@ import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
+import { createWaterWorld, type WaterWorld } from '../../water/hexWater';
+import { basinScript, phaseAt, phaseEnd, runScript, type WaterScript } from '../../water/waterScript';
 
 const HEX = 40;
 const SQUASH = 0.65;
@@ -27,8 +29,7 @@ const useArt = ref(true);
 /** Height of the highest ground, as a percentage of one hex row's offset. */
 const relief = ref(100);
 const mountainStyle = ref<MountainStyle>('sprites');
-/** High lakes: how full (100 = brim-full, above spills), the season (-100 winter … 100 summer), the wind. */
-const fill = ref(100);
+/** High lakes: the season (-100 winter … 100 summer) and the wind. */
 const season = ref(0);
 const wind = ref(25);
 const windDir = ref(30);
@@ -46,6 +47,39 @@ const renderer = new IsoRenderer(placeholderSprites);
 let scene: Scene | null = null;
 let labels: MapLabel[] = [];
 let resizeObs: ResizeObserver | null = null;
+let map: DemoMap = demoMap(mapId.value, seed.value);
+
+/** The scripted water run of the current map: every state, played back step by step. */
+let run: { script: WaterScript; states: WaterWorld[] } | null = null;
+const step = ref(0);
+const steps = ref(0);
+const playing = ref(false);
+const PLAY_MS = 120;
+let timer: ReturnType<typeof setInterval> | undefined;
+
+function startRun(): void {
+  stopPlaying();
+  const { grid, water } = map;
+  run = water?.some((d) => d > 0) ? { script: basinScript(grid.cols, grid.rows, water), states: [] } : null;
+  if (run) run.states = runScript(createWaterWorld(grid.cols, grid.rows, grid.elevation), run.script);
+  steps.value = run ? run.states.length - 1 : 0;
+  step.value = run ? phaseEnd(run.script, 'Rain') : 0; // open with the lakes full
+}
+
+const phase = computed(() => (run && steps.value ? phaseAt(run.script, step.value).label : ''));
+const depthNow = () => run?.states[Math.min(step.value, steps.value)].depth;
+
+function stopPlaying(): void {
+  clearInterval(timer);
+  playing.value = false;
+}
+
+function togglePlay(): void {
+  if (playing.value) return stopPlaying();
+  if (step.value >= steps.value) step.value = 0;
+  playing.value = true;
+  timer = setInterval(() => (step.value < steps.value ? step.value++ : stopPlaying()), PLAY_MS);
+}
 
 const groundTextures = () => (useArt.value ? { ...placeholders, ...art } : placeholders);
 
@@ -54,17 +88,20 @@ function lakeOptions(): LakeOptions {
     hexSize: HEX,
     view: { squash: SQUASH, thickness: THICKNESS },
     lakes: useArt.value ? artLakes : undefined,
-    water: { fill: fill.value / 100, warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
+    weather: { warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
   };
 }
 
 function rebuild(): void {
-  const map = demoMap(mapId.value, seed.value);
   labels = map.labels;
   renderer.sprites = useArt.value ? { ...placeholderSprites, ...artSprites } : placeholderSprites;
   renderer.walls = useArt.value ? artWalls : {};
-  scene = buildScene(map.grid, groundTextures(), {
+  // The flat map draws the high basins' water apart, as the run has it; the relief style shows them full.
+  const flat = mountainStyle.value === 'sprites';
+  scene = buildScene(flat ? map.grid : floodedGrid(map.grid, map.water), groundTextures(), {
     ...lakeOptions(),
+    highWater: flat ? map.water : undefined,
+    depth: flat ? depthNow() : undefined,
     seed: seed.value,
     blend: blend.value,
     relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value },
@@ -76,8 +113,8 @@ function rebuild(): void {
 
 /** Only the water changed: repaint the lakes, keep the land. */
 function repaintWater(): void {
-  if (!scene) return;
-  scene = paintLakes(scene, groundTextures(), lakeOptions());
+  if (!scene || mountainStyle.value !== 'sprites') return;
+  scene = paintLakes(scene, groundTextures(), lakeOptions(), depthNow() ?? map.water ?? []);
   draw();
 }
 
@@ -111,7 +148,14 @@ function draw(): void {
   drawLabels(ctx, scene, t);
 }
 
+function newMap(): void {
+  map = demoMap(mapId.value, seed.value);
+  startRun();
+  rebuild();
+}
+
 onMounted(() => {
+  startRun();
   rebuild();
   Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX), loadLakeKit(HEX)])
     .then(([textures, sprites, walls, cliff, poolFace, lakes]) => {
@@ -127,10 +171,14 @@ onMounted(() => {
   resizeObs = new ResizeObserver(draw);
   if (host.value) resizeObs.observe(host.value);
 });
-onBeforeUnmount(() => resizeObs?.disconnect());
+onBeforeUnmount(() => {
+  resizeObs?.disconnect();
+  stopPlaying();
+});
 
-watch([mapId, seed, blend, useArt, relief, mountainStyle, contours], rebuild);
-watch([fill, season, wind, windDir], repaintWater);
+watch([mapId, seed], newMap);
+watch([blend, useArt, relief, mountainStyle, contours], rebuild);
+watch([step, season, wind, windDir], repaintWater);
 watch(showGrid, draw);
 </script>
 
@@ -164,10 +212,12 @@ watch(showGrid, draw);
         Relief {{ relief }}%
         <input v-model.lazy.number="relief" type="range" min="0" max="150" step="10" />
       </label>
-      <label>
-        Lake water {{ fill }}%
-        <input v-model.number="fill" type="range" min="20" max="120" step="5" />
+      <label v-if="steps > 0">
+        Water
+        <button type="button" :title="playing ? 'Pause' : 'Play the water run'" @click="togglePlay">{{ playing ? '⏸' : '▶' }}</button>
+        <input v-model.number="step" type="range" min="0" :max="steps" step="1" />
       </label>
+      <p v-if="steps > 0" class="hint">Step {{ step }} / {{ steps }} · {{ phase }}</p>
       <label>
         Season {{ season < 0 ? 'winter' : season > 0 ? 'summer' : 'spring' }}
         <input v-model.number="season" type="range" min="-100" max="100" step="10" />

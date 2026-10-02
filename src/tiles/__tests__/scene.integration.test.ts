@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { coverAt, elevationAt, forEachCell } from '../coverGrid';
-import { LEVEL_BANDS, demoMap } from '../demoMaps';
+import { LEVEL_BANDS, demoMap, floodedGrid } from '../demoMaps';
 import { frameCentre } from '../geometry';
 import { createPlaceholderTextures } from '../placeholderTextures';
 import { getPixel } from '../raster';
@@ -8,6 +8,9 @@ import { BAND_ROWS, buildScene, paintLakes } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
+import { createWaterWorld } from '../../water/hexWater';
+import { basinScript, runScript } from '../../water/waterScript';
+import type { PropInstance } from '../scatter';
 
 /**
  * End-to-end: demo map → terrain sampler → ground image + scattered props +
@@ -17,8 +20,10 @@ const SIZE = 16;
 const view = { squash: 0.7, thickness: 4 };
 const relief = { height: 30 };
 const textures = createPlaceholderTextures(32);
+/** A map in the relief style, its high basins filled. */
 const build = (id: string) => {
-  const { grid } = demoMap(id, 1);
+  const map = demoMap(id, 1);
+  const grid = floodedGrid(map.grid, map.water);
   return { grid, scene: buildScene(grid, textures, { hexSize: SIZE, seed: 3, blend: 0.6, view, relief }) };
 };
 const { grid, scene } = build('levels');
@@ -137,13 +142,16 @@ describe('buildScene (highlands)', () => {
   });
 });
 
+const flatOptions = { hexSize: SIZE, seed: 3, blend: 0.6, view, relief: { height: 30, style: 'sprites' as const } };
+
 describe('buildScene (highlands, flat map)', () => {
-  const { grid: hg } = demoMap('highlands', 1);
-  const scene = buildScene(hg, textures, { hexSize: SIZE, seed: 3, blend: 0.6, view, relief: { height: 30, style: 'sprites' } });
+  const { grid: hg, water } = demoMap('highlands', 1);
+  const scene = buildScene(hg, textures, { ...flatOptions, highWater: water });
   const props = scene.bands.flatMap((b) => b.props);
   const falls = props.filter((p) => p.kind === 'fall');
-  const isLake = (i: number) => hg.cells[i].water >= 2 && hg.elevation[i] > 0.5;
-  const [outlet] = lakeOutlets(hg, isLake);
+  const full = floodedGrid(hg, water);
+  const isLake = (i: number) => full.cells[i].water >= 2 && full.elevation[i] > 0.5;
+  const [outlet] = lakeOutlets(full, isLake);
 
   it('keeps every tile on the floor, the high lake included', () => {
     expect(scene.tiles.every((t) => t.lift === 0)).toBe(true);
@@ -183,15 +191,12 @@ describe('buildScene (highlands, flat map)', () => {
     expect(lake.surface!.y + Math.min(...rows)).toBeLessThan(c.y * view.squash - SIZE * 0.25);
   });
 
-  it('repaints only the lakes when only the water changes, keeping the land and its props', () => {
-    const low = paintLakes(scene, textures, { hexSize: SIZE, view, water: { fill: 0.5, warmth: 0, wind: { strength: 0, direction: 0 } } });
-    expect(low.tiles).toBe(scene.tiles);
-    expect(low.ground).toBe(scene.ground);
-    const others = (s: typeof scene) => s.bands.flatMap((b) => b.props.filter((p) => !p.surface));
-    expect(others(low)).toEqual(others(scene));
-    const [lowLake] = low.bands.flatMap((b) => b.props.filter((p) => p.surface));
-    expect(lowLake.surface!.raster).not.toBe(lakeRaster);
-    expect(scene.bands.flatMap((b) => b.props).filter((p) => p.surface)[0]).toBe(lake); // the original scene is untouched
+  it('repaints the water without rebuilding the land, leaving the scene it came from as it was', () => {
+    const dry = paintLakes(scene, textures, { hexSize: SIZE, view }, new Array(hg.cols * hg.rows).fill(0));
+    expect(dry.tiles).toBe(scene.tiles);
+    expect(dry.ground).toBe(scene.ground);
+    expect(dry.bands.flatMap((b) => b.props).filter((p) => p.surface)).toHaveLength(0);
+    expect(scene.bands.flatMap((b) => b.props).filter((p) => p.surface)[0]).toBe(lake);
   });
 
   it('paints no open water on the ground under the mountain lake: the water is in the sprites', () => {
@@ -209,3 +214,44 @@ describe('buildScene (highlands, flat map)', () => {
     expect(falls).toHaveLength(0);
   });
 });
+
+describe('buildScene (mountains, flat map, water from a simulation)', () => {
+  const { grid: mg, water } = demoMap('mountains', 2);
+  const scene = buildScene(mg, textures, { ...flatOptions, highWater: water });
+  const cells = mg.cols * mg.rows;
+  const paint = (depth: ArrayLike<number>) => paintLakes(scene, textures, { hexSize: SIZE, view }, depth);
+  const lakesOf = (s: typeof scene) => s.bands.flatMap((b) => b.props).filter((p) => p.surface);
+  const landOf = (s: typeof scene) => s.bands.flatMap((b) => b.props).filter((p) => !p.surface);
+  const highest = scene.basins.reduce((a, b) => (b.full > a.full ? b : a));
+  const inHighest = (p: PropInstance) => highest.cells.includes(p.row * mg.cols + p.col);
+  const mountainsIn = (s: typeof scene) => landOf(s).filter((p) => p.elevation !== undefined && inHighest(p));
+  const states = runScript(createWaterWorld(mg.cols, mg.rows, mg.elevation), basinScript(mg.cols, mg.rows, water!));
+
+  it('shows an empty basin as plain land: mountains where its ground is high, no lake', () => {
+    const dry = paint(new Array(cells).fill(0));
+    expect(lakesOf(dry)).toHaveLength(0);
+    expect(mountainsIn(dry).length).toBeGreaterThan(0);
+  });
+
+  it('covers the basin\'s mountains when it is full', () => {
+    expect(lakesOf(scene).length).toBeGreaterThanOrEqual(scene.basins.length);
+    expect(mountainsIn(scene).length).toBeLessThan(mountainsIn(paint(new Array(cells).fill(0))).length);
+  });
+
+  it('shrinks a falling lake into its deepest spots, at a lower level', () => {
+    const lower = water!.map((d) => Math.max(0, d - 0.8));
+    const area = (s: typeof scene) => lakesOf(s).reduce((n, p) => n + p.surface!.raster.width * p.surface!.raster.height, 0);
+    expect(area(paint(lower))).toBeLessThan(area(scene));
+  });
+
+  it('stands every prop it keeps on dry land, and lifts the ones on a lake to its height', () => {
+    for (const k of [40, 90, 130, 200, 260]) {
+      const s = paint(states[k].depth);
+      for (const lake of lakesOf(s)) for (const r of lake.riders ?? []) expect(r.y).toBeLessThan(lake.y);
+      const riders = lakesOf(s).flatMap((l) => l.riders ?? []);
+      const land = landOf(s);
+      expect(land.length + riders.length).toBeLessThanOrEqual(landOf(paint(new Array(cells).fill(0))).length);
+    }
+  });
+});
+

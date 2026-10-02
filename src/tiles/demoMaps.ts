@@ -4,6 +4,7 @@ import { clamp, smoothstep } from '../math/scalar';
 import { createCoverGrid, type CellInit, type CoverGrid } from './coverGrid';
 import { fillDepressions } from './hydrology';
 import { LEVEL_NAMES, MAX_ELEVATION, MAX_LEVEL, type Cover, type Layer, type Level } from './levels';
+import { HIGH_LAKE_FROM } from './shores';
 
 export interface MapLabel {
   col: number;
@@ -14,6 +15,12 @@ export interface MapLabel {
 export interface DemoMap {
   grid: CoverGrid;
   labels: MapLabel[];
+  /**
+   * Water the high basins hold when rain has filled them, per cell (steps).
+   * Their cells in `grid` are dry ground at its true height, so the water
+   * can rise and fall over it; floodedGrid puts it back.
+   */
+  water?: number[];
 }
 
 export interface DemoMapDef {
@@ -107,6 +114,9 @@ function highlands(seed: number): DemoMap {
   const basin = { x: (rng() - 0.5) * 0.5, y: -0.35 + (rng() - 0.5) * 0.2 };
   const notch = Math.PI / 2 + (rng() - 0.5) * 1.2; // facing roughly toward the viewer
   const RING = 0.36;
+  // A peak in the basin, across from the notch: an island while the lake is low.
+  const away = notch + Math.PI + (rng() - 0.5) * 1.2;
+  const knoll = { x: basin.x + (Math.cos(away) * RING * KNOLL.off) / 1.4, y: basin.y + Math.sin(away) * RING * KNOLL.off };
 
   const elevation: number[] = [];
   const cover: Partial<Cover>[] = [];
@@ -129,8 +139,10 @@ function highlands(seed: number): DemoMap {
       const backBoost = Math.max(0, -Math.sin(angle)) * 1.2;
       const ring = Math.exp(-(((d - RING) / 0.14) ** 2)) * (2.8 + backBoost - 2.2 * notchDip);
       const lowland = Math.min(3.2, (land - 0.3) * 6);
-      const floor = lowland + (5 - lowland) * smoothstep(RING + 0.14, RING - 0.04, d); // the basin is a raised plateau
-      const e = clamp(floor + ring + (noise(5, nx * 4, ny * 4) - 0.5) * 1.2, 0, MAX_ELEVATION);
+      const bowl = BOWL * (1 - Math.min(1, d / RING) ** 2);
+      const floor = lowland + (5 - lowland) * smoothstep(RING + 0.14, RING - 0.04, d) - bowl; // the basin is a raised plateau, dished in the middle
+      const peak = KNOLL.high * Math.exp(-((Math.hypot((nx - knoll.x) * 1.4, ny - knoll.y) / (KNOLL.width * RING)) ** 2));
+      const e = clamp(floor + ring + peak + (noise(5, nx * 4, ny * 4) - 0.5) * 1.2, 0, MAX_ELEVATION);
       elevation.push(e);
       cover.push({
         grass: e >= 6 ? 0 : level((land - 0.3) * 8 + (noise(1, nx * 3, ny * 3) - 0.5) * 6 - Math.max(0, e - 3.5) * 2),
@@ -139,24 +151,49 @@ function highlands(seed: number): DemoMap {
     }
   }
 
-  return { grid: fillLakes(cols, rows, elevation, cover), labels: [] };
+  return { ...fillLakes(cols, rows, elevation, cover), labels: [] };
 }
 
 /**
- * Let rain fill every basin (priority-flood): cells that would hold water
- * deeper than a third of a step become lake, flat at its level; shallower
- * ones become a damp, level shore.
+ * A cell under `depth` steps of standing water: deeper than a third of a step
+ * it is lake, flat at its level; shallower it is a damp, level shore.
  */
-function fillLakes(cols: number, rows: number, elevation: number[], cover: Partial<Cover>[]): CoverGrid {
+function floodCell(cover: Partial<Cover>, ground: number, depth: number): CellInit {
+  if (depth > 0.35 && ground > 0) return { water: depth > 1.2 ? 4 : depth > 0.7 ? 3 : 2, elevation: ground + depth };
+  if (depth > 0) return { ...cover, water: 1, elevation: ground + depth };
+  return { ...cover, elevation: ground };
+}
+
+/** How far the middle of the highlands basin dips below its plateau (steps). */
+const BOWL = 0.9;
+/**
+ * Peaks standing in basins: how high above the floor (steps), and their reach
+ * and distance from the middle as shares of the basin's radius. Tall ones stay
+ * islands; low ones go under when the lake is full and come up as it falls.
+ */
+const KNOLL = { high: 1.8, low: 1.1, width: 0.3, off: 0.3 };
+
+/**
+ * Let rain fill every basin (priority-flood). Lakes low in the land become
+ * part of the map; the water of high basins is kept apart, over dry ground,
+ * so it can be simulated.
+ */
+function fillLakes(cols: number, rows: number, elevation: number[], cover: Partial<Cover>[]): Required<Pick<DemoMap, 'grid' | 'water'>> {
   const waterLevel = fillDepressions({ cols, rows, elevation });
-  return createCoverGrid(cols, rows, (col, row): CellInit => {
+  const high = (i: number) => waterLevel[i] > elevation[i] && waterLevel[i] >= HIGH_LAKE_FROM;
+  const water = elevation.map((e, i) => (high(i) ? waterLevel[i] - e : 0));
+  const grid = createCoverGrid(cols, rows, (col, row) => {
     const i = row * cols + col;
-    const depth = waterLevel[i] - elevation[i];
-    if (depth > 0.35 && elevation[i] > 0) {
-      return { water: depth > 1.2 ? 4 : depth > 0.7 ? 3 : 2, elevation: waterLevel[i] };
-    }
-    if (depth > 0) return { ...cover[i], water: 1, elevation: waterLevel[i] }; // damp, level shore
-    return { ...cover[i], elevation: elevation[i] };
+    return floodCell(cover[i], elevation[i], high(i) ? 0 : waterLevel[i] - elevation[i]);
+  });
+  return { grid, water };
+}
+
+/** The map with its high basins filled with `water` (steps per cell), the way a static map shows lakes. */
+export function floodedGrid(grid: CoverGrid, water: readonly number[] = []): CoverGrid {
+  return createCoverGrid(grid.cols, grid.rows, (col, row) => {
+    const i = row * grid.cols + col;
+    return floodCell(grid.cells[i], grid.elevation[i], water[i] ?? 0);
   });
 }
 
@@ -184,10 +221,15 @@ function mountains(seed: number): DemoMap {
     for (let tries = 0; tries < 40; tries++) {
       const [x, y] = [rng() * 1.3 - 0.65, rng() * 1.1 - 0.55];
       if (landAt(x, y) < 0.5 || basins.some((b) => Math.hypot(b.x - x, b.y - y) < 0.5)) continue;
-      basins.push({ x, y, r: 0.1 + rng() * 0.06, floor, notch: rng() * Math.PI * 2 });
+      basins.push({ x, y, r: 0.15 + rng() * 0.06, floor, notch: rng() * Math.PI * 2 });
       break;
     }
   }
+  // A peak in each basin, across from its notch: every other one tall enough to stay an island.
+  const knolls = basins.map((b, k) => {
+    const away = b.notch + Math.PI + (rng() - 0.5);
+    return { x: b.x + (Math.cos(away) * b.r * KNOLL.off) / 1.4, y: b.y + Math.sin(away) * b.r * KNOLL.off, h: k % 2 ? KNOLL.low : KNOLL.high };
+  });
 
   const elevation: number[] = [];
   const cover: Partial<Cover>[] = [];
@@ -204,14 +246,15 @@ function mountains(seed: number): DemoMap {
       const ridge = (1 - Math.abs(2 * noise(5, nx * 1.6, ny * 1.6) - 1)) ** 2.5;
       const range = ridge * 5.5 * smoothstep(0.4, 0.62, noise(6, nx * 1.1, ny * 1.1));
       let e = lowland + range;
-      for (const b of basins) {
+      basins.forEach((b, k) => {
         const d = Math.hypot((nx - b.x) * 1.4, ny - b.y) / b.r;
         const angle = Math.atan2(ny - b.y, (nx - b.x) * 1.4);
         const off = Math.atan2(Math.sin(angle - b.notch), Math.cos(angle - b.notch));
         const notch = Math.exp(-(off * off) / 0.15);
-        const bowl = d < 1 ? b.floor - 1.1 + 0.6 * d * d : b.floor + (1.6 - 1.4 * notch) * Math.exp(-(((d - 1.3) / 0.45) ** 2));
-        e += (bowl - e) * smoothstep(2.3, 1.5, d);
-      }
+        const peak = knolls[k].h * Math.exp(-((Math.hypot((nx - knolls[k].x) * 1.4, ny - knolls[k].y) / (KNOLL.width * b.r)) ** 2));
+        const bowl = d < 1 ? b.floor - 1.1 + 0.6 * d * d + peak : b.floor + (1.6 - 1.4 * notch) * Math.exp(-(((d - 1.3) / 0.45) ** 2));
+        e += (bowl - e) * smoothstep(2.1, 1.5, d);
+      });
       e = clamp(e + (noise(7, nx * 4, ny * 4) - 0.5) * 0.6, 0.3, MAX_ELEVATION);
       elevation.push(e);
       cover.push({
@@ -220,7 +263,7 @@ function mountains(seed: number): DemoMap {
       });
     }
   }
-  return { grid: fillLakes(cols, rows, elevation, cover), labels: [] };
+  return { ...fillLakes(cols, rows, elevation, cover), labels: [] };
 }
 
 /** Every hex random: a stress test for how well arbitrary neighbours fuse. */

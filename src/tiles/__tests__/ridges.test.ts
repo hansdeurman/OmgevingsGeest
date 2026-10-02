@@ -33,12 +33,10 @@ describe('ridgeProps', () => {
     expect(ridgeProps(row(1, 'L', 1), SIZE, 1)).toHaveLength(0);
   });
 
-  it('lets mountains lean against a high lake\'s rim, so the lake sits in the range instead of in a valley', () => {
-    const props = ridgeProps(row(7, 'L'), SIZE, 1);
-    const [m, lake] = [offsetToPixel(0, 0, SIZE), offsetToPixel(1, 0, SIZE)];
-    const leaning = props.filter((p) => p.x > m.x + SIZE * 0.3);
-    expect(leaning).toHaveLength(1);
-    expect(leaning[0].x).toBeLessThan((m.x + lake.x) / 2); // on the mountain's side of the shared edge
+  it('tags each mountain with the elevation it stands for, a link with its lower side', () => {
+    const props = ridgeProps(row(7, 5), SIZE, 1);
+    expect(props.find((p) => p.kind === 'peak')?.elevation).toBe(7);
+    expect(props.filter((p) => p.kind === 'hill').map((p) => p.elevation)).toEqual([5, 5]);
   });
 
   it('fills the middle between three high cells, so no bare floor shows between peaks', () => {

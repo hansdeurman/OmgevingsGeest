@@ -17,8 +17,12 @@ export interface PropInstance {
   row: number;
   /** Drawn height in scene pixels, overriding the sprite's own (e.g. a waterfall fitted to its drop). */
   height?: number;
+  /** The elevation (steps) a mountain sprite stands for: water rising past it hides it. */
+  elevation?: number;
   /** An image drawn instead of a sprite, its top-left at (x, y) in scene pixels, squashed to `height` (a painted high lake). */
   surface?: { raster: Raster; x: number; y: number; height: number };
+  /** Props standing on the surface (peaks and islands in a lake), drawn after it. */
+  riders?: PropInstance[];
 }
 
 const CANDIDATES = 40;

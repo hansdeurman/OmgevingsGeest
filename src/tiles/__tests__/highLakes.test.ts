@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WATER, lakeArt, lakeState, placeholderLakeKit, wallStyle } from '../highLakes';
+import { DEFAULT_WEATHER, lakeArt, lakeState, placeholderLakeKit, wallStyle } from '../highLakes';
 import { createPlaceholderTextures } from '../placeholderTextures';
-import { HIGH_LAKE_FROM, lakeLift } from '../shores';
+import { HIGH_LAKE_FROM, lakeShapes } from '../shores';
 import { MAX_ELEVATION } from '../levels';
 
 const SIZE = 20;
@@ -17,26 +17,27 @@ describe('wallStyle', () => {
 });
 
 describe('lakeState', () => {
-  const at = (fill: number) => lakeState(5, SIZE, { ...DEFAULT_WATER, fill });
+  /** A small lake at `level`, highest at `top`. */
+  const lake = (level: number, top = level) => ({ ...lakeShapes(Float32Array.from([level, level, level, level]), 2, 2)[0], level, top });
+  const outlet = { x: 5, y: 9 };
 
-  it('raises the rim with the lake\'s height', () => {
-    expect(at(1).rim).toBeCloseTo(lakeLift(5) * SIZE, 6);
+  it('is colder high up and warmer in summer, in the given wind', () => {
+    expect(lakeState(lake(6.5), DEFAULT_WEATHER).temperature).toBeLessThan(lakeState(lake(3), DEFAULT_WEATHER).temperature);
+    expect(lakeState(lake(5), { ...DEFAULT_WEATHER, warmth: 1 }).temperature).toBeGreaterThan(lakeState(lake(5), DEFAULT_WEATHER).temperature);
+    expect(lakeState(lake(5), DEFAULT_WEATHER).wind).toBe(DEFAULT_WEATHER.wind);
   });
 
-  it('fills a full lake to its rim and a low one part of the way', () => {
-    expect(at(1).water).toBe(at(1).rim);
-    expect(at(0.5).water).toBeCloseTo(at(1).rim / 2, 6);
-    expect(at(1).spill).toBe(0);
+  it('pours out of its outlet only once it has risen to its overflow level', () => {
+    expect(lakeState(lake(5), DEFAULT_WEATHER, { full: 5, outlet }).outlet).toBe(outlet);
+    expect(lakeState(lake(4.5), DEFAULT_WEATHER, { full: 5, outlet }).outlet).toBeUndefined();
+    expect(lakeState(lake(5), DEFAULT_WEATHER).outlet).toBeUndefined();
   });
 
-  it('spills ever harder above full, the water staying at the rim', () => {
-    expect(at(1.1).water).toBe(at(1).rim);
-    expect(at(1.1).spill).toBeGreaterThan(0);
-    expect(at(1.3).spill).toBe(1);
-  });
-
-  it('warms the water in summer', () => {
-    expect(lakeState(5, SIZE, { ...DEFAULT_WATER, warmth: 1 }).temperature).toBeGreaterThan(at(1).temperature);
+  it('spills over its near rim when it stands well above its overflow level, harder the higher', () => {
+    expect(lakeState(lake(5.05), DEFAULT_WEATHER, { full: 5, outlet }).spill).toBe(0);
+    const some = lakeState(lake(5, 5.4), DEFAULT_WEATHER, { full: 5, outlet }).spill;
+    expect(some).toBeGreaterThan(0);
+    expect(lakeState(lake(5, 6), DEFAULT_WEATHER, { full: 5, outlet }).spill).toBeGreaterThan(some);
   });
 });
 
