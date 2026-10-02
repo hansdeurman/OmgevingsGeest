@@ -73,19 +73,22 @@ export function basins(cols: number, rows: number, water: ArrayLike<number>): nu
 }
 
 /** Steps per phase of the season script. */
-const PACE = { winter: 40, spring: 160, burst: 80, summer: 220 };
+const PACE = { winter: 40, spring: 160, burst: 80, summer: 220, storm: 40, autumn: 100 };
 /** Rain per step on the lowlands; the mountains catch more, up to `mountains` times as much. */
 const RAIN = { lowland: 0.003, mountains: 3 };
 /** Water a cloudburst pours on one side of each basin, in steps. */
 const BURST = 1.2;
+/** How many times the usual rain an autumn storm brings. */
+const STORM = 12;
 
 /**
  * A year in the life of high lakes, given each hex's ground and the water
  * `full` basins hold: a winter that lays snow on the heights, spring rain that
  * soaks the land, runs off in streams and fills the basins until they
  * overflow, a cloudburst that piles water up on one side of each lake until it
- * levels out, and a dry summer in which the lakes sink while glaciers keep the
- * rivers running.
+ * levels out, a dry summer in which the lakes sink while glaciers keep the
+ * rivers running and the land dries out, and an autumn storm that soaks the
+ * land and floods its flats and hollows, which then slowly drain.
  */
 export function seasonScript(cols: number, rows: number, ground: ArrayLike<number>, full: ArrayLike<number>, years = 1): WaterScript {
   const n = cols * rows;
@@ -101,6 +104,8 @@ export function seasonScript(cols: number, rows: number, ground: ArrayLike<numbe
     { label: 'Spring rain', steps: PACE.spring, rain: rain.map((r) => r * 1.5), warmth: 0.3, evaporation: 0.002 },
     { label: 'Cloudburst, one side', steps: PACE.burst, rain: 0, warmth: 0.5, evaporation: 0.004, burst },
     { label: 'Dry summer', steps: PACE.summer, rain: 0, warmth: 1, evaporation: 0.012 },
+    { label: 'Autumn storm', steps: PACE.storm, rain: rain.map((r) => r * STORM), warmth: 0.4, evaporation: 0.001 },
+    { label: 'Autumn', steps: PACE.autumn, rain: rain.map((r) => r * 0.5), warmth: 0.1, evaporation: 0.004 },
   ];
   return Array.from({ length: years }, (_, y) => year.map((p) => (y ? { ...p, label: `${p.label}, year ${y + 1}` } : p))).flat();
 }

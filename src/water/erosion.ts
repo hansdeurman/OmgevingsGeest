@@ -85,7 +85,7 @@ export function erodeStep(
   }
 
   // Carry the load along with the water: each hex sends the share of its water that leaves it.
-  const moved = new Float32Array(n);
+  const moved = scratch('moved', n);
   for (let i = 0; i < n; i++) {
     if (!sediment[i]) continue;
     let out = 0;
@@ -106,7 +106,7 @@ export function erodeStep(
   for (let i = 0; i < n; i++) sediment[i] = sink[i] ? 0 : moved[i];
 
   // Ground too steep to stand slumps into its lower neighbours.
-  const slide = new Float32Array(n);
+  const slide = scratch('slide', n);
   for (let i = 0; i < n; i++) {
     if (sink[i]) continue; // the sea and the map's edge take, but give nothing
     for (let d = 0; d < 6; d++) {
@@ -120,4 +120,11 @@ export function erodeStep(
     }
   }
   for (let i = 0; i < n; i++) if (!sink[i]) ground[i] += slide[i];
+}
+
+/** Reused buffers, zeroed for each use: a step allocates nothing. */
+const buffers = { moved: new Float32Array(0), slide: new Float32Array(0) };
+function scratch(key: keyof typeof buffers, n: number): Float32Array {
+  if (buffers[key].length < n) buffers[key] = new Float32Array(n);
+  return buffers[key].subarray(0, n).fill(0);
 }

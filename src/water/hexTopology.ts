@@ -51,3 +51,9 @@ export function pipeTarget(t: HexTopology, i: number, d: number): number {
   const r = row + t.dr[d];
   return r < 0 || r >= t.rows || col < 0 || col >= t.cols ? -1 : r * t.cols + col;
 }
+
+/** Per row parity and direction, the index step to a pipe's target: `i + steps[(row & 1) * dirs + d]`, valid two hexes away from the map's edge. */
+export const pipeSteps = (t: HexTopology) => Int32Array.from({ length: 2 * t.dirs }, (_, k) => t.dr[k % t.dirs] * t.cols + t.dc[k]);
+
+/** Whether every pipe of the hex at (row, col) stays on the map, so `pipeSteps` hold for it. */
+export const isInner = (t: HexTopology, row: number, col: number) => row >= 2 && row < t.rows - 2 && col >= 2 && col < t.cols - 2;

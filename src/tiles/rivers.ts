@@ -84,28 +84,39 @@ export function smoothPath(points: readonly Pixel[], iterations: number): Pixel[
 /**
  * The pixels a river along `points` covers, each with how close it lies to
  * the centre line (1 on it, 0 at the bank). `width(t)` is the width in px at
- * share `t` of the way along the river, so it can widen downstream.
+ * share `t` of the way along the river, so it can widen downstream. The
+ * points are frame pixels; the pixels are of a W x H raster `squash`ed
+ * vertically (the projected map), where the river is as much flatter.
  */
-export function riverStroke(points: readonly Pixel[], W: number, H: number, width: (t: number) => number): Map<number, number> {
+export function riverStroke(points: readonly Pixel[], W: number, H: number, width: (t: number) => number, squash = 1): Map<number, number> {
   const wet = new Map<number, number>();
   const lengths = points.slice(1).map((p, k) => Math.hypot(p.x - points[k].x, p.y - points[k].y));
   const total = lengths.reduce((s, l) => s + l, 0) || 1;
   let done = 0;
   lengths.forEach((len, k) => {
+    // Every pixel near this stretch, by its distance to it; the width runs on evenly along it.
     const [a, b] = [points[k], points[k + 1]];
-    const steps = Math.max(1, Math.ceil(len * 2));
-    for (let s = 0; s <= steps; s++) {
-      const f = s / steps;
-      const [cx, cy] = [a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f];
-      const r = width((done + len * f) / total) / 2;
-      for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(H - 1, Math.floor(cy + r)); y++) {
-        for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(W - 1, Math.floor(cx + r)); x++) {
-          const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
-          if (d <= r) wet.set(y * W + x, Math.max(wet.get(y * W + x) ?? 0, 1 - d / r));
-        }
+    const [r0, r1] = [width(done / total) / 2, width((done + len) / total) / 2];
+    done += len;
+    const reach = Math.max(r0, r1);
+    if (reach <= 0) return;
+    const [dx, dy] = [b.x - a.x, b.y - a.y];
+    const len2 = dx * dx + dy * dy || 1;
+    const [y0, y1] = [Math.max(0, Math.floor((Math.min(a.y, b.y) - reach) * squash)), Math.min(H - 1, Math.floor((Math.max(a.y, b.y) + reach) * squash))];
+    const [x0, x1] = [Math.max(0, Math.floor(Math.min(a.x, b.x) - reach)), Math.min(W - 1, Math.floor(Math.max(a.x, b.x) + reach))];
+    for (let y = y0; y <= y1; y++) {
+      const py = (y + 0.5) / squash;
+      for (let x = x0; x <= x1; x++) {
+        const px = x + 0.5;
+        const u = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2));
+        const d = Math.hypot(px - a.x - u * dx, py - a.y - u * dy);
+        const r = r0 + (r1 - r0) * u;
+        if (d > r) continue;
+        const i = y * W + x;
+        const close = 1 - d / r;
+        if (close > (wet.get(i) ?? 0)) wet.set(i, close);
       }
     }
-    done += len;
   });
   return wet;
 }

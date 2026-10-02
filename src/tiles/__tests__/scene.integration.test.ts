@@ -8,7 +8,7 @@ import { BAND_ROWS, buildScene, paintLakes } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
-import { runScript, seasonScript } from '../../water/waterScript';
+import { phaseEnd, runScript, seasonScript } from '../../water/waterScript';
 import { hydroWorldOf } from '../mapHydro';
 import type { PropInstance } from '../scatter';
 
@@ -256,3 +256,60 @@ describe('buildScene (mountains, flat map, water from a simulation)', () => {
     }
   });
 });
+
+describe('buildScene (mountains, flat map, ground and rivers living with the water)', () => {
+  const { grid: mg, water } = demoMap('mountains', 3);
+  const world = hydroWorldOf(mg);
+  const script = seasonScript(mg.cols, mg.rows, mg.elevation, water!);
+  const states = runScript(world, script);
+  const stateAt = (k: number) => ({ ...states[k], topo: world.topo });
+  const scene = buildScene(mg, textures, { ...flatOptions, highWater: water, water: stateAt(phaseEnd(script, 'Spring rain')) });
+  const at = (k: number) => paintLakes(scene, textures, { hexSize: SIZE, view }, stateAt(k));
+  const [spring, summer] = [at(phaseEnd(script, 'Spring rain')), at(phaseEnd(script, 'Dry summer'))];
+  /** Mean colour of the projected ground over the land hexes of normal cover. */
+  const meanOver = (s: typeof scene, pick: (i: number) => boolean) => {
+    const sum = [0, 0, 0];
+    let k = 0;
+    for (let i = 0; i < mg.cols * mg.rows; i++) {
+      if (!pick(i)) continue;
+      const c = frameCentre(i % mg.cols, Math.floor(i / mg.cols), SIZE, s.frame);
+      const p = getPixel(s.flat!, Math.round(c.x), Math.round(c.y * view.squash));
+      [0, 1, 2].forEach((n) => (sum[n] += p[n]));
+      k++;
+    }
+    return sum.map((v) => v / k);
+  };
+  const grassy = (i: number) => mg.cells[i].grass >= 3 && mg.cells[i].water === 0 && mg.elevation[i] < 4;
+
+  it('draws the ground as one projected image, repainted with the water', () => {
+    expect(spring.flat!.width).toBe(scene.frame.width);
+    expect(spring.flat!.height).toBe(Math.ceil(scene.frame.height * view.squash));
+    expect(summer.flat).not.toBe(spring.flat);
+    expect(summer.ground).toBe(spring.ground); // the land itself is shared
+  });
+
+  it('lets the grass go yellow in a dry summer and darken in spring rain', () => {
+    const [wet, dry] = [meanOver(spring, grassy), meanOver(summer, grassy)];
+    const lum = ([r, g, b]: number[]) => 0.3 * r + 0.59 * g + 0.11 * b;
+    expect(dry[0] / dry[1]).toBeGreaterThan(wet[0] / wet[1] + 0.05); // yellower: more straw, less green
+    expect(lum(dry)).toBeGreaterThan(lum(wet) + 10); // paler, where spring rain darkened it
+  });
+
+  it('runs rivers with water in spring and leaves their beds when they run dry', () => {
+    const springs = states[phaseEnd(script, 'Spring rain')].river;
+    const summers = states[phaseEnd(script, 'Dry summer')].river;
+    const flowing = (r: typeof springs) => Array.from(r.flow).filter((f) => f > 0.02).length;
+    expect(flowing(springs)).toBeGreaterThan(3 * flowing(summers));
+    expect(summer.river!.some((v) => v)).toBe(true);
+  });
+
+  it('keeps props out of the rivers', () => {
+    for (const s of [spring, summer]) {
+      const land = s.bands.flatMap((b) => b.props).filter((p) => !p.surface);
+      const onRiver = land.filter((p) => s.river![Math.floor(p.y) * s.frame.width + Math.floor(p.x)]);
+      expect(s.river!.some((v) => v)).toBe(true);
+      expect(onRiver).toEqual([]);
+    }
+  });
+});
+

@@ -85,8 +85,9 @@ export class IsoRenderer {
     for (const tile of scene.tiles) {
       for (const face of tile.faces) this.drawFace(ctx, scene.hexSize, face, FACE_SHADE[face.side]);
     }
+    if (scene.flat) ctx.drawImage(this.canvasOf(scene.flat), 0, 0);
     scene.bands.forEach((band) => {
-      ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
+      if (!scene.flat) ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
       for (const p of band.props) this.drawProp(ctx, p);
     });
     if (opts.grid) for (const tile of scene.tiles) this.outline(ctx, tile.top);

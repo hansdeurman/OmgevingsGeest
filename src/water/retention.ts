@@ -74,7 +74,7 @@ export function weatherStep(ground: Float32Array, depth: Float32Array, soil: Flo
     const melt = Math.min(snow[i], MELT * Math.max(0, t));
     snow[i] -= melt;
     const soaked = Math.max(0, Math.min(depth[i] + melt, soak.infiltration[i], soak.capacity[i] - soil[i]));
-    const seep = soil[i] * soak.release[i];
+    const seep = t < 0 ? 0 : soil[i] * soak.release[i]; // frozen ground holds its water
     soil[i] += soaked - seep;
     const water = depth[i] + melt - soaked + seep;
     depth[i] = Math.max(0, water - evaporation * clamp(t / EVAPORATION_AT, 0, 1.5) * Math.min(1, water / OPEN_WATER));

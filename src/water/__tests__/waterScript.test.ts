@@ -55,8 +55,8 @@ describe('seasonScript', () => {
   const full = ground.map((g) => (g < W ? 3 - g : 0));
   const script = seasonScript(5, 5, ground, full);
 
-  it('runs through a year: snow, rain, a cloudburst, drought', () => {
-    expect(script.map((p) => p.label)).toEqual(['Winter', 'Spring rain', 'Cloudburst, one side', 'Dry summer']);
+  it('runs through a year: snow, rain, a cloudburst, drought, an autumn storm', () => {
+    expect(script.map((p) => p.label)).toEqual(['Winter', 'Spring rain', 'Cloudburst, one side', 'Dry summer', 'Autumn storm', 'Autumn']);
     expect(script[0].warmth).toBeLessThan(0);
     expect(script[3].rain).toBe(0);
   });
@@ -74,6 +74,11 @@ describe('seasonScript', () => {
 
   it('dries a bare bowl out in the summer', () => {
     const states = runScript(world(), script);
-    expect(totalWater(states[states.length - 1].depth)).toBeLessThan(totalWater(states[phaseEnd(script, 'Cloudburst, one side')].depth));
+    expect(totalWater(states[phaseEnd(script, 'Dry summer')].depth)).toBeLessThan(totalWater(states[phaseEnd(script, 'Cloudburst, one side')].depth));
+  });
+
+  it('storms in autumn: far more rain than in spring', () => {
+    const [spring, storm] = [script[1].rain as Float32Array, script[4].rain as Float32Array];
+    expect(storm[2 * 5 + 1]).toBeGreaterThan(5 * spring[2 * 5 + 1]);
   });
 });

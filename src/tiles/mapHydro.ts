@@ -3,7 +3,10 @@ import { hardnessOf } from '../water/erosion';
 import { glacierOf, soakOf } from '../water/retention';
 import type { CoverGrid } from './coverGrid';
 
-/** A map's water world: its ground holding water (and holding together) by its grass and trees, glaciers on its highest peaks, its basins dry. */
+/** Share of what its ground can hold that a hex holds at the start: ordinary, neither dry nor wet. */
+const START_FILL = 0.55;
+
+/** A map's water world: its ground holding water (and holding together) by its grass and trees, half full, glaciers on its highest peaks, its basins dry. */
 export function hydroWorldOf(grid: CoverGrid, dirs: 6 | 12 = 12): HydroWorld {
   const { cols, rows, cells, elevation } = grid;
   return createHydroWorld({
@@ -12,6 +15,7 @@ export function hydroWorldOf(grid: CoverGrid, dirs: 6 | 12 = 12): HydroWorld {
     dirs,
     ground: elevation,
     soak: (i) => soakOf(cells[i].grass, cells[i].trees, elevation[i]),
+    soil: (i) => START_FILL * soakOf(cells[i].grass, cells[i].trees, elevation[i]).capacity,
     snow: (i) => glacierOf(elevation[i]),
     hardness: (i) => hardnessOf(cells[i].grass, cells[i].trees, elevation[i]),
   });

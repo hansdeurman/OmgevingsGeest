@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createHydroWorld, snapshot, stepHydro, totalWater } from '../hydroWorld';
 import { outflow } from '../pipeFlow';
 import { soakOf, type Weather } from '../retention';
+import { WETNESS } from '../wetness';
 
 const N = 9;
 const WALL = 9;
@@ -51,5 +52,26 @@ describe('a hydro world', () => {
     run(w, 5, () => rain(0.1));
     expect(totalWater(before.depth)).toBe(0);
     expect(totalWater(w.depth)).toBeGreaterThan(0);
+  });
+
+  it('soaks a slope in the rain and dries it out in a dry, hot summer', () => {
+    const slope = Array.from({ length: N * N }, (_, i) => 0.5 + 0.25 * (i % N));
+    const w = world(slope, 3, 0);
+    const wet = snapshot(run(w, 80, () => rain(0.01))).wetness[at(4, 4)];
+    const dry = snapshot(run(w, 300, () => ({ rain: 0, warmth: 1, evaporation: 0.012 }))).wetness[at(4, 4)];
+    expect(wet).toBeGreaterThanOrEqual(WETNESS.moist);
+    expect(dry).toBeLessThan(WETNESS.dry);
+  });
+
+  it("wears a river bed through the bowl's notch that outlasts the rain", () => {
+    const w = world(bowlGround(1, 0.5));
+    const notch = at(N - 2, 4);
+    run(w, 300, () => rain(0.02));
+    const raining = snapshot(w).river;
+    expect(raining.flow[notch]).toBeGreaterThan(0.01);
+    expect(raining.down[notch]).toBe(at(N - 1, 4));
+    const after = snapshot(run(w, 300, () => ({ rain: 0, warmth: 1, evaporation: 0.012 }))).river;
+    expect(after.flow[notch]).toBeLessThan(raining.flow[notch] / 4);
+    expect(after.bed[notch]).toBeGreaterThan(raining.bed[notch] / 2);
   });
 });

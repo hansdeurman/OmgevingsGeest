@@ -64,6 +64,13 @@ describe('riverStroke', () => {
     const across = (x: number) => [...Array(W).keys()].filter((y) => wet.has(y * W + x)).length;
     expect(across(25)).toBeGreaterThan(across(5));
   });
+
+  it('flattens the river onto a squashed (projected) map', () => {
+    const across = (wet: Map<number, number>) => [...Array(W).keys()].filter((y) => wet.has(y * W + 10)).length;
+    const flat = riverStroke(line, W, W, () => 8, 0.5);
+    expect(across(flat)).toBeLessThan(across(riverStroke(line, W, W, () => 8)) * 0.7);
+    expect(flat.get(Math.floor(15.5 * 0.5) * W + 10)).toBeGreaterThan(0.6);
+  });
 });
 
 describe('rapidsFoam', () => {

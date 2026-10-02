@@ -85,4 +85,9 @@ describe('weatherStep', () => {
     const dry = (warmth: number) => runHex(1, soakOf(0, 0, 1), (k) => ({ rain: k === 0 ? 1 : 0, warmth, evaporation: 0.01 }), 30)[29].depth;
     expect(dry(1)).toBeLessThan(dry(-0.5));
   });
+
+  it('keeps the ground moist in a cool, wet spring', () => {
+    const steps = runHex(1, meadow, () => ({ rain: 0.0045, warmth: 0.3, evaporation: 0.002 }), 200);
+    expect(steps[199].soil).toBeGreaterThan(meadow.capacity * 0.8);
+  });
 });

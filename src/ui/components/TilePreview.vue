@@ -78,8 +78,8 @@ const phase = computed(() => (run && steps.value ? phaseAt(run.script, step.valu
 /** The water as the run has it now: what stands where and how it flows. */
 const waterNow = () => {
   if (!run) return undefined;
-  const { depth, flux, ground } = run.states[Math.min(step.value, steps.value)];
-  return { depth, flux, ground, topo: run.topo };
+  const { depth, flux, ground, wetness, river } = run.states[Math.min(step.value, steps.value)];
+  return { depth, flux, ground, wetness, river, topo: run.topo };
 };
 
 function stopPlaying(): void {

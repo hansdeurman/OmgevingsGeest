@@ -3,7 +3,8 @@ import { shade, type RGB } from '../rendering/palette';
 import { forEachCell, inGrid, type CoverGrid } from './coverGrid';
 import { offsetNeighbours, pixelToOffset } from '../math/hex';
 import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, type IsoView } from './geometry';
-import { composeTerrain, type Cascade } from './groundComposer';
+import { composeTerrain, texelAt, type Cascade } from './groundComposer';
+import { paintGroundWater, wetLayer, type WetLayer } from './groundWater';
 import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { PROP_RULES, type PropRule } from './propRules';
@@ -13,6 +14,8 @@ import { paintLake, type LakeImage } from './lakePainter';
 import { getPixel, type Raster } from './raster';
 import { findBasins, fullOutflow, lakeOutflow, lakesIn, settleProps, type Basin } from './waterLayer';
 import type { HexTopology } from '../water/hexTopology';
+import type { RiverState } from '../water/hydroWorld';
+import { WETNESS } from '../water/wetness';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
 import { scatterProps, type PropInstance } from './scatter';
 import { createTerrainSampler } from './terrainSampler';
@@ -50,6 +53,10 @@ export interface SceneWater {
   topo?: HexTopology;
   /** The ground as the water has worn it, per hex (steps); the map's own if absent. */
   ground?: ArrayLike<number>;
+  /** How wet each hex is (WETNESS scale): the ground's look follows it. Flat map only. */
+  wetness?: ArrayLike<number>;
+  /** The rivers and their beds: painted onto the ground. */
+  river?: RiverState;
 }
 
 /** Which wall texture a face shows; 'none' keeps the plain ground colour (open water). */
@@ -112,6 +119,12 @@ export interface Scene {
   grid: CoverGrid;
   /** The high basins, kept so their water can be repainted without rebuilding the map. */
   basins: Basin[];
+  /** On the flat map with a water model: how its ground is repainted as the water changes… */
+  wet?: WetLayer;
+  /** …and the ground as it is now, projected: drawn whole, under every band's props, instead of the bands' slices… */
+  flat?: Raster;
+  /** …and which of its pixels its rivers cover now. */
+  river?: Uint8Array;
 }
 
 /** What painting the high lakes needs from the scene options. */
@@ -193,7 +206,9 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const frame = gridFrame(grid.cols, grid.rows, size);
   const terrain = createTerrainSampler(grid, size, opts.blend, seed);
   const flat = opts.relief.style === 'sprites';
-  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater);
+  // With a water model the flat map's rivers come and go with the water; otherwise they are painted into the ground.
+  const live = flat && !!opts.water?.wetness;
+  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater, !live);
   const { ground, heights } = t;
   const bandOf = t.rows.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
   const faces = { wall: opts.cliff, pool: opts.poolFace, pools: t.pool, falls: t.falls };
@@ -204,7 +219,7 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
 
   // On the flat map mountains are ridge sprites; rivers keep their cells free of them.
   const riverCells = new Set(t.rivers.flatMap((r) => r.cells));
-  const ridges = flat ? ridgeProps(grid, size, seed, riverCells) : [];
+  const ridges = flat ? ridgeProps(grid, size, seed, live ? new Set() : riverCells) : [];
   const toScene = (p: PropInstance) => {
     const [fx, fy] = [p.x + frame.ox, p.y + frame.oy];
     const iso = toIso({ x: fx, y: fy }, view);
@@ -222,7 +237,8 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
 
   const full = opts.highWater ?? [];
   const basins = flat ? findBasins(grid, full, t.rivers, frame, size) : [];
-  return paintLakes({ frame, view, hexSize: size, ground, heights, tiles, bands, grid, basins }, textures, opts, opts.water ?? { depth: full });
+  const wet = live ? wetLayer(grid.cols, grid.rows, frame, size, Uint8Array.from(t.rows, (r, i) => (r < 0 || t.open[i] ? 1 : 0)), seed) : undefined;
+  return paintLakes({ frame, view, hexSize: size, ground, heights, tiles, bands, grid, basins, wet }, textures, opts, opts.water ?? { depth: full });
 }
 
 const byDepth = (a: PropInstance, b: PropInstance) => a.y - b.y;
@@ -234,8 +250,10 @@ const byDepth = (a: PropInstance, b: PropInstance) => a.y - b.y;
  * rivers on the ground. The land is shared, not rebuilt, so this is quick
  * enough to play a simulation.
  */
-export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, { depth, flux, topo, ground }: SceneWater): Scene {
+export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, { depth, flux, topo, ground, wetness, river }: SceneWater): Scene {
   const { hexSize: size, view } = opts;
+  const now = scene.wet && wetness ? groundNow(scene, scene.wet, textures, { wetness, river, ground: ground ?? scene.grid.elevation }) : undefined;
+  const onRiver = (p: PropInstance) => !!now?.river[Math.floor(p.y) * scene.frame.width + Math.floor(p.x)];
   const kit = opts.lakes ?? placeholderLakeKit(size);
   const water = { cols: scene.grid.cols, rows: scene.grid.rows, ground: ground ?? scene.grid.elevation, depth };
   const lakes = scene.basins.flatMap((b) => lakesIn(b, water, scene.frame, size)).map(({ shape, basin }) => {
@@ -246,7 +264,7 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
   });
   const riders = lakes.map((): PropInstance[] => []);
   const bands = scene.bands.map((b) => {
-    const settled = settleProps(b.land, lakes.map((l) => l.surface), view.squash);
+    const settled = settleProps(now ? b.land.filter((p) => !onRiver(p)) : b.land, lakes.map((l) => l.surface), view.squash);
     settled.riders.forEach((r, k) => riders[k].push(...r));
     return { ...b, props: settled.kept };
   });
@@ -255,5 +273,14 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
     const band = bands[bandIndex(bands, footY)];
     band.props = [...band.props, { ...lakeProp(img, footY, view.squash), riders: riders[k].sort(byDepth) }].sort(byDepth);
   });
-  return { ...scene, bands };
+  return { ...scene, bands, flat: now?.ground, river: now?.river };
+}
+
+/** The flat map's ground as the water has it now: graded by wetness, with its rivers; high basins' water is drawn apart, so they at most look moist. */
+function groundNow(scene: Scene, wet: WetLayer, textures: GroundTextures, state: Parameters<typeof paintGroundWater>[2]) {
+  const basin = new Uint8Array(scene.grid.cols * scene.grid.rows);
+  for (const b of scene.basins) for (const i of b.cells) basin[i] = 1;
+  const { seed, frame, size } = wet;
+  const opts = { cap: (i: number) => (basin[i] ? WETNESS.moist : WETNESS.deep), water: (x: number, y: number) => texelAt(textures, x, y, seed, frame, size)('water') };
+  return paintGroundWater(scene.ground, wet, state, opts, scene.view.squash);
 }

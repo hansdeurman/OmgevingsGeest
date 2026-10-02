@@ -1,7 +1,9 @@
+import { channelStep, createChannels, type Channels } from './channels';
 import { DEFAULT_EROSION, erodeStep, type ErosionParams } from './erosion';
 import { hexTopology, type HexTopology } from './hexTopology';
 import { DEFAULT_FLOW, flowStep, type FlowParams } from './pipeFlow';
 import { soakMap, weatherStep, type Soak, type SoakMap, type Weather } from './retention';
+import { wetnessMap } from './wetness';
 
 /**
  * Water on a hex map: what stands on each hex, what flows through each pipe,
@@ -26,6 +28,8 @@ export interface HydroWorld {
   /** Ground carried by the water, and how hard each hex is to wear away (0–1). */
   sediment: Float32Array;
   hardness: Float32Array;
+  /** The rivers the water runs in, and the beds it has worn. */
+  channels: Channels;
 }
 
 export interface HydroInit {
@@ -34,24 +38,36 @@ export interface HydroInit {
   ground: ArrayLike<number>;
   soak: (i: number) => Soak;
   depth?: (i: number) => number;
+  /** Water the ground holds at the start (steps); dry if absent. */
+  soil?: (i: number) => number;
   snow?: (i: number) => number;
   hardness?: (i: number) => number;
   /** Pipes per hex: 6 (edges) or 12 (edges and corners). */
   dirs?: 6 | 12;
 }
 
-/** What a view needs of one moment: the water, the flow, the snow and the ground as worn so far. */
+/** What a view needs of one moment: the water, the flow, the snow, the ground as worn so far, how wet each hex is and its river. */
 export interface HydroSnapshot {
   depth: Float32Array;
   flux: Float32Array;
   snow: Float32Array;
   ground: Float32Array;
+  /** Per hex, on the WETNESS scale. */
+  wetness: Float32Array;
+  river: RiverState;
+}
+
+/** Per hex: water running through now, the flow its bed was worn for, and the hex the river runs on to (-1: none). */
+export interface RiverState {
+  flow: Float32Array;
+  bed: Float32Array;
+  down: Int32Array;
 }
 
 /** Flow rounds per step: water moves this many times per round of weather. */
 export const ROUNDS = 2;
 
-export function createHydroWorld({ cols, rows, ground, soak, depth, snow, hardness, dirs = 12 }: HydroInit): HydroWorld {
+export function createHydroWorld({ cols, rows, ground, soak, depth, soil, snow, hardness, dirs = 12 }: HydroInit): HydroWorld {
   const n = cols * rows;
   const topo = hexTopology(cols, rows, dirs);
   const edge = (i: number) => i % cols === 0 || i % cols === cols - 1 || i < cols || i >= n - cols;
@@ -62,10 +78,11 @@ export function createHydroWorld({ cols, rows, ground, soak, depth, snow, hardne
     soak: soakMap(Array.from({ length: n }, (_, i) => soak(i))),
     depth: Float32Array.from({ length: n }, (_, i) => depth?.(i) ?? 0),
     flux: new Float32Array(n * dirs),
-    soil: new Float32Array(n),
+    soil: Float32Array.from({ length: n }, (_, i) => soil?.(i) ?? 0),
     snow: Float32Array.from({ length: n }, (_, i) => snow?.(i) ?? 0),
     sediment: new Float32Array(n),
     hardness: Float32Array.from({ length: n }, (_, i) => hardness?.(i) ?? 0.5),
+    channels: createChannels(topo),
   };
 }
 
@@ -76,9 +93,21 @@ export function stepHydro(w: HydroWorld, weather: Weather, rounds = ROUNDS, flow
     flowStep(w.topo, w.ground, w.depth, w.flux, w.sink, flow);
     erodeStep(w.topo, w.ground, w.depth, w.flux, w.sediment, w.hardness, w.sink, erosion);
   }
+  channelStep(w.topo, w.ground, w.flux, w.sink, w.channels);
 }
 
-export const snapshot = (w: HydroWorld): HydroSnapshot => ({ depth: w.depth.slice(), flux: w.flux.slice(), snow: w.snow.slice(), ground: w.ground.slice() });
+export const snapshot = (w: HydroWorld): HydroSnapshot => ({
+  depth: w.depth.slice(),
+  flux: w.flux.slice(),
+  snow: w.snow.slice(),
+  ground: w.ground.slice(),
+  wetness: wetnessMap(w.soak.capacity, w.soil, w.depth, w.sink),
+  river: {
+    flow: w.channels.flow.slice(),
+    bed: w.channels.bed.slice(),
+    down: w.channels.down.slice(),
+  },
+});
 
 export function totalWater(depth: ArrayLike<number>): number {
   let sum = 0;

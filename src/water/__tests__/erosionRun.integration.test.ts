@@ -18,9 +18,9 @@ describe('years of water wearing the land (mountains, seed 2)', () => {
     expect(Math.min(...change)).toBeLessThan(-0.05);
   });
 
-  it('leaves most of the land as it was', () => {
+  it('leaves most of the land nearly as it was: autumn storms wear only a film off it', () => {
     const sorted = change.map(Math.abs).sort((a, b) => a - b);
-    expect(sorted[Math.floor(sorted.length / 2)]).toBeLessThan(0.01);
+    expect(sorted[Math.floor(sorted.length / 2)]).toBeLessThan(0.025);
   });
 
   it('wears gradually: nowhere more than a step in three years', () => {
