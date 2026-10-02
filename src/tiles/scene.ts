@@ -12,7 +12,6 @@ import { DEFAULT_WEATHER, lakeArt, lakeState, placeholderLakeKit, type LakeKit, 
 import { paintLake, type LakeImage } from './lakePainter';
 import { getPixel, type Raster } from './raster';
 import { findBasins, fullOutflow, lakeOutflow, lakesIn, settleProps, type Basin } from './waterLayer';
-import { riverSegments, type RiverSegment } from './riverLayer';
 import type { HexTopology } from '../water/hexTopology';
 import { sliceTerrain, type ReliefOptions, type Slice } from './relief';
 import { scatterProps, type PropInstance } from './scatter';
@@ -90,8 +89,6 @@ export interface SceneBand {
   props: PropInstance[];
   /** The props standing on the land, before any lake covers them. */
   land: PropInstance[];
-  /** Stretches of river on the ground here, in iso pixels; drawn over the terrain, under the props. */
-  rivers: RiverSegment[];
 }
 
 /**
@@ -195,13 +192,12 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const { hexSize: size, seed, view } = opts;
   const frame = gridFrame(grid.cols, grid.rows, size);
   const terrain = createTerrainSampler(grid, size, opts.blend, seed);
-  // On the flat map rivers come from the water model; the relief style paints them into the ground.
   const flat = opts.relief.style === 'sprites';
-  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater, !flat);
+  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater);
   const { ground, heights } = t;
   const bandOf = t.rows.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
   const faces = { wall: opts.cliff, pool: opts.poolFace, pools: t.pool, falls: t.falls };
-  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, faces).map((slice) => ({ slice, props: [], land: [], rivers: [] }));
+  const bands: SceneBand[] = sliceTerrain(ground, heights, bandOf, view.squash, faces).map((slice) => ({ slice, props: [], land: [] }));
 
   const tiles: TileDraw[] = [];
   forEachCell(grid, (cover, col, row, elevation) => tiles.push(tileDraw(grid, ground, heights, cover, col, row, elevation, opts, frame)));
@@ -252,13 +248,8 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
   const bands = scene.bands.map((b) => {
     const settled = settleProps(b.land, lakes.map((l) => l.surface), view.squash);
     settled.riders.forEach((r, k) => riders[k].push(...r));
-    return { ...b, props: settled.kept, rivers: [] as RiverSegment[] };
+    return { ...b, props: settled.kept };
   });
-  const cut = ground && Array.from(scene.grid.elevation, (e, i) => e - ground[i]);
-  for (const r of flux && topo ? riverSegments(topo, flux, depth, scene.frame, size, cut) : []) {
-    const iso = (p: Pixel) => ({ x: p.x, y: p.y * view.squash });
-    bands[bandIndex(bands, Math.max(r.from.y, r.via.y, r.to.y))].rivers.push({ ...r, from: iso(r.from), via: iso(r.via), to: iso(r.to) });
-  }
   lakes.forEach((img, k) => {
     const footY = img.surface.y0 + img.surface.height;
     const band = bands[bandIndex(bands, footY)];

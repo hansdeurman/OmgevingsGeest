@@ -3,7 +3,6 @@ import { rgbToCss } from '../rendering/palette';
 import type { Sprite, SpriteSet } from './placeholderSprites';
 import type { Raster } from './raster';
 import type { PropInstance } from './scatter';
-import type { RiverSegment } from './riverLayer';
 import type { Scene, SideFace, WallKind } from './scene';
 
 /** Scene → screen mapping: screen = offset + scene * scale. */
@@ -62,32 +61,6 @@ function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number):
   ctx.fill();
 }
 
-/** A river: the gully it has cut (widening with its cut), its wet banks, the water, a lighter current down its middle. */
-const RIVER: readonly { colour: (r: RiverSegment) => string; width: (r: RiverSegment) => number }[] = [
-  { colour: (r) => `rgba(84, 70, 54, ${Math.min(0.75, r.cut * 1.5)})`, width: (r) => r.width * (1.5 + 6 * Math.min(1, r.cut)) },
-  { colour: () => 'rgba(70, 82, 52, 0.35)', width: (r) => r.width * 1.5 },
-  { colour: () => 'rgb(58, 118, 156)', width: (r) => r.width },
-  { colour: () => 'rgba(150, 200, 226, 0.7)', width: (r) => r.width * 0.35 },
-];
-
-/** Stretches of river as curves, round at their ends so they join where they meet. */
-function drawRivers(ctx: CanvasRenderingContext2D, rivers: readonly RiverSegment[]): void {
-  if (!rivers.length) return;
-  ctx.save();
-  ctx.lineCap = 'round';
-  for (const layer of RIVER) {
-    for (const r of rivers) {
-      ctx.strokeStyle = layer.colour(r);
-      ctx.lineWidth = layer.width(r);
-      ctx.beginPath();
-      ctx.moveTo(r.from.x, r.from.y);
-      ctx.quadraticCurveTo(r.via.x, r.via.y, r.to.x, r.to.y);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-
 /**
  * Draws a Scene: the slab faces under the map first, then band by band, back
  * to front, each band's terrain slice followed by the props standing in it.
@@ -114,7 +87,6 @@ export class IsoRenderer {
     }
     scene.bands.forEach((band) => {
       ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
-      drawRivers(ctx, band.rivers);
       for (const p of band.props) this.drawProp(ctx, p);
     });
     if (opts.grid) for (const tile of scene.tiles) this.outline(ctx, tile.top);

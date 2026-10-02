@@ -8,7 +8,7 @@ import { BAND_ROWS, buildScene, paintLakes } from '../scene';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
-import { phaseEnd, runScript, seasonScript } from '../../water/waterScript';
+import { runScript, seasonScript } from '../../water/waterScript';
 import { hydroWorldOf } from '../mapHydro';
 import type { PropInstance } from '../scatter';
 
@@ -254,16 +254,5 @@ describe('buildScene (mountains, flat map, water from a simulation)', () => {
       const land = landOf(s);
       expect(land.length + riders.length).toBeLessThanOrEqual(landOf(paint(new Array(cells).fill(0))).length);
     }
-  });
-
-  it('draws rivers wherever the water runs, and none where it stands still', () => {
-    const rivers = (s: typeof scene) => s.bands.flatMap((b) => b.rivers);
-    const raining = states[phaseEnd(script, 'Spring rain')];
-    expect(rivers(paint(raining.depth, raining.flux)).length).toBeGreaterThan(5);
-    expect(rivers(paint(raining.depth))).toEqual([]);
-  });
-
-  it('paints no river into the ground of the flat map: they come and go with the water', () => {
-    expect(scene.bands.flatMap((b) => b.rivers)).toEqual([]);
   });
 });
