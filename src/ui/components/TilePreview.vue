@@ -156,10 +156,13 @@ async function rebuild(): Promise<void> {
   const textures = groundTextures();
   const reliefOptions = { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value };
   const start = performance.now();
-  const [base, groundDetail] = await Promise.all([
+  const painted = Promise.all([
     painters.base({ grid, textures, frame: gridFrame(grid.cols, grid.rows, HEX), size: HEX, seed: seed.value, relief: reliefOptions, blend: blend.value }),
     detail,
   ]);
+  // While the painters paint, run the water up to where the view opens.
+  const water = flat ? waterNow() : undefined;
+  const [base, groundDetail] = await painted;
   performance.measure('base', { start, end: performance.now() });
   if (token !== building) return;
   labels = map.labels;
@@ -171,7 +174,7 @@ async function rebuild(): Promise<void> {
       highWater: flat ? map.water : undefined,
       lakes: useArt.value ? artLakes : undefined,
       lakeSource: lakes.source,
-      water: flat ? waterNow() : undefined,
+      water,
       seed: seed.value,
       blend: blend.value,
       relief: reliefOptions,

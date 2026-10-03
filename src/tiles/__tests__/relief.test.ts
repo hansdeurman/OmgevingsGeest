@@ -55,6 +55,23 @@ describe('blurHeights', () => {
     expect(row[0]).toBeCloseTo(0, 6);
     expect(row[W - 1]).toBeCloseTo(1, 6);
   });
+
+  it('is two box blurs of the given radius along each axis, borders clamped', () => {
+    const [w, h] = [13, 9];
+    const at = (a: ArrayLike<number>, x: number, y: number) => a[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
+    const box = (a: ArrayLike<number>, dx: number, dy: number) =>
+      Float32Array.from({ length: w * h }, (_, i) => {
+        let sum = 0;
+        for (let k = -2; k <= 2; k++) sum += at(a, (i % w) + k * dx, Math.floor(i / w) + k * dy);
+        return sum / 5;
+      });
+    const start = Float32Array.from({ length: w * h }, (_, i) => Math.sin(i * 1.3) * 5 + (i % 7));
+    let expected: Float32Array = start;
+    for (let pass = 0; pass < 2; pass++) expected = box(box(expected, 1, 0), 0, 1);
+    const got = start.slice();
+    blurHeights(got, w, h, 2);
+    got.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 4));
+  });
 });
 
 describe('shadeSlopes', () => {
@@ -66,6 +83,20 @@ describe('shadeSlopes', () => {
     const r = flatGrey();
     shadeSlopes(r, new Float32Array(W * W));
     expect(getPixel(r, 4, 4)).toEqual([100, 100, 100, 255]);
+  });
+
+  it('lights each pixel by the slope across its neighbours, as the plain formula does', () => {
+    const heights = Float32Array.from({ length: W * W }, (_, i) => Math.sin(i * 0.7) * 4 + (i % W));
+    const r = flatGrey();
+    shadeSlopes(r, heights, 1.8);
+    const h = (x: number, y: number) => heights[Math.min(W - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))];
+    const light = [-0.62, 0.22, 0.75].map((v, _, a) => v / Math.hypot(...a)); // from the left, a little from the front, above
+    for (const [x, y] of [[0, 0], [4, 4], [8, 3], [2, 8]]) {
+      const [hx, hy] = [(h(x + 1, y) - h(x - 1, y)) / 2, (h(x, y + 1) - h(x, y - 1)) / 2];
+      const lit = (-hx * light[0] - hy * light[1] + light[2]) / Math.hypot(hx, hy, 1) / light[2];
+      const k = Math.min(1.35, Math.max(0.55, 1 + (lit - 1) * 1.8));
+      expect(getPixel(r, x, y)[0]).toBeCloseTo(Math.min(255, 100 * k), -0.5);
+    }
   });
 
   it('lights slopes facing the light (left) and darkens those facing away', () => {

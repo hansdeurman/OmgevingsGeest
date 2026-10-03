@@ -218,7 +218,8 @@ export class GroundGL {
       gl.bufferData(gl.ARRAY_BUFFER, Float32Array.of(0, 0, w, 0, 0, h, 0, h, w, 0, w, h), gl.STATIC_DRAW);
     }
     if (u.keep !== layer.keep) {
-      const keep = Uint8Array.from(layer.keep, (k) => k * 255);
+      const keep = new Uint8Array(layer.keep.length);
+      for (let i = 0; i < keep.length; i++) keep[i] = layer.keep[i] ? 255 : 0;
       this.texture('keep', gl.R8, base.width, base.height, gl.RED, gl.UNSIGNED_BYTE, keep, gl.NEAREST, gl.CLAMP_TO_EDGE);
     }
     if (u.detail !== layer.detail) {

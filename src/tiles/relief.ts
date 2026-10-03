@@ -55,15 +55,17 @@ export function ridgeNoise(x: number, y: number, size: number, seed: number): nu
 
 /** Box-blur along one axis, clamping at the borders. */
 function blurAxis(src: Float32Array, dst: Float32Array, W: number, H: number, r: number, horizontal: boolean): void {
-  const n = horizontal ? W : H;
-  const lines = horizontal ? H : W;
-  const at = (line: number, k: number) => (horizontal ? line * W + k : k * W + line);
-  for (let line = 0; line < lines; line++) {
+  // Along a line: element k at start + k * stride. Plain numbers: this runs for every pixel of the map, four times.
+  const [n, lines, stride, next] = horizontal ? [W, H, 1, W] : [H, W, W, 1];
+  const span = 2 * r + 1;
+  for (let line = 0, start = 0; line < lines; line++, start += next) {
     let sum = 0;
-    for (let k = -r; k <= r; k++) sum += src[at(line, clamp(k, 0, n - 1))];
+    for (let k = -r; k <= r; k++) sum += src[start + (k < 0 ? 0 : k > n - 1 ? n - 1 : k) * stride];
     for (let k = 0; k < n; k++) {
-      dst[at(line, k)] = sum / (2 * r + 1);
-      sum += src[at(line, Math.min(n - 1, k + r + 1))] - src[at(line, Math.max(0, k - r))];
+      dst[start + k * stride] = sum / span;
+      const add = k + r + 1 > n - 1 ? n - 1 : k + r + 1;
+      const drop = k - r < 0 ? 0 : k - r;
+      sum += src[start + add * stride] - src[start + drop * stride];
     }
   }
 }
@@ -113,18 +115,21 @@ const LIGHT = (() => {
 /** Darken or lighten each ground pixel by how its slope faces the light. Flat ground is unchanged. */
 export function shadeSlopes(ground: Raster, heights: Float32Array, strength = 1): void {
   const { width: W, height: H, data } = ground;
-  const h = (x: number, y: number) => heights[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)];
+  const [lx, ly, lz] = LIGHT;
   // Plain numbers in place: this runs for every pixel of the map.
   for (let y = 0; y < H; y++) {
+    const [up, down] = [(y > 0 ? y - 1 : 0) * W, (y < H - 1 ? y + 1 : H - 1) * W];
     for (let x = 0; x < W; x++) {
       const o = (y * W + x) * 4;
       if (!data[o + 3]) continue;
-      const hx = (h(x + 1, y) - h(x - 1, y)) / 2;
-      const hy = (h(x, y + 1) - h(x, y - 1)) / 2;
+      const hx = (heights[y * W + (x < W - 1 ? x + 1 : W - 1)] - heights[y * W + (x > 0 ? x - 1 : 0)]) / 2;
+      const hy = (heights[down + x] - heights[up + x]) / 2;
       if (hx === 0 && hy === 0) continue;
-      const lit = (-hx * LIGHT[0] - hy * LIGHT[1] + LIGHT[2]) / Math.hypot(hx, hy, 1) / LIGHT[2];
+      const lit = (-hx * lx - hy * ly + lz) / Math.sqrt(hx * hx + hy * hy + 1) / lz;
       const k = clamp(1 + (lit - 1) * strength, 0.55, 1.35);
-      for (let c = 0; c < 3; c++) data[o + c] = Math.max(0, Math.min(255, data[o + c] * k));
+      data[o] *= k; // the array clamps to 0–255
+      data[o + 1] *= k;
+      data[o + 2] *= k;
     }
   }
 }
