@@ -89,17 +89,26 @@ export function smoothPath(points: readonly Pixel[], iterations: number): Pixel[
  * vertically (the projected map), where the river is as much flatter.
  */
 export function riverStroke(points: readonly Pixel[], W: number, H: number, width: (t: number) => number, squash = 1): Map<number, number> {
-  const wet = new Map<number, number>();
-  const lengths = points.slice(1).map((p, k) => Math.hypot(p.x - points[k].x, p.y - points[k].y));
+  return strokeAlong(points, alongPath(points).map(width), W, H, squash);
+}
+
+/** How far along `points` (0–1) each point lies. */
+export function alongPath(points: readonly Pixel[]): number[] {
+  const lengths = points.map((p, k) => (k ? Math.hypot(p.x - points[k - 1].x, p.y - points[k - 1].y) : 0));
   const total = lengths.reduce((s, l) => s + l, 0) || 1;
   let done = 0;
-  lengths.forEach((len, k) => {
-    // Every pixel near this stretch, by its distance to it; the width runs on evenly along it.
+  return lengths.map((l) => (done += l) / total);
+}
+
+/** As riverStroke, the width given per point (px), running on evenly between points. */
+export function strokeAlong(points: readonly Pixel[], widths: ArrayLike<number>, W: number, H: number, squash = 1): Map<number, number> {
+  const wet = new Map<number, number>();
+  for (let k = 0; k + 1 < points.length; k++) {
+    // Every pixel near this stretch, by its distance to it.
     const [a, b] = [points[k], points[k + 1]];
-    const [r0, r1] = [width(done / total) / 2, width((done + len) / total) / 2];
-    done += len;
+    const [r0, r1] = [widths[k] / 2, widths[k + 1] / 2];
     const reach = Math.max(r0, r1);
-    if (reach <= 0) return;
+    if (reach <= 0) continue;
     const [dx, dy] = [b.x - a.x, b.y - a.y];
     const len2 = dx * dx + dy * dy || 1;
     const [y0, y1] = [Math.max(0, Math.floor((Math.min(a.y, b.y) - reach) * squash)), Math.min(H - 1, Math.floor((Math.max(a.y, b.y) + reach) * squash))];
@@ -117,7 +126,7 @@ export function riverStroke(points: readonly Pixel[], W: number, H: number, widt
         if (close > (wet.get(i) ?? 0)) wet.set(i, close);
       }
     }
-  });
+  }
   return wet;
 }
 

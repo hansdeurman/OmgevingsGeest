@@ -112,18 +112,19 @@ const LIGHT = (() => {
 
 /** Darken or lighten each ground pixel by how its slope faces the light. Flat ground is unchanged. */
 export function shadeSlopes(ground: Raster, heights: Float32Array, strength = 1): void {
-  const { width: W, height: H } = ground;
+  const { width: W, height: H, data } = ground;
   const h = (x: number, y: number) => heights[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)];
+  // Plain numbers in place: this runs for every pixel of the map.
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const [r, g, b, a] = getPixel(ground, x, y);
-      if (!a) continue;
+      const o = (y * W + x) * 4;
+      if (!data[o + 3]) continue;
       const hx = (h(x + 1, y) - h(x - 1, y)) / 2;
       const hy = (h(x, y + 1) - h(x, y - 1)) / 2;
       if (hx === 0 && hy === 0) continue;
       const lit = (-hx * LIGHT[0] - hy * LIGHT[1] + LIGHT[2]) / Math.hypot(hx, hy, 1) / LIGHT[2];
       const k = clamp(1 + (lit - 1) * strength, 0.55, 1.35);
-      setPixel(ground, x, y, shade([r, g, b], k), a);
+      for (let c = 0; c < 3; c++) data[o + c] = Math.max(0, Math.min(255, data[o + c] * k));
     }
   }
 }

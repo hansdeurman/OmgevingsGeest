@@ -53,11 +53,18 @@ function rasterCanvas(r: Raster): HTMLCanvasElement {
   return canvas;
 }
 
-/** Soft contact shadow, nudged right and down because light comes from the top-left. */
-function drawShadow(ctx: CanvasRenderingContext2D, foot: Pixel, radius: number): void {
-  ctx.fillStyle = 'rgba(30, 40, 20, 0.22)';
+const SHADOW = 'rgba(30, 40, 20, 0.22)';
+
+/** Soft contact shadows of `props`, nudged right and down because light comes from the top-left: one path, filled once. */
+function drawShadows(ctx: CanvasRenderingContext2D, shadows: readonly { foot: Pixel; radius: number }[]): void {
+  if (!shadows.length) return;
+  ctx.fillStyle = SHADOW;
   ctx.beginPath();
-  ctx.ellipse(foot.x + radius * 0.2, foot.y, radius, radius * 0.38, 0, 0, Math.PI * 2);
+  for (const { foot, radius } of shadows) {
+    const x = foot.x + radius * 0.2;
+    ctx.moveTo(x + radius, foot.y);
+    ctx.ellipse(x, foot.y, radius, radius * 0.38, 0, 0, Math.PI * 2);
+  }
   ctx.fill();
 }
 
@@ -70,28 +77,69 @@ export class IsoRenderer {
   /** Canvases per raster (terrain slices, painted lakes), shared by scenes that share the raster. */
   private readonly canvases = new WeakMap<Raster, HTMLCanvasElement>();
   private readonly patterns = new Map<HTMLImageElement, CanvasPattern>();
+  /** The flat map's faces and props as last drawn: redrawn only when they, or the view, change. */
+  private layer?: { canvas: HTMLCanvasElement; bands: Scene['bands']; tiles: Scene['tiles']; key: string };
 
   constructor(
     public sprites: SpriteSet,
     public walls: WallImages = {},
   ) {}
 
-  draw(ctx: CanvasRenderingContext2D, scene: Scene, t: ViewTransform, opts: { grid?: boolean } = {}): void {
+  /** `ground: false` leaves the ground out (it is drawn elsewhere, on the GPU, under this canvas). */
+  draw(ctx: CanvasRenderingContext2D, scene: Scene, t: ViewTransform, opts: { grid?: boolean; ground?: boolean } = {}): void {
+    const ground = opts.ground ?? true;
     ctx.save();
     ctx.translate(t.x, t.y);
     ctx.scale(t.scale, t.scale);
     ctx.lineWidth = 0.6;
     ctx.imageSmoothingQuality = 'high';
-    for (const tile of scene.tiles) {
-      for (const face of tile.faces) this.drawFace(ctx, scene.hexSize, face, FACE_SHADE[face.side]);
+    if (scene.flat) {
+      // Nothing is raised on the flat map: the ground, then everything on it, which mostly stays the same from frame to frame.
+      if (ground) ctx.drawImage(this.canvasOf(scene.flat), 0, 0);
+      const layer = this.layerOf(ctx, scene);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(layer, 0, 0);
+      ctx.restore();
+    } else {
+      this.drawFaces(ctx, scene);
+      scene.bands.forEach((band) => {
+        if (ground) ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
+        this.drawProps(ctx, band.props);
+      });
     }
-    if (scene.flat) ctx.drawImage(this.canvasOf(scene.flat), 0, 0);
-    scene.bands.forEach((band) => {
-      if (!scene.flat) ctx.drawImage(this.canvasOf(band.slice.raster), 0, band.slice.top);
-      for (const p of band.props) this.drawProp(ctx, p);
-    });
     if (opts.grid) for (const tile of scene.tiles) this.outline(ctx, tile.top);
     ctx.restore();
+  }
+
+  /** The flat map's faces and props, drawn with `ctx`'s view onto a canvas of its size, kept while they and the view stay. */
+  private layerOf(ctx: CanvasRenderingContext2D, scene: Scene): HTMLCanvasElement {
+    const m = ctx.getTransform();
+    const key = [ctx.canvas.width, ctx.canvas.height, m.a, m.d, m.e, m.f].join();
+    const l = this.layer;
+    if (l && l.bands === scene.bands && l.tiles === scene.tiles && l.key === key) return l.canvas;
+    const start = performance.now();
+    const canvas = l?.canvas ?? document.createElement('canvas');
+    [canvas.width, canvas.height] = [ctx.canvas.width, ctx.canvas.height];
+    const c = canvas.getContext('2d')!;
+    c.setTransform(m);
+    c.lineWidth = 0.6;
+    c.imageSmoothingQuality = 'high';
+    this.drawFaces(c, scene);
+    for (const band of scene.bands) this.drawProps(c, band.props);
+    this.layer = { canvas, bands: scene.bands, tiles: scene.tiles, key };
+    performance.measure('props layer', { start, end: performance.now() });
+    return canvas;
+  }
+
+  private drawFaces(ctx: CanvasRenderingContext2D, scene: Scene): void {
+    for (const tile of scene.tiles) for (const face of tile.faces) this.drawFace(ctx, scene.hexSize, face, FACE_SHADE[face.side]);
+  }
+
+  /** A band's props: their shadows first, in one go (far cheaper than one by one), then what casts them. */
+  private drawProps(ctx: CanvasRenderingContext2D, props: readonly PropInstance[]): void {
+    drawShadows(ctx, props.flatMap((p) => this.shadowOf(p)));
+    for (const p of props) this.drawProp(ctx, p);
   }
 
   private drawFace(ctx: CanvasRenderingContext2D, hexSize: number, face: SideFace, darken: number): void {
@@ -133,12 +181,19 @@ export class IsoRenderer {
     if (p.surface) {
       const { raster, x, y, height } = p.surface;
       ctx.drawImage(this.canvasOf(raster), x, y, raster.width, height);
+      drawShadows(ctx, (p.riders ?? []).flatMap((r) => this.shadowOf(r)));
       for (const r of p.riders ?? []) this.drawProp(ctx, r);
       return;
     }
     const { s, k } = this.sized(p);
-    if (s.shadow) drawShadow(ctx, p, s.shadow * k);
     ctx.drawImage(s.image, p.x - (s.width * k) / 2, p.y - s.height * k, s.width * k, s.height * k);
+  }
+
+  /** The contact shadow under a prop, if its sprite wants one. */
+  private shadowOf(p: PropInstance): { foot: Pixel; radius: number }[] {
+    if (p.surface) return [];
+    const { s, k } = this.sized(p);
+    return s.shadow ? [{ foot: p, radius: s.shadow * k }] : [];
   }
 
   private canvasOf(r: Raster): HTMLCanvasElement {

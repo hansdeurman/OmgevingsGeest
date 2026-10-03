@@ -3,8 +3,9 @@ import { shade, type RGB } from '../rendering/palette';
 import { forEachCell, inGrid, type CoverGrid } from './coverGrid';
 import { offsetNeighbours, pixelToOffset } from '../math/hex';
 import { frameCentre, gridFrame, isoSideFaces, isoTop, toIso, type GridFrame, type IsoView } from './geometry';
-import { composeTerrain, texelAt, type Cascade } from './groundComposer';
-import { paintGroundWater, wetLayer, type WetLayer } from './groundWater';
+import { composeTerrain, texelAt, type BaseTerrain, type Cascade } from './groundComposer';
+import type { GroundDetail } from './wetGround';
+import { onRiver, paintWaterLook, waterLook, wetLayer, type GroundWaterState, type RiverMask, type WaterLook, type WetLayer } from './groundWater';
 import type { Cover } from './levels';
 import type { GroundTextures } from './placeholderTextures';
 import { PROP_RULES, type PropRule } from './propRules';
@@ -48,6 +49,12 @@ export interface SceneOptions {
   water?: SceneWater;
   /** Where the high basins' lakes get painted: right away, if absent, or elsewhere (a worker). */
   lakeSource?: LakeSource;
+  /** The base terrain, if it was painted already (in workers, see basePool); painted here if absent. */
+  base?: BaseTerrain;
+  /** The ground's detail (puddle spots, cracks), if it was made already; made here if absent. */
+  detail?: GroundDetail;
+  /** The flat map's ground is graded by the water elsewhere (on the GPU, from the scene's `look`): only work out the look. */
+  groundElsewhere?: boolean;
 }
 
 /** The water on the map at one moment: per hex, and the flow per pipe (with the pipes it runs through). */
@@ -129,8 +136,12 @@ export interface Scene {
   lakes: { setup: LakeSetup; source: LakeSource };
   /** The flat map's ground as it is now, projected: drawn whole, under every band's props, instead of the bands' slices… */
   flat?: Raster;
-  /** …and which of its pixels its rivers cover now. */
-  river?: Uint8Array;
+  /** …and where its rivers run now… */
+  river?: RiverMask;
+  /** …and the water's look it was graded by (to grade it elsewhere). */
+  look?: WaterLook;
+  /** What the props were last settled around (which the rivers hide, the lakes): while that stays, so do the bands. */
+  settled?: { hidden: Uint8Array; lakes: LakeImage[]; bands: SceneBand[] };
 }
 
 /** A basin's water (steps) may move this much before its lake is painted anew: less does not show. */
@@ -139,7 +150,7 @@ export const LAKE_SETTLES = 0.02;
 const OUTFLOW_WEIGHT = 0.5;
 
 /** What painting the high lakes needs from the scene options. */
-export type LakeOptions = Pick<SceneOptions, 'hexSize' | 'view' | 'weather'>;
+export type LakeOptions = Pick<SceneOptions, 'hexSize' | 'view' | 'weather' | 'groundElsewhere'>;
 
 export const tileAt = (scene: Scene, col: number, row: number): TileDraw | undefined =>
   scene.tiles.find((t) => t.col === col && t.row === row);
@@ -219,9 +230,10 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
   const flat = opts.relief.style === 'sprites';
   // With a water model the flat map's rivers come and go with the water; otherwise they are painted into the ground.
   const live = flat && !!opts.water?.wetness;
-  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater, !live);
+  const t = composeTerrain(terrain, grid, textures, frame, size, seed, opts.relief, opts.highWater, !live, opts.base);
   const { ground, heights } = t;
-  const bandOf = t.rows.map((r, i) => (r < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS)));
+  const bandOf = new Int16Array(t.rows.length);
+  for (let i = 0; i < bandOf.length; i++) bandOf[i] = t.rows[i] < 0 ? -1 : Math.floor(Math.floor(i / frame.width) / BAND_ROWS);
   const faces = { wall: opts.cliff, pool: opts.poolFace, pools: t.pool, falls: t.falls };
   // The flat map raises nothing, so its ground is drawn whole, projected; only the relief style needs slices.
   const slices = flat ? flatSlices(bandOf, view.squash, frame.width) : sliceTerrain(ground, heights, bandOf, view.squash, faces);
@@ -250,7 +262,7 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
 
   const full = opts.highWater ?? [];
   const basins = flat ? findBasins(grid, full, t.rivers, frame, size) : [];
-  const wet = live ? wetLayer(grid.cols, grid.rows, frame, size, Uint8Array.from(t.rows, (r, i) => (r < 0 || t.open[i] ? 1 : 0)), seed) : undefined;
+  const wet = live ? wetLayer(grid.cols, grid.rows, frame, size, keepMask(t.rows, t.open), seed, opts.detail) : undefined;
   const projected = flat ? squashRaster(ground, view.squash) : undefined;
   const setup: LakeSetup = { cols: grid.cols, rows: grid.rows, frame, size, squash: view.squash, basins, kit: opts.lakes ?? placeholderLakeKit(size), rims: textures, floor: ground };
   const lakes = { setup, source: opts.lakeSource ?? syncLakes(LAKE_SETTLES) };
@@ -258,6 +270,13 @@ export function buildScene(grid: CoverGrid, textures: GroundTextures, opts: Scen
 }
 
 const byDepth = (a: PropInstance, b: PropInstance) => a.y - b.y;
+
+/** Pixels the water leaves alone: off the map and open water. */
+function keepMask(rows: Int16Array, open: Uint8Array): Uint8Array {
+  const keep = new Uint8Array(rows.length);
+  for (let i = 0; i < keep.length; i++) keep[i] = rows[i] < 0 || open[i] ? 1 : 0;
+  return keep;
+}
 
 /** Slices of the flat map: only where each band starts, its ground being drawn whole. */
 function flatSlices(bandOf: Int16Array, squash: number, width: number): Slice[] {
@@ -275,8 +294,10 @@ function flatSlices(bandOf: Int16Array, squash: number, width: number): Slice[] 
  */
 export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOptions, { depth, flux, topo, ground, wetness, river }: SceneWater): Scene {
   const { view } = opts;
-  const now = scene.wet && wetness ? groundNow(scene, scene.wet, textures, { wetness, river, ground: ground ?? scene.grid.elevation }) : undefined;
-  const onRiver = (p: PropInstance) => !!now?.river[Math.floor(p.y) * scene.frame.width + Math.floor(p.x)];
+  const look = scene.wet && wetness ? lookNow(scene, scene.wet, { wetness, river, ground: ground ?? scene.grid.elevation }) : undefined;
+  const flat = look && !opts.groundElsewhere ? paintLook(scene, scene.wet!, textures, look) : scene.flat;
+  // Which land props the rivers hide, in band order.
+  const hidden = Uint8Array.from(scene.bands.flatMap((b) => b.land), (p) => (look && onRiver(look.river, p.x, p.y) ? 1 : 0));
   const weather = opts.weather ?? DEFAULT_WEATHER;
   const cells = { ground: ground ?? scene.grid.elevation, depth };
   const tag = JSON.stringify(weather);
@@ -285,25 +306,42 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
     const job = { basin: k, ...cells, flux: topo && flux, dirs: topo?.dirs, weather };
     return scene.lakes.source(scene.lakes.setup, job, settled, tag);
   });
+  // Settling props costs: while the rivers' beds and the lakes are as before, the bands are too.
+  const was = scene.settled;
+  const unchanged = was && same(was.hidden, hidden) && same(was.lakes, lakes);
+  const bands = unchanged ? was.bands : settleBands(scene.bands, lakes, hidden, view.squash);
+  return { ...scene, bands, flat, river: look?.river, look, settled: { hidden, lakes, bands } };
+}
+
+/** The bands with their land props settled: those `hidden` (by rivers, in band order) left out, hidden under or riding on the lakes, which stand in the band of their foot. */
+function settleBands(land: readonly SceneBand[], lakes: readonly LakeImage[], hidden: Uint8Array, squash: number): SceneBand[] {
   const riders = lakes.map((): PropInstance[] => []);
-  const bands = scene.bands.map((b) => {
-    const settled = settleProps(now ? b.land.filter((p) => !onRiver(p)) : b.land, lakes.map((l) => l.surface), view.squash);
+  let next = 0;
+  const bands = land.map((b) => {
+    const shown = b.land.filter(() => !hidden[next++]);
+    const settled = settleProps(shown, lakes.map((l) => l.surface), squash);
     settled.riders.forEach((r, k) => riders[k].push(...r));
     return { ...b, props: settled.kept };
   });
-  lakes.forEach((img, k) => {
+  lakes.forEach((img, l) => {
     const footY = img.surface.y0 + img.surface.height;
     const band = bands[bandIndex(bands, footY)];
-    band.props = [...band.props, { ...lakeProp(img, footY, view.squash), riders: riders[k].sort(byDepth) }].sort(byDepth);
+    band.props = [...band.props, { ...lakeProp(img, footY, squash), riders: riders[l].sort(byDepth) }].sort(byDepth);
   });
-  return { ...scene, bands, flat: now?.ground ?? scene.flat, river: now?.river };
+  return bands;
 }
 
-/** The flat map's ground as the water has it now: graded by wetness, with its rivers; high basins' water is drawn apart, so they at most look moist. */
-function groundNow(scene: Scene, wet: WetLayer, textures: GroundTextures, state: Parameters<typeof paintGroundWater>[2]) {
+const same = <T,>(a: ArrayLike<T>, b: ArrayLike<T>) => a.length === b.length && Array.prototype.every.call(a, (v: T, i: number) => v === b[i]);
+
+/** The water's look on the flat map now; high basins' water is drawn apart, so they at most look moist. */
+function lookNow(scene: Scene, wet: WetLayer, state: GroundWaterState): WaterLook {
   const basin = new Uint8Array(scene.grid.cols * scene.grid.rows);
   for (const b of scene.basins) for (const i of b.cells) basin[i] = 1;
+  return waterLook(scene.ground.width, scene.ground.height, wet, state, (i) => (basin[i] ? WETNESS.moist : WETNESS.deep), scene.view.squash);
+}
+
+/** The flat map's ground graded by the water's look, with its rivers, projected. */
+function paintLook(scene: Scene, wet: WetLayer, textures: GroundTextures, look: WaterLook): Raster {
   const { seed, frame, size } = wet;
-  const opts = { cap: (i: number) => (basin[i] ? WETNESS.moist : WETNESS.deep), water: (x: number, y: number) => texelAt(textures, x, y, seed, frame, size)('water') };
-  return paintGroundWater(scene.ground, wet, state, opts, scene.view.squash);
+  return paintWaterLook(scene.ground, wet, look, (x, y) => texelAt(textures, x, y, seed, frame, size)('water'), scene.view.squash);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { paintRivers, riverCurve, riverPaths, type RiverPaint } from '../riverPaint';
+import { paintRivers, riverCurve, riverLines, riverPaths, type RiverPaint } from '../riverPaint';
 import { createRaster, getPixel, setPixel } from '../raster';
 import type { Pixel } from '../../math/hex';
 import type { RGB } from '../../rendering/palette';
@@ -103,5 +103,30 @@ describe('paintRivers', () => {
     const { mask } = paint([0, 0.1, 0.1, 0.1, 0, 0, 0, 0]);
     expect(mask.some((v) => v)).toBe(true);
     expect(mask[5 * W + 5]).toBe(0);
+  });
+});
+
+describe('riverLines', () => {
+  const SIZE = 20;
+  const centre = (i: number): Pixel => ({ x: 20 + i * 34, y: 40 });
+  const shape = (flow: number[]) => ({ centre, size: SIZE, seed: 1, bed, flow: Float32Array.from(flow), ground: new Float32Array(8) });
+  const [line] = riverLines([[0, 1, 2, 3, 4]], shape([0, 0.01, 0.01, 0.1, 0]));
+
+  it('follows the river\'s winding line', () => {
+    expect(line.points).toEqual(riverCurve([0, 1, 2, 3, 4], centre, SIZE, 1).points);
+    expect(line.bed).toHaveLength(line.points.length);
+    expect(line.water).toHaveLength(line.points.length);
+  });
+
+  it('widens the bed downstream, and the water with the flow, none where too little runs', () => {
+    expect(line.bed.at(-2)!).toBeGreaterThan(line.bed[1]);
+    expect(line.water[0]).toBe(0); // its spring carries nothing yet
+    expect(Math.max(...line.water)).toBeGreaterThan(0);
+  });
+
+  it('marks white water only where a running river drops steeply', () => {
+    expect(Math.max(...line.foam)).toBe(0);
+    const steep = riverLines([[0, 1, 2, 3, 4]], { ...shape([0, 0.1, 0.1, 0.1, 0]), ground: Float32Array.of(8, 8, 6, 4, 4, 0, 0, 0) })[0];
+    expect(Math.max(...steep.foam)).toBeGreaterThan(0.5);
   });
 });

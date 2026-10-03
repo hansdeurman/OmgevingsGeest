@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { DEMO_MAPS, demoMap, floodedGrid, type DemoMap, type MapLabel } from '../../tiles/demoMaps';
-import { frameCentre } from '../../tiles/geometry';
+import { ART_HEX, frameCentre, gridFrame } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
@@ -19,14 +19,20 @@ import { timed } from '../perf';
 import { hexSizeFor } from '../display';
 import { asyncLakes, type LakeReply } from '../../tiles/lakeSource';
 import { LAKE_SETTLES } from '../../tiles/scene';
+import { GroundGL } from '../../tiles/gl/groundGL';
+import { workerPainters } from '../../tiles/basePool';
 
 /** Hex radius: the map is painted at about the size it is shown at, far smaller on a phone. */
 const HEX = hexSizeFor(window.screen, window.location.search);
 const SQUASH = 0.65;
+const MAX_DPR = 2;
 const THICKNESS = 0.26 * HEX;
 
 const host = ref<HTMLDivElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
+/** Under the canvas: the flat map's ground, graded by the water on the GPU (unless ?gpu=0, or there is no WebGL2). */
+const groundCanvas = ref<HTMLCanvasElement | null>(null);
+let groundGl: GroundGL | undefined;
 const mapId = ref(DEMO_MAPS[0].id);
 const seed = ref(1);
 const blend = ref(0.6);
@@ -128,34 +134,59 @@ function lakeOptions(): LakeOptions {
   return {
     hexSize: HEX,
     view: { squash: SQUASH, thickness: THICKNESS },
+    groundElsewhere: !!groundGl,
     weather: { warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
   };
 }
 
-function rebuild(): void {
+/** Painters of the map's base terrain: workers side by side, as many as the device has cores to spare. */
+const PAINTERS = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+const baseWorkers = Array.from({ length: PAINTERS }, () => new Worker(new URL('../../tiles/baseWorker.ts', import.meta.url), { type: 'module' }));
+const painters = workerPainters(baseWorkers);
+/** The ground's detail for this hex size, made by a painter while the first map's ground is painted. */
+const detail = painters.detail(HEX / ART_HEX);
+/** The latest build asked for: an older one still painting is dropped when it comes in. */
+let building = 0;
+
+async function rebuild(): Promise<void> {
+  const token = ++building;
+  // The flat map draws the high basins' water apart, as the run has it; the relief style shows them full.
+  const flat = mountainStyle.value === 'sprites';
+  const grid = flat ? map.grid : floodedGrid(map.grid, map.water);
+  const textures = groundTextures();
+  const reliefOptions = { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value };
+  const start = performance.now();
+  const [base, groundDetail] = await Promise.all([
+    painters.base({ grid, textures, frame: gridFrame(grid.cols, grid.rows, HEX), size: HEX, seed: seed.value, relief: reliefOptions, blend: blend.value }),
+    detail,
+  ]);
+  performance.measure('base', { start, end: performance.now() });
+  if (token !== building) return;
   labels = map.labels;
   renderer.sprites = useArt.value ? { ...placeholderSprites, ...artSprites } : placeholderSprites;
   renderer.walls = useArt.value ? artWalls : {};
-  // The flat map draws the high basins' water apart, as the run has it; the relief style shows them full.
-  const flat = mountainStyle.value === 'sprites';
-  scene = timed('build', () => buildScene(flat ? map.grid : floodedGrid(map.grid, map.water), groundTextures(), {
-    ...lakeOptions(),
-    highWater: flat ? map.water : undefined,
-    lakes: useArt.value ? artLakes : undefined,
-    lakeSource: lakes.source,
-    water: flat ? waterNow() : undefined,
-    seed: seed.value,
-    blend: blend.value,
-    relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value },
-    cliff: useArt.value ? artCliff : undefined,
-    poolFace: useArt.value ? artPoolFace : undefined,
-  }));
+  scene = timed('build', () =>
+    buildScene(grid, textures, {
+      ...lakeOptions(),
+      highWater: flat ? map.water : undefined,
+      lakes: useArt.value ? artLakes : undefined,
+      lakeSource: lakes.source,
+      water: flat ? waterNow() : undefined,
+      seed: seed.value,
+      blend: blend.value,
+      relief: reliefOptions,
+      base,
+      detail: groundDetail,
+      cliff: useArt.value ? artCliff : undefined,
+      poolFace: useArt.value ? artPoolFace : undefined,
+    }),
+  );
   draw();
 }
 
-/** Only the water changed: repaint the lakes, keep the land. */
 function repaintWater(): void {
-  if (!scene || mountainStyle.value !== 'sprites') return;
+  // Not while a new map is still being built: the scene shown is of the old one.
+  if (!scene || mountainStyle.value !== 'sprites' || scene.grid !== map.grid) return;
   scene = timed('water paint', () => paintLakes(scene!, groundTextures(), lakeOptions(), waterNow() ?? { depth: map.water ?? [] }));
   draw();
 }
@@ -174,20 +205,34 @@ function drawLabels(ctx: CanvasRenderingContext2D, s: Scene, t: ViewTransform): 
   }
 }
 
+/** Size a canvas to its box in device pixels; only when that changed, as resizing clears and reallocates it. */
+function fit(el: HTMLCanvasElement, w: number, h: number, dpr: number): void {
+  const [cw, ch] = [Math.max(1, Math.floor(w * dpr)), Math.max(1, Math.floor(h * dpr))];
+  if (el.width !== cw || el.height !== ch) [el.width, el.height] = [cw, ch];
+}
+
 function draw(): void {
   const el = canvas.value;
   const box = host.value;
   if (!el || !box || !scene) return;
-  const dpr = window.devicePixelRatio || 1;
+  const s = scene;
+  // Sharper than 2 device px per CSS px is lost on the eye but not on the GPU: phones at 3 draw half as many pixels.
+  const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
   const { clientWidth: w, clientHeight: h } = box;
-  el.width = Math.max(1, Math.floor(w * dpr));
-  el.height = Math.max(1, Math.floor(h * dpr));
+  fit(el, w, h, dpr);
   const ctx = el.getContext('2d')!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const t = fitTransform(scene, w, h, 48);
-  timed('draw', () => renderer.draw(ctx, scene!, t, { grid: showGrid.value }));
-  drawLabels(ctx, scene, t);
+  const t = fitTransform(s, w, h, 48);
+  const onGpu = !!(groundGl && s.look && s.wet);
+  if (groundGl && groundCanvas.value) {
+    fit(groundCanvas.value, w, h, dpr);
+    const water = groundTextures().water[0];
+    if (onGpu) timed('ground', () => groundGl!.render(s.ground, s.wet!, s.look!, water, { scale: t.scale * dpr, x: t.x * dpr, y: t.y * dpr, squash: SQUASH }));
+    else groundGl.clear();
+  }
+  timed('draw', () => renderer.draw(ctx, s, t, { grid: showGrid.value, ground: !onGpu }));
+  drawLabels(ctx, s, t);
 }
 
 function newMap(): void {
@@ -197,6 +242,7 @@ function newMap(): void {
 }
 
 onMounted(() => {
+  if (groundCanvas.value && new URLSearchParams(window.location.search).get('gpu') !== '0') groundGl = GroundGL.create(groundCanvas.value);
   startRun();
   rebuild();
   Promise.all([loadGroundTextures(TEXTURE_FILES, textureSize(HEX)), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX), loadLakeKit(HEX)])
@@ -216,6 +262,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObs?.disconnect();
   lakeWorker.terminate();
+  baseWorkers.forEach((w) => w.terminate());
   stopPlaying();
 });
 
@@ -227,7 +274,7 @@ watch(showGrid, draw);
 
 <template>
   <div class="tiles">
-    <div ref="host" class="stage"><canvas ref="canvas" /></div>
+    <div ref="host" class="stage"><canvas ref="groundCanvas" /><canvas ref="canvas" /></div>
     <div class="controls">
       <label>
         Map
@@ -285,7 +332,7 @@ watch(showGrid, draw);
   background: radial-gradient(ellipse at 50% 40%, #23324a 0%, #0f1520 75%);
 }
 .stage { position: absolute; inset: 0; }
-canvas { display: block; width: 100%; height: 100%; }
+canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .controls {
   position: absolute;
   bottom: 12px;

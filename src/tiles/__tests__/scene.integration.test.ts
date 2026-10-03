@@ -5,6 +5,7 @@ import { frameCentre } from '../geometry';
 import { createPlaceholderTextures } from '../placeholderTextures';
 import { getPixel } from '../raster';
 import { BAND_ROWS, buildScene, paintLakes } from '../scene';
+import { onRiver } from '../groundWater';
 import { offsetNeighbours } from '../../math/hex';
 import { lakeHeight } from '../relief';
 import { lakeOutlets } from '../hydrology';
@@ -310,15 +311,21 @@ describe('buildScene (mountains, flat map, ground and rivers living with the wat
     const summers = states[phaseEnd(script, 'Dry summer')].river;
     const flowing = (r: typeof springs) => Array.from(r.flow).filter((f) => f > 0.02).length;
     expect(flowing(springs)).toBeGreaterThan(3 * flowing(summers));
-    expect(summer.river!.some((v) => v)).toBe(true);
+    expect(summer.river!.data.some((v) => v)).toBe(true);
+  });
+
+  it('keeps the props as they were settled while the rivers and lakes stay the same', () => {
+    const once = at(phaseEnd(script, 'Spring rain'));
+    const again = paintLakes(once, textures, { hexSize: SIZE, view }, stateAt(phaseEnd(script, 'Spring rain')));
+    expect(again.bands).toBe(once.bands);
+    expect(paintLakes(again, textures, { hexSize: SIZE, view }, stateAt(phaseEnd(script, 'Dry summer'))).bands).not.toBe(once.bands);
   });
 
   it('keeps props out of the rivers', () => {
     for (const s of [spring, summer]) {
       const land = s.bands.flatMap((b) => b.props).filter((p) => !p.surface);
-      const onRiver = land.filter((p) => s.river![Math.floor(p.y) * s.frame.width + Math.floor(p.x)]);
-      expect(s.river!.some((v) => v)).toBe(true);
-      expect(onRiver).toEqual([]);
+      expect(s.river!.data.some((v) => v)).toBe(true);
+      expect(land.filter((p) => onRiver(s.river!, p.x, p.y))).toEqual([]);
     }
   });
 });

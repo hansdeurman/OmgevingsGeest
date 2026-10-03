@@ -116,7 +116,7 @@ function lakeLevelNear(grid: CoverGrid, col: number, row: number, x: number, y: 
 }
 
 /** The painted ground plus, per pixel, the relief and the water on it. */
-interface BaseTerrain {
+export interface BaseTerrain {
   ground: Raster;
   /** Relief height in screen pixels: land with ridges, lakes flat at their level. */
   field: Float32Array;
@@ -129,7 +129,17 @@ interface BaseTerrain {
   open: Uint8Array;
 }
 
-function paintBase(
+/** The base terrain of the whole frame. */
+function paintBase(terrain: CoverField, grid: CoverGrid, textures: GroundTextures, frame: GridFrame, size: number, seed: number, relief: ReliefOptions): BaseTerrain {
+  return paintBaseRows(terrain, grid, textures, frame, size, seed, relief, 0, frame.height);
+}
+
+/**
+ * The base terrain of frame rows [y0, y1) only: rows can be painted apart
+ * (in workers, side by side) and joined after (joinBases); every pixel
+ * depends only on where it lies.
+ */
+export function paintBaseRows(
   terrain: CoverField,
   grid: CoverGrid,
   textures: GroundTextures,
@@ -137,8 +147,11 @@ function paintBase(
   size: number,
   seed: number,
   relief: ReliefOptions,
+  y0: number,
+  y1: number,
 ): BaseTerrain {
-  const { width: W, height: H } = frame;
+  const W = frame.width;
+  const H = y1 - y0;
   const ground = createRaster(W, H);
   const field = new Float32Array(W * H);
   const elevation = new Float32Array(W * H).fill(-Infinity);
@@ -149,17 +162,17 @@ function paintBase(
   // Heights blend wider than cover and only by elevation: smooth enough to take from a coarse grid.
   const heightBlend = hexBlend(grid.cols, grid.rows, frame, size, RELIEF_BLEND, 4);
   const heightField = blendField(heightBlend, grid.elevation);
-  for (let y = 0; y < H; y++) {
+  for (let y = y0; y < y1; y++) {
     for (let x = 0; x < W; x++) {
       const lx = x + 0.5 - frame.ox;
       const ly = y + 0.5 - frame.oy;
       const hex = pixelToOffset(lx, ly, size);
       if (!inGrid(grid, hex.col, hex.row)) continue;
-      const i = y * W + x;
+      const i = (y - y0) * W + x;
       rows[i] = hex.row;
       terrain.sample(lx, ly, a);
       const level = a.water > OPEN_WATER ? lakeLevelNear(grid, hex.col, hex.row, lx, ly, size) : undefined;
-      setPixel(ground, x, y, shadeGround(a, texelAt(textures, x, y, seed, frame, size)));
+      setPixel(ground, x, y - y0, shadeGround(a, texelAt(textures, x, y, seed, frame, size)));
 
       if (level !== undefined) {
         field[i] = lakeHeight(level, relief);
@@ -174,6 +187,30 @@ function paintBase(
     }
   }
   return { ground, field, elevation, rows, lake, open };
+}
+
+/** Bands of base terrain, top to bottom, as one. */
+export function joinBases(parts: readonly BaseTerrain[]): BaseTerrain {
+  const W = parts[0].ground.width;
+  const H = parts.reduce((h, p) => h + p.ground.height, 0);
+  const join = <T extends Float32Array | Int16Array | Uint8Array | Uint8ClampedArray>(make: (n: number) => T, pick: (p: BaseTerrain) => T, per = 1) => {
+    const out = make(W * H * per);
+    let at = 0;
+    for (const p of parts) {
+      const v = pick(p);
+      out.set(v as never, at);
+      at += v.length;
+    }
+    return out;
+  };
+  return {
+    ground: { width: W, height: H, data: join((n) => new Uint8ClampedArray(n), (p) => p.ground.data, 4) },
+    field: join((n) => new Float32Array(n), (p) => p.field),
+    elevation: join((n) => new Float32Array(n), (p) => p.elevation),
+    rows: join((n) => new Int16Array(n), (p) => p.rows),
+    lake: join((n) => new Uint8Array(n), (p) => p.lake),
+    open: join((n) => new Uint8Array(n), (p) => p.open),
+  };
 }
 
 /** Texture lookup at a frame pixel, with variants chosen by slowly varying noise. */
@@ -241,6 +278,7 @@ function raiseRelief(base: BaseTerrain, grid: CoverGrid, frame: GridFrame, size:
  * `water` is the water high basins hold when full (steps per cell), kept
  * apart from the map: rivers leave the basins as if they were full. Without
  * `rivers` their routes are found but not painted (a water model paints them).
+ * `painted` is the base terrain if it was painted already (in workers).
  */
 export function composeTerrain(
   terrain: CoverField,
@@ -252,9 +290,10 @@ export function composeTerrain(
   relief: ReliefOptions,
   water: ArrayLike<number> = [],
   rivers = true,
+  painted?: BaseTerrain,
 ): Terrain {
   const { width: W, height: H } = frame;
-  const base = paintBase(terrain, grid, textures, frame, size, seed, relief);
+  const base = painted ?? paintBase(terrain, grid, textures, frame, size, seed, relief);
   const routes = paintRivers(base, grid, textures, frame, size, seed, water, rivers);
   const flat = relief.style === 'sprites';
   const shown = flat

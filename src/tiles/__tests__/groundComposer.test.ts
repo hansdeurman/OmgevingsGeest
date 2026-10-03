@@ -4,7 +4,7 @@ import { coverAt } from '../coverGrid';
 import { demoMap, floodedGrid } from '../demoMaps';
 import type { CoverGrid } from '../coverGrid';
 import { gridFrame } from '../geometry';
-import { composeTerrain } from '../groundComposer';
+import { composeTerrain, joinBases, paintBaseRows } from '../groundComposer';
 import { createPlaceholderTextures } from '../placeholderTextures';
 import type { ReliefOptions } from '../relief';
 import { createTerrainSampler } from '../terrainSampler';
@@ -75,4 +75,22 @@ describe('composeTerrain (flat map)', () => {
     const changed = [...lines.ground.data.keys()].filter((k) => lines.ground.data[k] !== t.ground.data[k]);
     expect(changed.length).toBeGreaterThan(0);
   });
+});
+
+describe('paintBaseRows', () => {
+  it('paints in bands that, joined, are the whole ground exactly, so bands can be painted side by side', () => {
+    const textures = createPlaceholderTextures(32);
+    const terrain = createTerrainSampler(grid, SIZE, 0.6, 3);
+    const relief = { height: 30, style: 'sprites' as const };
+    const paint = (y0: number, y1: number) => paintBaseRows(terrain, grid, textures, frame, SIZE, 3, relief, y0, y1);
+    const whole = paint(0, frame.height);
+    const cut = [0, 17, 90, frame.height];
+    const joined = joinBases(cut.slice(1).map((y1, k) => paint(cut[k], y1)));
+    const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => Object.is(v, b[i]));
+    expect(joined.ground.height).toBe(frame.height);
+    for (const k of ['field', 'elevation', 'rows', 'lake', 'open'] as const) expect(same(joined[k], whole[k])).toBe(true);
+    expect(same(joined.ground.data, whole.ground.data)).toBe(true);
+    const t = composeTerrain(terrain, grid, textures, frame, SIZE, 3, relief, water, true, joined);
+    expect(same(t.ground.data, composeOn(grid, relief, water).ground.data)).toBe(true);
+  }, 60000);
 });

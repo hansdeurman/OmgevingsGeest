@@ -3,7 +3,7 @@ import { hash2 } from '../math/noise';
 import { clamp, piecewise, smoothstep } from '../math/scalar';
 import { mix, type RGB } from '../rendering/palette';
 import { getPixel, setPixel, type Raster } from './raster';
-import { CASCADE_DROP, rapidsFoam, riverStroke, smoothPath } from './rivers';
+import { CASCADE_DROP, alongPath, rapidsFoam, smoothPath, strokeAlong } from './rivers';
 
 /**
  * Rivers painted onto the ground from the water model's river beds (per
@@ -80,8 +80,8 @@ export function riverCurve(cells: readonly number[], centre: (i: number) => Pixe
   return { points: smoothPath(control, 3), along };
 }
 
-/** What painting rivers needs to know, per hex and per pixel. */
-export interface RiverPaint {
+/** Where rivers run and how much: per hex. */
+export interface RiverShape {
   centre: (i: number) => Pixel;
   size: number;
   seed: number;
@@ -89,6 +89,18 @@ export interface RiverPaint {
   bed: ArrayLike<number>;
   flow: ArrayLike<number>;
   ground: ArrayLike<number>;
+}
+
+/** A river as drawn: its winding line (frame px), and per point the width of its bed and of its water (px), and how white its water is. */
+export interface RiverLine {
+  points: Pixel[];
+  bed: Float32Array;
+  water: Float32Array;
+  foam: Float32Array;
+}
+
+/** What painting rivers onto pixels needs besides. */
+export interface RiverPaint extends RiverShape {
   /** Whether to leave pixel (x, y) as it is (open water). */
   keep: (x: number, y: number) => boolean;
   /** The water's own colour at a pixel. */
@@ -111,17 +123,12 @@ const RAPIDS_REACH = 0.8;
 
 const widthOf = ({ perRoot, min, max }: typeof BED_WIDTH, flow: number) => clamp(perRoot * Math.sqrt(flow), min, max);
 
-/** Paint `paths` onto `target`; returns which of its pixels the rivers' beds cover. */
-export function paintRivers(target: Raster, paths: readonly number[][], ctx: RiverPaint): Uint8Array {
-  const { width: W, height: H } = target;
-  const squash = ctx.squash ?? 1;
-  const mask = new Uint8Array(W * H);
-  for (const cells of paths) {
+/** The rivers along `paths` as lines to draw. */
+export function riverLines(paths: readonly number[][], ctx: RiverShape): RiverLine[] {
+  return paths.map((cells) => {
     const { points, along } = riverCurve(cells, ctx.centre, ctx.size, ctx.seed);
     const byHex = (value: (i: number) => number) => piecewise(cells.map((i, k) => [along[k], value(i)] as [number, number]));
-    const bedWidth = byHex((i) => widthOf(BED_WIDTH, ctx.bed[i]) * ctx.size);
-    const flow = byHex((i) => ctx.flow[i]);
-    const waterWidth = (t: number) => (flow(t) < TRICKLE ? 0 : widthOf(WATER_WIDTH, flow(t)) * ctx.size);
+    const [bed, flow] = [byHex((i) => widthOf(BED_WIDTH, ctx.bed[i]) * ctx.size), byHex((i) => ctx.flow[i])];
     const drops = cells
       .slice(1)
       .map((b, k) => [cells[k], b])
@@ -130,7 +137,29 @@ export function paintRivers(target: Raster, paths: readonly number[][], ctx: Riv
         const [p, q] = [ctx.centre(a), ctx.centre(b)];
         return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
       });
-    for (const [i, centre] of riverStroke(points, W, H, bedWidth, squash)) {
+    const reach = RAPIDS_REACH * ctx.size;
+    const t = alongPath(points);
+    return {
+      points,
+      bed: Float32Array.from(t, bed),
+      water: Float32Array.from(t, (u) => (flow(u) < TRICKLE ? 0 : widthOf(WATER_WIDTH, flow(u)) * ctx.size)),
+      foam: Float32Array.from(points, (p) => Math.max(0, ...drops.map((at) => smoothstep(reach, reach * 0.3, Math.hypot(p.x - at.x, p.y - at.y))))),
+    };
+  });
+}
+
+/** Paint `paths` onto `target`; returns which of its pixels the rivers' beds cover. */
+export function paintRivers(target: Raster, paths: readonly number[][], ctx: RiverPaint): Uint8Array {
+  return paintRiverLines(target, riverLines(paths, ctx), ctx);
+}
+
+/** Paint river `lines` onto `target`; returns which of its pixels their beds cover. */
+export function paintRiverLines(target: Raster, lines: readonly RiverLine[], ctx: Pick<RiverPaint, 'keep' | 'water' | 'squash' | 'seed' | 'size'>): Uint8Array {
+  const { width: W, height: H } = target;
+  const squash = ctx.squash ?? 1;
+  const mask = new Uint8Array(W * H);
+  for (const line of lines) {
+    for (const [i, centre] of strokeAlong(line.points, line.bed, W, H, squash)) {
       const [x, y] = [i % W, Math.floor(i / W)];
       if (ctx.keep(x, y)) continue;
       const [r, g, b] = getPixel(target, x, y);
@@ -139,15 +168,26 @@ export function paintRivers(target: Raster, paths: readonly number[][], ctx: Riv
       setPixel(target, x, y, mix([r, g, b], stones, smoothstep(0, 0.35, centre)));
       mask[i] = 1;
     }
-    for (const [i, centre] of riverStroke(points, W, H, waterWidth, squash)) {
+    const white = Math.max(...line.foam);
+    for (const [i, centre] of strokeAlong(line.points, line.water, W, H, squash)) {
       const [x, y] = [i % W, Math.floor(i / W)];
       if (ctx.keep(x, y)) continue;
       const [r, g, b] = getPixel(target, x, y);
-      const foam = Math.max(0, ...drops.map((at) => rapidsFoam(x, y / squash, at, RAPIDS_REACH * ctx.size)));
+      const foam = white > 0 ? foamAt(line, x, y / squash, ctx.size) : 0;
       const water = mix(mix(ctx.water(x, y), DEEP, 0.35 * centre), FOAM, foam * 0.8);
       setPixel(target, x, y, mix([r, g, b], water, smoothstep(0, 0.3, centre)));
       mask[i] = 1;
     }
   }
   return mask;
+}
+
+/** White water at frame point (x, y): the foam of the line's nearest point, broken into streaks. */
+function foamAt(line: RiverLine, x: number, y: number, size: number): number {
+  let [best, near] = [0, Infinity];
+  line.points.forEach((p, k) => {
+    const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+    if (d < near) [best, near] = [line.foam[k], d];
+  });
+  return best * rapidsFoam(x, y, { x, y }, size); // the streaks, at full strength
 }

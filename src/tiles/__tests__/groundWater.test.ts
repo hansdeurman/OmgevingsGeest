@@ -48,7 +48,7 @@ describe('paintGroundWater', () => {
   it('paints the rivers, full or dry, and tells where they run', () => {
     const dry = paint(even(WETNESS.normal));
     const [x, y] = middle(2, 1);
-    expect(dry.river.some((v) => v)).toBe(true);
+    expect(dry.river.data.some((v) => v)).toBe(true);
     expect(isWater(getPixel(dry.ground, x, y))).toBe(false);
     const running = paint(even(WETNESS.normal), { flow: 0.1 });
     const column = Array.from({ length: 2 * SIZE }, (_, k) => getPixel(running.ground, x, y - SIZE + k));
@@ -57,7 +57,7 @@ describe('paintGroundWater', () => {
 
   it('draws no river through water standing over it', () => {
     const { river } = paint(even(WETNESS.flooded), { flow: 0.1 });
-    expect(river.some((v) => v)).toBe(false);
+    expect(river.data.some((v) => v)).toBe(false);
   });
 
   it('paints the map projected, squashed as the view squashes it, rivers and all', () => {
@@ -66,12 +66,12 @@ describe('paintGroundWater', () => {
     const [x, y] = middle(2, 1);
     const column = Array.from({ length: SIZE }, (_, k) => getPixel(flat.ground, x, Math.round(y / 2) - SIZE / 2 + k));
     expect(column.some(isWater)).toBe(true);
-    expect(flat.river.length).toBe(flat.ground.width * flat.ground.height);
+    expect(flat.river.data.length).toBe(Math.ceil(flat.ground.width / flat.river.cell) * Math.ceil(flat.ground.height / flat.river.cell));
   });
 
   it('draws no river where the bed is worn too little', () => {
     const shallow = { ...river(0.1), bed: new Float32Array(n).fill(RIVER_BED * 0.9) };
     const { river: mask } = paintGroundWater(base, layer, { wetness: even(WETNESS.normal), river: shallow, ground: new Float32Array(n) }, { water: () => WATER });
-    expect(mask.some((v) => v)).toBe(false);
+    expect(mask.data.some((v) => v)).toBe(false);
   });
 });

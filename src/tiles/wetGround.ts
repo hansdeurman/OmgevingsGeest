@@ -33,8 +33,24 @@ type Look = keyof typeof LOOK;
 
 /** The looks tabled per 1/RES of a stage, so a pixel only looks them up. */
 const RES = 64;
+export const LOOK_RES = RES;
 const table = (look: Look) => Float32Array.from({ length: WETNESS.deep * RES + 1 }, (_, s) => LOOK[look](s / RES));
 const [STRAW, CRACKS, LIGHT, SATURATION, PUDDLES, SHOWN, DEEPNESS] = (['straw', 'cracks', 'light', 'saturation', 'puddles', 'water', 'deep'] as const).map(table);
+/**
+ * The looks as a texture for grading on the GPU: per 1/LOOK_RES of a stage,
+ * row 0 straw, cracks, light, saturation; row 1 puddles, water shown, deep.
+ */
+export function lookTable(): { width: number; data: Float32Array } {
+  const width = STRAW.length;
+  const rows = [
+    [STRAW, CRACKS, LIGHT, SATURATION],
+    [PUDDLES, SHOWN, DEEPNESS, new Float32Array(width)],
+  ];
+  const data = new Float32Array(width * 2 * 4);
+  rows.forEach((row, r) => row.forEach((values, k) => values.forEach((v, s) => (data[(r * width + s) * 4 + k] = v))));
+  return { width, data };
+}
+
 const stageIndex = (stage: number) => Math.round(clamp(stage, 0, WETNESS.deep) * RES);
 
 const DEEP: RGB = [22, 70, 110];
