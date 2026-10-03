@@ -8,6 +8,7 @@ import type { Raster } from './raster';
 import { makeSeamless } from './seamless';
 import type { WallStrip } from './wallStrip';
 import type { WaterKind } from './waterLook';
+import { ART_HEX } from './geometry';
 
 export type TextureFiles = Partial<Record<GroundKind, string[]>>;
 
@@ -20,8 +21,11 @@ export const TEXTURE_FILES: TextureFiles = {
   snow: ['snow-1.webp', 'snow-2.webp'],
 };
 
-/** Pixel size textures are scaled to; at hex radius 40 one texture spans ~2.3 hexes. */
+/** Pixel size textures are scaled to at hex radius ART_HEX (40): one texture spans ~2.3 hexes. */
 export const TEXTURE_SIZE = 160;
+
+/** Texture size for a map of hex radius `hexSize`, so a texture spans as many hexes at any size. */
+export const textureSize = (hexSize: number, size = TEXTURE_SIZE) => Math.round((size * hexSize) / ART_HEX);
 
 /** Wall art in public/tiles/: seamless left to right, seen from the front. */
 export const WALL_FILES: Record<keyof WallImages, string> = {
@@ -105,9 +109,10 @@ const mapValues = async <K extends string, V, R>(rec: Record<K, V>, f: (v: V) =>
 
 export async function loadLakeKit(hexSize: number): Promise<LakeKit> {
   const k = (LAKE_WALL_REPEAT * hexSize) / LAKE_WALL_ART;
+  const waterSize = Math.round((WATER_SIZE * hexSize) / ART_HEX);
   const [walls, water] = await Promise.all([
     mapValues(LAKE_WALLS, (m) => loadStrip(m, k)),
-    mapValues(WATER_FILES, async (f) => makeSeamless(await loadRaster(`${import.meta.env.BASE_URL}tiles/lake/${f}`, WATER_SIZE))),
+    mapValues(WATER_FILES, async (f) => makeSeamless(await loadRaster(`${import.meta.env.BASE_URL}tiles/lake/${f}`, waterSize))),
   ]);
   return { walls, water };
 }

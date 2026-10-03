@@ -16,8 +16,10 @@ function smootherstep(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
+const unwrapped = (i: number) => i;
+
 export function valueNoise2D(x: number, y: number, seed: number): number {
-  return latticeNoise(x, y, seed, (i) => i);
+  return latticeNoise(x, y, seed, unwrapped);
 }
 
 /**

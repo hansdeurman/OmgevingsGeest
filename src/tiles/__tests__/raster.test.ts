@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RGB } from '../../rendering/palette';
-import { getPixel, paintRaster, sampleRaster, sampleVariants } from '../raster';
+import { createRaster, getPixel, paintRaster, sampleRaster, sampleVariants, setPixel, squashRaster } from '../raster';
 
 const solid = (rgb: RGB) => paintRaster(4, 4, () => rgb);
 
@@ -35,5 +35,15 @@ describe('sampleVariants', () => {
     const mid = sampleVariants([red, blue], 0, 0, 0.5);
     expect(mid[0]).toBeCloseTo(100, 6);
     expect(mid[2]).toBeCloseTo(100, 6);
+  });
+});
+
+describe('squashRaster', () => {
+  it('squashes a raster vertically, each row showing the source row it falls on', () => {
+    const r = createRaster(2, 10);
+    for (let y = 0; y < 10; y++) setPixel(r, 0, y, [y * 20, 0, 0]);
+    const s = squashRaster(r, 0.5);
+    expect(s.height).toBe(5);
+    expect(getPixel(s, 0, 2)[0]).toBe(100); // row 2 shows source row 5
   });
 });

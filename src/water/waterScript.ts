@@ -38,15 +38,25 @@ export function pour(w: HydroWorld, amount: ArrayLike<number>): void {
   for (let i = 0; i < w.depth.length; i++) if (!w.sink[i]) w.depth[i] += amount[i];
 }
 
+/** Take step `k` (from 0) of the script on `world`: its phase's weather, after the phase's burst if it starts here. */
+export function stepScript(world: HydroWorld, script: WaterScript, k: number): void {
+  let start = 0;
+  for (const phase of script) {
+    if (k < start + phase.steps) {
+      if (k === start && phase.burst) pour(world, phase.burst);
+      stepHydro(world, phase);
+      return;
+    }
+    start += phase.steps;
+  }
+}
+
 /** Run the script on `world` (which it changes): index k of the result is the moment after k steps. */
 export function runScript(world: HydroWorld, script: WaterScript): HydroSnapshot[] {
   const states = [snapshot(world)];
-  for (const phase of script) {
-    for (let k = 0; k < phase.steps; k++) {
-      if (k === 0 && phase.burst) pour(world, phase.burst);
-      stepHydro(world, phase);
-      states.push(snapshot(world));
-    }
+  for (let k = 0; k < scriptLength(script); k++) {
+    stepScript(world, script, k);
+    states.push(snapshot(world));
   }
   return states;
 }

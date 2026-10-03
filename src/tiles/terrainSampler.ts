@@ -25,10 +25,12 @@ export function createTerrainSampler(grid: CoverGrid, size: number, blend: numbe
 
   function sample(x: number, y: number, out?: Amounts): Amounts {
     const a = field.sample(x, y, out);
-    FIELDS.forEach((f, i) => {
-      const n = fbm2D(x * scale, y * scale, noise[i]) - 0.5;
-      a[f] += n * 2 * WOBBLE[f] * smoothstep(0, 0.15, a[f]);
-    });
+    for (let i = 0; i < FIELDS.length; i++) {
+      const f = FIELDS[i];
+      const amount = a[f];
+      if (amount <= 0) continue; // no layer, no noise
+      a[f] = amount + (fbm2D(x * scale, y * scale, noise[i]) - 0.5) * 2 * WOBBLE[f] * smoothstep(0, 0.15, amount);
+    }
     return a;
   }
 

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { offsetToPixel } from '../../math/hex';
+import { offsetNeighbours, offsetToPixel, pixelToOffset } from '../../math/hex';
 import { createCoverGrid } from '../coverGrid';
 import { createCoverField } from '../coverField';
-import { MAX_ELEVATION } from '../levels';
+import { LAYERS, MAX_ELEVATION, levelAmount, type Level } from '../levels';
+import { coverAt, elevationAt, type CoverGrid } from '../coverGrid';
 
 const SIZE = 10;
 // Two hexes side by side: dry sand on the left, a full meadow on the right.
@@ -47,5 +48,34 @@ describe('createCoverField', () => {
     const out = { water: 9, grass: 9, trees: 9, alt: 9 };
     expect(field.sample(right.x, right.y, out)).toBe(out);
     expect(out.water).toBe(0);
+  });
+
+  it('is the Gaussian blend of a point\'s hex and its neighbours, exactly', () => {
+    // The plain formula, written out: the field must give the same, however it is computed.
+    const reference = (g: CoverGrid, size: number, blend: number, x: number, y: number) => {
+      const out = { water: 0, grass: 0, trees: 0, alt: 0 };
+      const { col, row } = pixelToOffset(x, y, size);
+      let total = 0;
+      for (const [c, r] of [[col, row], ...offsetNeighbours(row).map((d) => [col + d.dc, row + d.dr])]) {
+        const cover = coverAt(g, c, r);
+        if (!cover) continue;
+        const p = offsetToPixel(c, r, size);
+        const w = Math.exp(-((x - p.x) ** 2 + (y - p.y) ** 2) / (blend * size) ** 2);
+        total += w;
+        for (const l of LAYERS) out[l] += w * levelAmount(cover[l]);
+        out.alt += (w * elevationAt(g, c, r)) / MAX_ELEVATION;
+      }
+      if (total > 0) for (const k of [...LAYERS, 'alt'] as const) out[k] /= total;
+      return out;
+    };
+    const lvl = (k: number) => (k % 5) as Level;
+    const mixed = createCoverGrid(5, 4, (c, r) => ({ water: lvl(c * 3 + r), grass: lvl(c + r * 2), trees: lvl(c * r), elevation: (c * 7 + r * 3) % 9 }));
+    const f = createCoverField(mixed, SIZE, 0.6);
+    for (let y = -3; y < 60; y += 2.7) {
+      for (let x = -3; x < 90; x += 3.1) {
+        const [a, b] = [f.sample(x, y), reference(mixed, SIZE, 0.6, x, y)];
+        for (const k of ['water', 'grass', 'trees', 'alt'] as const) expect(a[k]).toBeCloseTo(b[k], 9);
+      }
+    }
   });
 });

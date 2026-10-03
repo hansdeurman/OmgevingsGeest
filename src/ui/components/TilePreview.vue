@@ -5,7 +5,7 @@ import { frameCentre } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
-import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadLakeKit, loadPoolFace, loadWalls } from '../../tiles/imageTextures';
+import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadLakeKit, loadPoolFace, loadWalls, textureSize } from '../../tiles/imageTextures';
 import type { LakeKit } from '../../tiles/highLakes';
 import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
@@ -13,10 +13,15 @@ import { createPlaceholderTextures, type GroundTextures } from '../../tiles/plac
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
 import { hydroWorldOf } from '../../tiles/mapHydro';
 import type { HexTopology } from '../../water/hexTopology';
-import type { HydroSnapshot } from '../../water/hydroWorld';
-import { phaseAt, phaseEnd, runScript, seasonScript, type WaterScript } from '../../water/waterScript';
+import { createWaterRun, type WaterRun } from '../../water/waterRun';
+import { phaseAt, phaseEnd, seasonScript, type WaterScript } from '../../water/waterScript';
+import { timed } from '../perf';
+import { hexSizeFor } from '../display';
+import { asyncLakes, type LakeReply } from '../../tiles/lakeSource';
+import { LAKE_SETTLES } from '../../tiles/scene';
 
-const HEX = 40;
+/** Hex radius: the map is painted at about the size it is shown at, far smaller on a phone. */
+const HEX = hexSizeFor(window.screen, window.location.search);
 const SQUASH = 0.65;
 const THICKNESS = 0.26 * HEX;
 
@@ -37,7 +42,7 @@ const wind = ref(25);
 const windDir = ref(30);
 const HEX_ROW = 1.5 * HEX * SQUASH;
 
-const placeholders = createPlaceholderTextures(128);
+const placeholders = createPlaceholderTextures(textureSize(HEX, 128));
 let art: Partial<GroundTextures> = {};
 const placeholderSprites = createPlaceholderSprites(HEX);
 let artSprites: Partial<SpriteSet> = {};
@@ -51,8 +56,8 @@ let labels: MapLabel[] = [];
 let resizeObs: ResizeObserver | null = null;
 let map: DemoMap = demoMap(mapId.value, seed.value);
 
-/** The scripted water run of the current map: every state, played back step by step. */
-let run: { script: WaterScript; states: HydroSnapshot[]; topo: HexTopology } | null = null;
+/** The scripted water run of the current map, played as it goes. */
+let run: { script: WaterScript; water: WaterRun; topo: HexTopology } | null = null;
 const step = ref(0);
 const steps = ref(0);
 const playing = ref(false);
@@ -68,9 +73,9 @@ function startRun(): void {
   if (water?.some((d) => d > 0)) {
     const world = hydroWorldOf(grid);
     const script = seasonScript(grid.cols, grid.rows, grid.elevation, water, YEARS);
-    run = { script, states: runScript(world, script), topo: world.topo };
+    run = { script, water: createWaterRun(world, script), topo: world.topo };
   } else run = null;
-  steps.value = run ? run.states.length - 1 : 0;
+  steps.value = run ? run.water.length : 0;
   step.value = run ? phaseEnd(run.script, 'Spring rain') + 20 : 0; // open just after the cloudburst, rivers running
 }
 
@@ -78,7 +83,7 @@ const phase = computed(() => (run && steps.value ? phaseAt(run.script, step.valu
 /** The water as the run has it now: what stands where and how it flows. */
 const waterNow = () => {
   if (!run) return undefined;
-  const { depth, flux, ground, wetness, river } = run.states[Math.min(step.value, steps.value)];
+  const { depth, flux, ground, wetness, river } = timed('water step', () => run!.water.at(step.value));
   return { depth, flux, ground, wetness, river, topo: run.topo };
 };
 
@@ -102,11 +107,27 @@ function togglePlay(): void {
 
 const groundTextures = () => (useArt.value ? { ...placeholders, ...art } : placeholders);
 
+/** High lakes are painted in a worker, so playing the water never waits on them; a new painting repaints the view. */
+const lakeWorker = new Worker(new URL('../../tiles/lakeWorker.ts', import.meta.url), { type: 'module' });
+const lakes = asyncLakes((request) => lakeWorker.postMessage(request), () => schedule(repaintWater), LAKE_SETTLES);
+lakeWorker.onmessage = ({ data }: MessageEvent<LakeReply>) => lakes.receive(data);
+
+/** Run `f` once on the next animation frame, however often asked before it. */
+const pending = new Set<() => void>();
+function schedule(f: () => void): void {
+  if (!pending.size)
+    requestAnimationFrame(() => {
+      const due = [...pending];
+      pending.clear();
+      due.forEach((g) => g());
+    });
+  pending.add(f);
+}
+
 function lakeOptions(): LakeOptions {
   return {
     hexSize: HEX,
     view: { squash: SQUASH, thickness: THICKNESS },
-    lakes: useArt.value ? artLakes : undefined,
     weather: { warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
   };
 }
@@ -117,23 +138,25 @@ function rebuild(): void {
   renderer.walls = useArt.value ? artWalls : {};
   // The flat map draws the high basins' water apart, as the run has it; the relief style shows them full.
   const flat = mountainStyle.value === 'sprites';
-  scene = buildScene(flat ? map.grid : floodedGrid(map.grid, map.water), groundTextures(), {
+  scene = timed('build', () => buildScene(flat ? map.grid : floodedGrid(map.grid, map.water), groundTextures(), {
     ...lakeOptions(),
     highWater: flat ? map.water : undefined,
+    lakes: useArt.value ? artLakes : undefined,
+    lakeSource: lakes.source,
     water: flat ? waterNow() : undefined,
     seed: seed.value,
     blend: blend.value,
     relief: { height: (relief.value / 100) * HEX_ROW, style: mountainStyle.value, contours: contours.value },
     cliff: useArt.value ? artCliff : undefined,
     poolFace: useArt.value ? artPoolFace : undefined,
-  });
+  }));
   draw();
 }
 
 /** Only the water changed: repaint the lakes, keep the land. */
 function repaintWater(): void {
   if (!scene || mountainStyle.value !== 'sprites') return;
-  scene = paintLakes(scene, groundTextures(), lakeOptions(), waterNow() ?? { depth: map.water ?? [] });
+  scene = timed('water paint', () => paintLakes(scene!, groundTextures(), lakeOptions(), waterNow() ?? { depth: map.water ?? [] }));
   draw();
 }
 
@@ -163,7 +186,7 @@ function draw(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const t = fitTransform(scene, w, h, 48);
-  renderer.draw(ctx, scene, t, { grid: showGrid.value });
+  timed('draw', () => renderer.draw(ctx, scene!, t, { grid: showGrid.value }));
   drawLabels(ctx, scene, t);
 }
 
@@ -176,7 +199,7 @@ function newMap(): void {
 onMounted(() => {
   startRun();
   rebuild();
-  Promise.all([loadGroundTextures(TEXTURE_FILES), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX), loadLakeKit(HEX)])
+  Promise.all([loadGroundTextures(TEXTURE_FILES, textureSize(HEX)), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX), loadLakeKit(HEX)])
     .then(([textures, sprites, walls, cliff, poolFace, lakes]) => {
       art = textures;
       artSprites = sprites;
@@ -192,6 +215,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   resizeObs?.disconnect();
+  lakeWorker.terminate();
   stopPlaying();
 });
 

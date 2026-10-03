@@ -246,6 +246,16 @@ describe('buildScene (mountains, flat map, water from a simulation)', () => {
     expect(area(paint(lower))).toBeLessThan(area(scene));
   });
 
+  it('reuses a lake\'s painting while its water barely changes, and paints it anew once it does', () => {
+    const rasters = (s: typeof scene) => lakesOf(s).map((p) => p.surface!.raster);
+    const before = rasters(paint(water!));
+    const nudged = rasters(paint(water!.map((d) => (d > 0 ? d + 0.005 : d))));
+    expect(nudged.length).toBe(before.length);
+    expect(nudged.every((r, k) => r === before[k])).toBe(true); // the very same paintings
+    const lower = rasters(paint(water!.map((d) => Math.max(0, d - 0.3))));
+    expect(lower.some((r) => before.includes(r))).toBe(false);
+  });
+
   it('stands every prop it keeps on dry land, and lifts the ones on a lake to its height', () => {
     for (const k of [40, 120, 200, 230, 300, 440]) {
       const s = paint(states[k].depth);

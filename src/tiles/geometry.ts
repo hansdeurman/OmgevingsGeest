@@ -11,6 +11,9 @@ export interface IsoView {
   thickness: number;
 }
 
+/** Hex radius (px) at which textures and ground detail have their native size; at other sizes they scale along. */
+export const ART_HEX = 40;
+
 /** Top-down pixel frame of a grid; (ox, oy) is where hex (0,0)'s centre lands. */
 export interface GridFrame {
   width: number;

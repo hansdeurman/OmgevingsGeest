@@ -123,27 +123,31 @@ const PUDDLE_CELLS = [12, 24, 48];
 const CRACK_CELL = 12;
 const CRACK_WIDTH = 0.6;
 
-export function groundDetail(seed: number, size = 512): GroundDetail {
+/** The detail tile for a map drawn at `scale` times the art's native size (so blobs and cracks keep their size per hex). */
+export function groundDetail(seed: number, size = 512, scale = 1): GroundDetail {
+  const puddleCells = PUDDLE_CELLS.map((c) => Math.max(1, Math.round(c / scale)));
+  const cells = Math.max(1, Math.round(size / (CRACK_CELL * scale)));
+  const crackCell = size / cells;
+  const crackWidth = Math.max(0.45, CRACK_WIDTH * scale);
   const n = size * size;
   // Puddles: smooth noise, its values spread evenly so a share of the spots is that share of the ground.
   const noise = Float32Array.from({ length: n }, (_, i) => {
     const [x, y] = [i % size, Math.floor(i / size)];
-    return PUDDLE_CELLS.reduce((s, cells, k) => s + tileableValueNoise2D((x * cells) / size, (y * cells) / size, cells, seed + k) / 2 ** k, 0);
+    return puddleCells.reduce((s, cells, k) => s + tileableValueNoise2D((x * cells) / size, (y * cells) / size, cells, seed + k) / 2 ** k, 0);
   });
   const rank = Uint32Array.from({ length: n }, (_, i) => i).sort((a, b) => noise[a] - noise[b]);
   const puddle = new Uint8Array(n);
   rank.forEach((i, k) => (puddle[i] = Math.floor((k / n) * 256)));
   // Cracks: the borders of wobbly cells around scattered points.
-  const cells = size / CRACK_CELL;
   const point = (cx: number, cy: number) => {
     const [wx, wy] = [((cx % cells) + cells) % cells, ((cy % cells) + cells) % cells];
-    return [(cx + hash2(wx, wy, seed + 7)) * CRACK_CELL, (cy + hash2(wx, wy, seed + 8)) * CRACK_CELL];
+    return [(cx + hash2(wx, wy, seed + 7)) * crackCell, (cy + hash2(wx, wy, seed + 8)) * crackCell];
   };
   const crack = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     const wobble = (k: number) => (tileableValueNoise2D(((i % size) * cells) / size / 2, (Math.floor(i / size) * cells) / size / 2, cells / 2, seed + k) - 0.5) * 6;
     const [x, y] = [(i % size) + wobble(20), Math.floor(i / size) + wobble(21)];
-    const [cx, cy] = [Math.floor(x / CRACK_CELL), Math.floor(y / CRACK_CELL)];
+    const [cx, cy] = [Math.floor(x / crackCell), Math.floor(y / crackCell)];
     let [f1, f2] = [Infinity, Infinity];
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -153,7 +157,7 @@ export function groundDetail(seed: number, size = 512): GroundDetail {
         else if (d < f2) f2 = d;
       }
     }
-    crack[i] = Math.round(255 * smoothstep(CRACK_WIDTH * 2, 0, f2 - f1));
+    crack[i] = Math.round(255 * smoothstep(crackWidth * 2, 0, f2 - f1));
   }
   return { size, puddle, crack };
 }

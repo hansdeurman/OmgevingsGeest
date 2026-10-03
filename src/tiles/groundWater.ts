@@ -1,7 +1,7 @@
 import type { RGB } from '../rendering/palette';
 import type { RiverState } from '../water/hydroWorld';
 import { WETNESS } from '../water/wetness';
-import { frameCentre, type GridFrame } from './geometry';
+import { ART_HEX, frameCentre, type GridFrame } from './geometry';
 import { blendField, hexBlend, sampleField, type HexBlend } from './hexField';
 import { createRaster, type Raster } from './raster';
 import { paintRivers, riverPaths } from './riverPaint';
@@ -44,12 +44,12 @@ export const RIVER_BED = 0.04;
 /** …except where water stands over it this wet: the river runs into the lake. */
 const UNDER_WATER = 4.5;
 
-/** The ground's detail is the same on every map. */
-let detailCache: GroundDetail | undefined;
+/** The ground's detail is the same on every map drawn at one hex size. */
+const details = new Map<number, GroundDetail>();
+const detailFor = (size: number) => details.get(size) ?? details.set(size, groundDetail(1, 512, size / ART_HEX)).get(size)!;
 
 export function wetLayer(cols: number, rows: number, frame: GridFrame, size: number, keep: Uint8Array, seed: number): WetLayer {
-  detailCache ??= groundDetail(1);
-  return { cols, rows, frame, size, seed, blend: hexBlend(cols, rows, frame, size), detail: detailCache, keep };
+  return { cols, rows, frame, size, seed, blend: hexBlend(cols, rows, frame, size), detail: detailFor(size), keep };
 }
 
 /**

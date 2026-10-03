@@ -2,7 +2,8 @@ import { offsetNeighbours, offsetToPixel, pixelToOffset } from '../math/hex';
 import { valueNoise2D } from '../math/noise';
 import { smoothstep } from '../math/scalar';
 import { coverAt, elevationAt, inGrid, type CoverGrid } from './coverGrid';
-import { createCoverField, type CoverField } from './coverField';
+import type { CoverField } from './coverField';
+import { blendField, hexBlend, sampleField } from './hexField';
 import type { GridFrame } from './geometry';
 import { shadeGround, type GroundKind, type TexelLookup } from './groundShader';
 import { MAX_ELEVATION, zeroAmounts } from './levels';
@@ -145,8 +146,9 @@ function paintBase(
   const lake = new Uint8Array(W * H);
   const open = new Uint8Array(W * H);
   const a = zeroAmounts();
-  const r = zeroAmounts();
-  const reliefField = createCoverField(grid, size, RELIEF_BLEND);
+  // Heights blend wider than cover and only by elevation: smooth enough to take from a coarse grid.
+  const heightBlend = hexBlend(grid.cols, grid.rows, frame, size, RELIEF_BLEND, 4);
+  const heightField = blendField(heightBlend, grid.elevation);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const lx = x + 0.5 - frame.ox;
@@ -166,7 +168,7 @@ function paintBase(
         lake[i] = field[i] > 0 ? 1 : 0;
         continue;
       }
-      const e = reliefField.sample(lx, ly, r).alt * MAX_ELEVATION;
+      const e = sampleField(heightBlend, heightField, x + 0.5, y + 0.5);
       field[i] = terrainHeight(e, e > MOUNTAIN_FROM - 0.5 ? ridgeNoise(lx, ly, size, seed) : 0.5, relief);
       elevation[i] = e;
     }

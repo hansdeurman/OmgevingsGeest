@@ -53,3 +53,14 @@ export function sampleVariants(variants: readonly Raster[], x: number, y: number
   if (k >= 1) return sampleRaster(variants[i + 1], x, y);
   return mix(sampleRaster(variants[i], x, y), sampleRaster(variants[i + 1], x, y), k);
 }
+
+/** `r` squashed vertically by `squash` (0–1), as the view projects the map: each row shows the source row it falls on. */
+export function squashRaster(r: Raster, squash: number): Raster {
+  const out = createRaster(r.width, Math.ceil(r.height * squash));
+  const row = r.width * 4;
+  for (let y = 0; y < out.height; y++) {
+    const from = Math.min(r.height - 1, Math.floor((y + 0.5) / squash));
+    out.data.set(r.data.subarray(from * row, (from + 1) * row), y * row);
+  }
+  return out;
+}

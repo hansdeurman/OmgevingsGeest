@@ -109,6 +109,29 @@ export const snapshot = (w: HydroWorld): HydroSnapshot => ({
   },
 });
 
+/** What changes as a world runs, copied out, so it can be set back to this moment. */
+export interface WorldState {
+  arrays: Float32Array[];
+  channels: { flow: Float32Array; bed: Float32Array; down: Int32Array; order: Int32Array; age: number };
+}
+
+const changing = (w: HydroWorld) => [w.ground, w.depth, w.flux, w.soil, w.snow, w.sediment];
+
+export const saveWorld = (w: HydroWorld): WorldState => ({
+  arrays: changing(w).map((a) => a.slice()),
+  channels: { flow: w.channels.flow.slice(), bed: w.channels.bed.slice(), down: w.channels.down.slice(), order: w.channels.order.slice(), age: w.channels.age },
+});
+
+/** Set `w` back to a moment saved from it. */
+export function restoreWorld(w: HydroWorld, state: WorldState): void {
+  changing(w).forEach((a, k) => a.set(state.arrays[k]));
+  const { flow, bed, down, order, age } = state.channels;
+  w.channels.flow.set(flow);
+  w.channels.bed.set(bed);
+  w.channels.down.set(down);
+  Object.assign(w.channels, { order: order.slice(), age });
+}
+
 export function totalWater(depth: ArrayLike<number>): number {
   let sum = 0;
   for (let i = 0; i < depth.length; i++) sum += depth[i];

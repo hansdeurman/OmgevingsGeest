@@ -205,6 +205,19 @@ export function lakeOutflow(shape: LakeShape, topo: HexTopology, flux: Float32Ar
   return { amount, at: most.at };
 }
 
+/** Water leaving a basin's `cells` per step: what runs out of them, less what runs back in, through pipes to other hexes. */
+export function basinOutflow(topo: HexTopology, flux: Float32Array, cells: readonly number[]): number {
+  const inside = new Set(cells);
+  let out = 0;
+  for (const i of cells) {
+    for (let d = 0; d < topo.dirs; d++) {
+      const j = pipeTarget(topo, i, d);
+      if (j >= 0 && !inside.has(j)) out += flux[i * topo.dirs + d] - flux[j * topo.dirs + opposite(d)];
+    }
+  }
+  return Math.max(0, out);
+}
+
 /** The outflow of a full basin when no water model says otherwise: it pours out where its river leaves once the lake reaches its overflow level. */
 export function fullOutflow(shape: LakeShape, basin: Basin): Outflow {
   return shape.top >= basin.full - FULL_WITHIN && basin.outlet ? { amount: STILL_POURING, at: basin.outlet } : { amount: 0 };

@@ -63,7 +63,7 @@ export function lakeState(shape: LakeShape, weather: Weather, outflow: Outflow =
 }
 
 /** The art for one lake: rock in the style of its height, its rim from the ground art. */
-export function lakeArt(kit: LakeKit, level: number, ground: GroundTextures): LakeArt {
+export function lakeArt(kit: LakeKit, level: number, ground: Pick<GroundTextures, 'snow' | 'rock'>): LakeArt {
   const style = wallStyle(level);
   return { wall: kit.walls[style], rim: (style === 'snowy' ? ground.snow : ground.rock)[0], water: kit.water };
 }
