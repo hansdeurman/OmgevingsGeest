@@ -44,7 +44,7 @@ describe('createDeck', () => {
   it('drifts its puffs with the wind, smoothly between steps', () => {
     const deck = createDeck(map, 1);
     const cloud = patch(0.1);
-    deck.reset(sky(cloud));
+    deck.reset(sky(cloud, { x: 0.3, y: 0 }));
     const before = deck.puffs.map((p) => ({ x: p.x, y: p.y }));
     deck.update(sky(cloud, { x: 0.3, y: 0 }), 0.5);
     deck.puffs.slice(0, before.length).forEach((p, k) => {
@@ -94,6 +94,37 @@ describe('createDeck', () => {
     const before = deck.puffs.map((p) => p.x);
     deck.update({ ...sky(cloud), windX }, 1);
     deck.puffs.slice(0, before.length).forEach((p, k) => expect(Math.sign(p.x - before[k])).toBe(before[k] < centreOf(8, 6).x ? 1 : -1));
+  });
+
+  it('glides: a puff takes up a change of wind gradually, not at once', () => {
+    const deck = createDeck(map, 1);
+    const cloud = patch(0.1);
+    deck.reset(sky(cloud));
+    const p = deck.puffs[0];
+    const x0 = p.x;
+    deck.update(sky(cloud, { x: 0.3, y: 0 }), 0.1);
+    expect(p.x - x0).toBeGreaterThan(0);
+    expect(p.x - x0).toBeLessThan(0.3 * map.spacing * 0.1 * 0.5);
+    for (let k = 0; k < 40; k++) deck.update(sky(cloud, { x: 0.3, y: 0 }), 0.25);
+    expect(p.vx).toBeCloseTo(0.3 * map.spacing, 1);
+  });
+
+  it('feels the wind blended over the hexes around it, so crossing a hex edge it does not lurch', () => {
+    // Wind east, half as strong in the eastern half of the map: a puff crossing over speeds down smoothly.
+    const windX = Float32Array.from({ length: n }, (_, i) => (i % cols < 8 ? 0.3 : 0.15));
+    const field = { ...sky(patch(0.1, (c, r) => c === 5 && r === 6)), windX };
+    const deck = createDeck(map, 1);
+    deck.reset(field);
+    const p = deck.puffs[0];
+    for (let k = 0; k < 20; k++) deck.update(field, 0.25); // settled into the western wind
+    const speeds: number[] = [];
+    for (let k = 0; k < 60 && p.x < centreOf(11, 6).x; k++) {
+      deck.update(field, 0.25);
+      speeds.push(p.vx);
+    }
+    const jumps = speeds.slice(1).map((v, k) => Math.abs(v - speeds[k]));
+    expect(Math.max(...jumps)).toBeLessThan(0.15 * map.spacing * 0.2);
+    expect(speeds.at(-1)!).toBeLessThan(speeds[0]);
   });
 
   it('lets puffs that drift off the map fade', () => {

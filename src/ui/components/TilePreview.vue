@@ -17,6 +17,7 @@ import { createRun, type Run } from '../../water/waterRun';
 import { seasonOf, YEAR } from '../../water/sun';
 import { createWaterCycle, cycleModel, defaultClimate, type CycleSnapshot } from '../../water/waterCycle';
 import { CLIMATE_SETTINGS, climateReadout, setValue, valueOf, type ClimateSetting } from '../climateSettings';
+import { drawWind, windArrows } from '../windOverlay';
 import { createDeck, deckMap, type CloudDeck, type SkyField } from '../../clouds/cloudDeck';
 import { CloudGL, type SkyLook } from '../../clouds/cloudGL';
 import { cloudAtlas } from '../../clouds/cloudSprites';
@@ -84,7 +85,7 @@ const firstStep = ref(0);
 const runs = ref(0);
 const playing = ref(false);
 /** Steps played per second; when painting a step takes longer, playback skips ahead rather than slowing down. */
-const speed = ref(12);
+const speed = ref(8);
 /** The run starts in spring with its high lakes full; the view opens at midsummer, the rivers worn in and running with melt. */
 const OPENS_AT = YEAR / 4;
 /** While playing, props settle around changed rivers and lakes at most once in this many steps. */
@@ -159,6 +160,40 @@ function togglePlay(): void {
   frame = requestAnimationFrame(tick);
 }
 
+/** The wind made visible, over everything: while Shift is held, or when switched on. */
+const windCanvas = ref<HTMLCanvasElement | null>(null);
+const shift = ref(false);
+const windOn = ref(false);
+const onKey = (e: KeyboardEvent) => {
+  if (e.key !== 'Shift' || shift.value === (e.type === 'keydown')) return;
+  shift.value = e.type === 'keydown';
+};
+const offKey = () => (shift.value = false);
+/** Whether the wind layer holds arrows now: only then is there anything to clear. */
+let windDrawn = false;
+
+function drawWindLayer(): void {
+  const el = windCanvas.value;
+  const box = host.value;
+  if (!el || !box) return;
+  const show = (shift.value || windOn.value) && run && run.map === map && placed && scene?.grid === map.grid;
+  if (!show && !windDrawn) return;
+  const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
+  fit(el, box.clientWidth, box.clientHeight, dpr);
+  const ctx = el.getContext('2d')!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, el.width, el.height);
+  windDrawn = !!show;
+  if (!show || !run || !placed) return;
+  const { sky } = run.water.at(step.value);
+  const { cols } = map.grid;
+  const frame = gridFrame(cols, map.grid.rows, HEX);
+  const t = placed;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const arrows = windArrows(sky, (i) => frameCentre(i % cols, Math.floor(i / cols), HEX, frame), Math.sqrt(3) * HEX, { scale: t.scale, x: t.x, y: t.y, squash: SQUASH });
+  drawWind(ctx, arrows, { x: box.clientWidth - 150, y: 12 });
+}
+
 /** The sky over the map, on the GPU (when there is WebGL2): clouds, their shadows, rain and snow. */
 const skyCanvas = ref<HTMLCanvasElement | null>(null);
 let skyGl: CloudGL | undefined;
@@ -188,6 +223,7 @@ function resetSky(): void {
 }
 
 function drawSky(): void {
+  drawWindLayer();
   const el = skyCanvas.value;
   const box = host.value;
   if (!skyGl || !el || !box) return;
@@ -371,12 +407,18 @@ onMounted(() => {
     .catch((e) => console.error('Tile art failed to load', e));
   resizeObs = new ResizeObserver(draw);
   if (host.value) resizeObs.observe(host.value);
+  window.addEventListener('keydown', onKey);
+  window.addEventListener('keyup', onKey);
+  window.addEventListener('blur', offKey);
 });
 onBeforeUnmount(() => {
   resizeObs?.disconnect();
   lakeWorker.terminate();
   baseWorkers.forEach((w) => w.terminate());
   stopPlaying();
+  window.removeEventListener('keydown', onKey);
+  window.removeEventListener('keyup', onKey);
+  window.removeEventListener('blur', offKey);
 });
 
 watch([mapId, seed], newMap);
@@ -385,12 +427,13 @@ watch([step, season, wind, windDir], repaintWater);
 watch(step, () => playing.value || resetSky());
 watch(showGrid, draw);
 watch(cloudMode, drawSky);
+watch([shift, windOn], drawWindLayer);
 </script>
 
 <template>
   <div class="tiles">
     <div ref="host" class="stage" @pointermove="point" @pointerdown="point" @pointerleave="unpoint">
-      <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="skyCanvas" class="sky" />
+      <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="skyCanvas" class="sky" /><canvas ref="windCanvas" class="sky" />
     </div>
     <div class="controls">
       <label>
@@ -426,6 +469,7 @@ watch(cloudMode, drawSky);
       </label>
       <p v-if="steps > 0" class="hint">{{ clock }}</p>
       <p v-if="steps > 0" class="hint">{{ weatherNow }}</p>
+      <label v-if="steps > 0" class="check" title="Or hold Shift"><input v-model="windOn" type="checkbox" /> Wind (Shift)</label>
       <label v-if="steps > 0">
         Speed {{ speed }}/s
         <input v-model.number="speed" type="range" min="2" max="48" step="2" />

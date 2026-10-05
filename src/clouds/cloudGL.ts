@@ -137,7 +137,7 @@ void main() {
     // Rain: thin streaks falling fast, in columns of their own pace.
     float column = floor(px.x / 3.0);
     float h = hash(vec2(column, vFall.z));
-    float y = px.y / 18.0 - uTime * (12.0 + 4.0 * h) + h * 13.0;
+    float y = px.y / 18.0 - uTime * (6.5 + 2.0 * h) + h * 13.0; // about 120–155 px a second
     float f = fract(y);
     float on = step(1.0 - vFall.x * 0.7, hash(vec2(column, floor(y) + vFall.z)));
     float line = 1.0 - smoothstep(0.5, 1.0, abs(fract(px.x / 3.0) - 0.5) * 3.0);

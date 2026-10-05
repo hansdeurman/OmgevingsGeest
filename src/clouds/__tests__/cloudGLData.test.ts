@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Puff } from '../cloudDeck';
 import { CLOUD_ASPECT, CLOUD_INSTANCE, cloudInstances, RAIN_INSTANCE, rainInstances } from '../cloudGLData';
 
-const puff = (x: number, y: number, extra: Partial<Puff> = {}): Puff => ({ x, y, size: 40, target: 40, shown: 1, dark: 0, fall: 0, snow: false, shape: 1, seed: 7, ...extra });
+const puff = (x: number, y: number, extra: Partial<Puff> = {}): Puff => ({ x, y, vx: 0, vy: 0, size: 40, target: 40, shown: 1, dark: 0, fall: 0, snow: false, shape: 1, seed: 7, ...extra });
 const view = { scale: 2, x: 10, y: 20, squash: 0.5, altitude: 30 };
 
 describe('cloudInstances', () => {

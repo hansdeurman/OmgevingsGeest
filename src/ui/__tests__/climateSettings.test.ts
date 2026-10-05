@@ -31,6 +31,6 @@ describe('climateReadout', () => {
   it('tells the sea, lowland and peak temperatures and the wind', () => {
     const heights = [0, 0, 1, 1, 7];
     const sky = { surface: [9, 9, 12, 12, 1], temperature: [8, 8, 11.4, 11.6, -2.4], windX: [0.1, 0.1, 0.1, 0.1, 0.1], windY: [0, 0, 0, 0, 0] };
-    expect(climateReadout(sky, heights)).toBe('Sea 9° · land 12° · peaks -2° · wind 4 m/s W');
+    expect(climateReadout(sky, heights)).toBe('Sea 9° · land 12° · peaks -2° · wind W 3 m/s, Bft 2');
   });
 });

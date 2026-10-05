@@ -1,4 +1,5 @@
 import type { ClimateParams } from '../water/waterCycle';
+import { beaufort, METRES_PER_SECOND } from './windOverlay';
 
 /**
  * The climate's settings a player can tweak, as sliders: the sun and how
@@ -40,14 +41,12 @@ export function setValue(p: ClimateParams, s: ClimateSetting, v: number): void {
   (p[s.group] as unknown as Record<string, number>)[s.key] = v;
 }
 
-/** Wind speed (m/s, roughly) of one hex spacing per step. */
-const METRES_PER_SECOND = 40;
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
 
 /** Where the wind (x east, y south) blows from, as a compass point. */
 export const windFrom = (x: number, y: number) => COMPASS[(Math.round(Math.atan2(-y, -x) / (Math.PI / 4)) + 8) % 8];
 
-/** The weather now in a few words: the sea's and the air's warmth over the lowland and the peaks, and the wind. */
+/** The weather now in a few words: the sea's and the air's warmth over the lowland and the peaks, and the wind (where from, how fast, its force). */
 export function climateReadout(sky: { temperature: ArrayLike<number>; surface: ArrayLike<number>; windX: ArrayLike<number>; windY: ArrayLike<number> }, heights: ArrayLike<number>): string {
   const cells = Array.from({ length: heights.length }, (_, i) => i);
   const mean = (a: ArrayLike<number>, of: number[]) => (of.length ? of.reduce((s, i) => s + a[i], 0) / of.length : NaN);
@@ -55,5 +54,5 @@ export function climateReadout(sky: { temperature: ArrayLike<number>; surface: A
   const [x, y] = [mean(sky.windX, cells), mean(sky.windY, cells)];
   const speed = mean(Float32Array.from(cells, (i) => Math.hypot(sky.windX[i], sky.windY[i])), cells) * METRES_PER_SECOND;
   const deg = (v: number) => (Number.isNaN(v) ? '–' : `${Math.round(v)}°`);
-  return `Sea ${deg(mean(sky.surface, sea))} · land ${deg(mean(sky.temperature, low))} · peaks ${deg(mean(sky.temperature, peaks))} · wind ${Math.round(speed)} m/s ${windFrom(x, y)}`;
+  return `Sea ${deg(mean(sky.surface, sea))} · land ${deg(mean(sky.temperature, low))} · peaks ${deg(mean(sky.temperature, peaks))} · wind ${windFrom(x, y)} ${Math.round(speed)} m/s, Bft ${beaufort(speed)}`;
 }
