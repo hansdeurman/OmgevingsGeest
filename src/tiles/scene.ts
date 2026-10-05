@@ -140,8 +140,8 @@ export interface Scene {
   river?: RiverMask;
   /** …and the water's look it was graded by (to grade it elsewhere). */
   look?: WaterLook;
-  /** What the props were last settled around (which the rivers hide, the lakes): while that stays, so do the bands. */
-  settled?: { hidden: Uint8Array; lakes: LakeImage[]; bands: SceneBand[] };
+  /** What the props were last settled around (which the rivers hide, the lakes): while that stays, so do the bands; and paints since. */
+  settled?: { hidden: Uint8Array; lakes: LakeImage[]; bands: SceneBand[]; age: number };
 }
 
 /** A basin's water (steps) may move this much before its lake is painted anew: less does not show. */
@@ -150,7 +150,10 @@ export const LAKE_SETTLES = 0.02;
 const OUTFLOW_WEIGHT = 0.5;
 
 /** What painting the high lakes needs from the scene options. */
-export type LakeOptions = Pick<SceneOptions, 'hexSize' | 'view' | 'weather' | 'groundElsewhere'>;
+export type LakeOptions = Pick<SceneOptions, 'hexSize' | 'view' | 'weather' | 'groundElsewhere'> & {
+  /** Props settle around changed rivers and lakes at most once in this many paints (while the water plays, a little late is fine); every paint if absent. */
+  settleEvery?: number;
+};
 
 export const tileAt = (scene: Scene, col: number, row: number): TileDraw | undefined =>
   scene.tiles.find((t) => t.col === col && t.row === row);
@@ -296,8 +299,9 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
   const { view } = opts;
   const look = scene.wet && wetness ? lookNow(scene, scene.wet, { wetness, river, ground: ground ?? scene.grid.elevation }) : undefined;
   const flat = look && !opts.groundElsewhere ? paintLook(scene, scene.wet!, textures, look) : scene.flat;
-  // Which land props the rivers hide, in band order.
-  const hidden = Uint8Array.from(scene.bands.flatMap((b) => b.land), (p) => (look && onRiver(look.river, p.x, p.y) ? 1 : 0));
+  // Which land props the rivers hide, in band order; one hidden stays so while the river runs close by, so a river's edge shifting a pixel does not make props blink (and the bands settle again).
+  const before = scene.settled?.hidden;
+  const hidden = Uint8Array.from(scene.bands.flatMap((b) => b.land), (p, k) => (look && (onRiver(look.river, p.x, p.y) || (before?.[k] === 1 && nearRiver(look.river, p.x, p.y))) ? 1 : 0));
   const weather = opts.weather ?? DEFAULT_WEATHER;
   const cells = { ground: ground ?? scene.grid.elevation, depth };
   const tag = JSON.stringify(weather);
@@ -306,11 +310,18 @@ export function paintLakes(scene: Scene, textures: GroundTextures, opts: LakeOpt
     const job = { basin: k, ...cells, flux: topo && flux, dirs: topo?.dirs, weather };
     return scene.lakes.source(scene.lakes.setup, job, settled, tag);
   });
-  // Settling props costs: while the rivers' beds and the lakes are as before, the bands are too.
+  // Settling props costs: while the rivers' beds and the lakes are as before, the bands are too; and they settle again at most every `settleEvery` paints.
   const was = scene.settled;
   const unchanged = was && same(was.hidden, hidden) && same(was.lakes, lakes);
-  const bands = unchanged ? was.bands : settleBands(scene.bands, lakes, hidden, view.squash);
-  return { ...scene, bands, flat, river: look?.river, look, settled: { hidden, lakes, bands } };
+  if (was && (unchanged || was.age + 1 < (opts.settleEvery ?? 1))) return { ...scene, bands: was.bands, flat, river: look?.river, look, settled: { ...was, age: was.age + 1 } };
+  const bands = settleBands(scene.bands, lakes, hidden, view.squash);
+  return { ...scene, bands, flat, river: look?.river, look, settled: { hidden, lakes, bands, age: 0 } };
+}
+
+/** Whether the rivers cover pixel (x, y) or a cell beside it. */
+function nearRiver(m: RiverMask, x: number, y: number): boolean {
+  const c = m.cell;
+  return onRiver(m, x - c, y) || onRiver(m, x + c, y) || onRiver(m, x, y - c) || onRiver(m, x, y + c);
 }
 
 /** The bands with their land props settled: those `hidden` (by rivers, in band order) left out, hidden under or riding on the lakes, which stand in the band of their foot. */

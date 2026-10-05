@@ -28,11 +28,12 @@ export interface Puff {
   seed: number;
 }
 
-/** The sky the puffs follow, per hex: cloud, what falls (steps), the wind (hex spacings per step), and whether what falls is snow. */
+/** The sky the puffs follow, per hex: cloud, what falls (steps), the wind (hex spacings per step, x east, y south), and whether what falls is snow. */
 export interface SkyField {
   cloud: ArrayLike<number>;
   fall: ArrayLike<number>;
-  wind: { x: number; y: number };
+  windX: ArrayLike<number>;
+  windY: ArrayLike<number>;
   snow?: (i: number) => boolean;
 }
 
@@ -154,11 +155,14 @@ export function createDeck(map: DeckMap, seed: number): CloudDeck {
     },
     update(sky, steps) {
       if (steps <= 0) return;
-      const [dx, dy] = [sky.wind.x * map.spacing * steps, sky.wind.y * map.spacing * steps];
       covered.fill(0);
       for (const p of puffs) {
-        p.x += dx;
-        p.y += dy;
+        // Each puff drifts with the wind where it is.
+        const here = map.hexAt(p.x, p.y);
+        if (here >= 0) {
+          p.x += sky.windX[here] * map.spacing * steps;
+          p.y += sky.windY[here] * map.spacing * steps;
+        }
         // Where an older puff covers a younger one, the younger fades: puffs never heap up.
         const i = map.hexAt(p.x, p.y);
         const crowded = i >= 0 && covered[i] === 1;

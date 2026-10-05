@@ -5,14 +5,17 @@ import { clamp, smoothstep } from '../math/scalar';
  * meadow hold much, sand little, bare rock high up almost nothing) and seeps
  * out again slowly, so streams keep running long after the rain; cold
  * precipitation lies as snow and melts when it warms, and glaciers on the
- * highest peaks melt slowly all summer. Heights and water in terrace steps.
+ * highest peaks melt slowly all summer. Open water evaporates, and plants
+ * draw water from the soil into the air as long as it is not too dry.
+ * Heights and water in terrace steps.
  */
 
-/** How a hex holds water: soil it can fill, how fast rain soaks in, and what share of its soil water seeps out per step. */
+/** How a hex holds water: soil it can fill, how fast rain soaks in, what share of its soil water seeps out per step, and how much its plants breathe out (0–1). */
 export interface Soak {
   capacity: number;
   infiltration: number;
   release: number;
+  plants?: number;
 }
 
 /** Soak per hex, as flat arrays. */
@@ -20,18 +23,28 @@ export interface SoakMap {
   capacity: Float32Array;
   infiltration: Float32Array;
   release: Float32Array;
+  plants: Float32Array;
 }
 
-/** The weather over one step: rain (everywhere, or per hex), warmth (-1 winter … 1 summer) and how fast warm water evaporates. */
+/**
+ * The weather over one step: rain (everywhere, or per hex), warmth (-1
+ * winter … 1 summer) and how fast warm water evaporates; or, where the
+ * air is simulated, its `temperature` per hex and how much water it would
+ * take up (`demand`, steps), which then rules over warmth and evaporation.
+ */
 export interface Weather {
   rain: number | ArrayLike<number>;
   warmth: number;
   evaporation: number;
+  temperature?: ArrayLike<number>;
+  demand?: ArrayLike<number>;
   /** Where evaporated water goes, added per hex (into the air); gone if absent. */
   into?: Float32Array;
 }
 
-/** Temperature (°, roughly) at sea level in spring, how far the seasons swing it, and how much colder each step up is. */
+/** How much colder (°) the air is per step of height. */
+export const LAPSE = 1.5;
+/** For scripted weather: temperature (°, roughly) at sea level in spring, how far the seasons swing it, and how much colder each step up is. */
 const TEMP = { base: 5, season: 6, lapse: 1.1 };
 /** Snow melted per degree above freezing per step (steps of water). */
 const MELT = 0.004;
@@ -41,6 +54,10 @@ const EVAPORATION_AT = 10;
 const OPEN_WATER = 0.3;
 /** Ice (steps of water) glaciers hold, per step of height above where they start. */
 const GLACIER = { from: 6.5, ice: 2.5 };
+/** Plants breathe out freely while their soil is this full, not at all once it is this dry. */
+const THIRST = { free: 0.6, dry: 0.15 };
+/** Ice and snow give the air only this share of what open water would. */
+const FROZEN = 0.15;
 
 /** From grass and tree levels (0–4) and elevation: forest holds most and gives it back slowest, bare rock high up holds least. */
 export function soakOf(grass: number, trees: number, elevation: number): Soak {
@@ -49,6 +66,7 @@ export function soakOf(grass: number, trees: number, elevation: number): Soak {
     capacity: (0.15 + 0.1 * grass + 0.2 * trees) * (1 - 0.85 * rock),
     infiltration: (0.015 + 0.005 * grass + 0.01 * trees) * (1 - 0.7 * rock),
     release: 0.012 / (1 + 0.5 * trees),
+    plants: Math.min(1, 0.15 + 0.12 * grass + 0.15 * trees) * (1 - 0.8 * rock),
   };
 }
 
@@ -57,6 +75,7 @@ export function soakMap(soaks: readonly Soak[]): SoakMap {
     capacity: Float32Array.from(soaks, (s) => s.capacity),
     infiltration: Float32Array.from(soaks, (s) => s.infiltration),
     release: Float32Array.from(soaks, (s) => s.release),
+    plants: Float32Array.from(soaks, (s) => s.plants ?? 0.5),
   };
 }
 
@@ -67,9 +86,9 @@ export const glacierOf = (elevation: number) => Math.max(0, elevation - GLACIER.
 
 /** One step of weather on every hex, in place: precipitation, melt, soaking in and seeping out, evaporation. */
 export function weatherStep(ground: Float32Array, depth: Float32Array, soil: Float32Array, snow: Float32Array, soak: SoakMap, weather: Weather): void {
-  const { rain, warmth, evaporation, into } = weather;
+  const { rain, warmth, evaporation, into, demand } = weather;
   for (let i = 0; i < depth.length; i++) {
-    const t = temperature(ground[i], warmth);
+    const t = weather.temperature ? weather.temperature[i] : temperature(ground[i], warmth);
     const p = typeof rain === 'number' ? rain : rain[i];
     if (t < 0) snow[i] += p;
     else depth[i] += p;
@@ -79,6 +98,19 @@ export function weatherStep(ground: Float32Array, depth: Float32Array, soil: Flo
     const seep = t < 0 ? 0 : soil[i] * soak.release[i]; // frozen ground holds its water
     soil[i] += soaked - seep;
     const water = depth[i] + melt - soaked + seep;
+    if (demand) {
+      // Open water gives the air what it asks; where the water is thin, the soil, through its plants, gives the rest as long as it is not too dry.
+      const open = Math.min(1, water / OPEN_WATER);
+      const fromWater = Math.min(water, demand[i] * open * (t < 0 ? FROZEN : 1));
+      const thirst = smoothstep(THIRST.dry, THIRST.free, soil[i] / (soak.capacity[i] || 1));
+      const fromSoil = t < 0 ? 0 : Math.min(soil[i], demand[i] * (1 - open) * thirst * soak.plants[i]);
+      const fromSnow = Math.min(snow[i], demand[i] * (1 - open) * FROZEN);
+      depth[i] = water - fromWater;
+      soil[i] -= fromSoil;
+      snow[i] -= fromSnow;
+      if (into) into[i] += fromWater + fromSoil + fromSnow;
+      continue;
+    }
     depth[i] = Math.max(0, water - evaporation * clamp(t / EVAPORATION_AT, 0, 1.5) * Math.min(1, water / OPEN_WATER));
     if (into) into[i] += Math.max(0, water - depth[i]);
   }

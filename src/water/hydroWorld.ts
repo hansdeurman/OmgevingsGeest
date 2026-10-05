@@ -86,14 +86,16 @@ export function createHydroWorld({ cols, rows, ground, soak, depth, soil, snow, 
   };
 }
 
-/** One step, in place: the weather, then `rounds` of flow, each wearing the ground. */
-export function stepHydro(w: HydroWorld, weather: Weather, rounds = ROUNDS, flow: FlowParams = DEFAULT_FLOW, erosion: ErosionParams = DEFAULT_EROSION): void {
+/** One step, in place: the weather, then `rounds` of flow, each wearing the ground. Returns the water that left into the sea and over the map's edge. */
+export function stepHydro(w: HydroWorld, weather: Weather, rounds = ROUNDS, flow: FlowParams = DEFAULT_FLOW, erosion: ErosionParams = DEFAULT_EROSION): number {
   weatherStep(w.ground, w.depth, w.soil, w.snow, w.soak, weather);
+  let left = 0;
   for (let r = 0; r < rounds; r++) {
-    flowStep(w.topo, w.ground, w.depth, w.flux, w.sink, flow);
+    left += flowStep(w.topo, w.ground, w.depth, w.flux, w.sink, flow);
     erodeStep(w.topo, w.ground, w.depth, w.flux, w.sediment, w.hardness, w.sink, erosion);
   }
   channelStep(w.topo, w.ground, w.flux, w.sink, w.channels);
+  return left;
 }
 
 export const snapshot = (w: HydroWorld): HydroSnapshot => ({

@@ -17,6 +17,8 @@ export interface Run<V> {
   at(step: number): V;
   /** Moments kept to go back to. */
   readonly kept: number;
+  /** Forget what comes after the moment last shown: the model changed (its settings), so from there on it runs anew. */
+  forget(): void;
 }
 
 /** What a run steps: step `k` (from 0) in place, save and restore its state, and what a view needs of now. */
@@ -55,6 +57,10 @@ export function createRun<S, V>(model: Model<S, V>, length = Infinity, every = 4
     },
     get kept() {
       return kept.size;
+    },
+    forget() {
+      goTo(last.step);
+      for (const step of [...kept.keys()]) if (step > last.step) kept.delete(step);
     },
     at(step) {
       const target = Math.max(first, Math.min(length, Math.round(step)));

@@ -8,7 +8,13 @@ const n = cols * rows;
 /** Cloud over a patch of hexes around (6, 6), clear elsewhere. */
 const patch = (amount: number, near = (c: number, r: number) => Math.abs(c - 6) <= 1 && Math.abs(r - 6) <= 1) =>
   Float32Array.from({ length: n }, (_, i) => (near(i % cols, Math.floor(i / cols)) ? amount : 0));
-const sky = (cloud: Float32Array, wind = { x: 0, y: 0 }, fall = new Float32Array(n), snow?: (i: number) => boolean): SkyField => ({ cloud, fall, wind, snow });
+const sky = (cloud: Float32Array, wind = { x: 0, y: 0 }, fall = new Float32Array(n), snow?: (i: number) => boolean): SkyField => ({
+  cloud,
+  fall,
+  windX: new Float32Array(n).fill(wind.x),
+  windY: new Float32Array(n).fill(wind.y),
+  snow,
+});
 const centreOf = (c: number, r: number) => map.centre(r * cols + c);
 
 describe('createDeck', () => {
@@ -78,6 +84,16 @@ describe('createDeck', () => {
     expect(deck.puffs.every((p) => p.dark > 0.5 && p.fall > 0.5 && p.snow)).toBe(true);
     deck.reset(sky(cloud));
     expect(deck.puffs.every((p) => p.dark === 0 && p.fall === 0 && !p.snow)).toBe(true);
+  });
+
+  it('drifts each puff with the wind where it is', () => {
+    const deck = createDeck(map, 1);
+    const cloud = patch(0.1, (c, r) => (c === 3 || c === 12) && r === 6);
+    deck.reset(sky(cloud));
+    const windX = Float32Array.from({ length: n }, (_, i) => (i % cols < 8 ? 0.3 : -0.3));
+    const before = deck.puffs.map((p) => p.x);
+    deck.update({ ...sky(cloud), windX }, 1);
+    deck.puffs.slice(0, before.length).forEach((p, k) => expect(Math.sign(p.x - before[k])).toBe(before[k] < centreOf(8, 6).x ? 1 : -1));
   });
 
   it('lets puffs that drift off the map fade', () => {

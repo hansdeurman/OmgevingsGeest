@@ -59,6 +59,19 @@ describe('createRun', () => {
     expect(run.at(5000)).toBe(5000);
   });
 
+  it('forgets what came after now when its model changes, and runs on anew from there', () => {
+    let n = 0;
+    let by = 1;
+    const model = { step: () => void (n += by), save: () => n, restore: (s: number) => void (n = s), view: () => n };
+    const run = createRun(model, Infinity, 10);
+    expect(run.at(50)).toBe(50);
+    run.at(25);
+    by = 2;
+    run.forget();
+    expect(run.at(50)).toBe(25 + 2 * 25);
+    expect(run.at(20)).toBe(20); // the past is as it was
+  });
+
   it('keeps at most so many moments, dropping the oldest, and goes back no further than it holds', () => {
     const run = createRun(counter(), Infinity, 10, 5);
     run.at(200);

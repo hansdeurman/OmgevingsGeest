@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WATER_KINDS, lakeTemperature, waterColour, waterWeights, waveCrest, type WaterTextures } from '../waterLook';
+import { WATER_KINDS, lakeLook, lakeTemperature, waterColour, waterWeights, waveCrest, type WaterTextures } from '../waterLook';
 import { HIGH_LAKE_FROM } from '../shores';
 import { MAX_ELEVATION } from '../levels';
 import { paintRaster } from '../raster';
@@ -26,6 +26,16 @@ describe('waterWeights', () => {
   it('holds one look over most of its range and blends only neighbours', () => {
     expect(waterWeights(2 / 3)).toEqual([0, 0, 1, 0]);
     expect(waterWeights(0.5).filter((w) => w > 0)).toHaveLength(2);
+  });
+});
+
+describe('lakeLook', () => {
+  it('freezes a lake below freezing and warms its look with its water', () => {
+    const kind = (t: number) => WATER_KINDS[waterWeights(lakeLook(t)).indexOf(Math.max(...waterWeights(lakeLook(t))))];
+    expect(kind(-3)).toBe('ice');
+    expect(kind(3)).toBe('cold');
+    expect(kind(10)).toBe('mild');
+    expect(kind(20)).toBe('warm');
   });
 });
 

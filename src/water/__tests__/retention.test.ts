@@ -54,6 +54,65 @@ describe('weatherStep', () => {
     expect(total()).toBeCloseTo(start, 5);
   });
 
+  describe('under a simulated air', () => {
+    const air = (demand: number, t: number, into = new Float32Array(1)) => ({ rain: 0, warmth: 0, evaporation: 0, temperature: Float32Array.of(t), demand: Float32Array.of(demand), into });
+    const hex = (depth: number, soil: number, snow = 0, soak = meadow) => ({
+      ground: Float32Array.of(1),
+      depth: Float32Array.of(depth),
+      soil: Float32Array.of(soil),
+      snow: Float32Array.of(snow),
+      map: soakMap([soak]),
+    });
+    const step = (h: ReturnType<typeof hex>, w: Weather) => weatherStep(h.ground, h.depth, h.soil, h.snow, h.map, w);
+
+    it('gives open water to the air as it asks, all of it into the air', () => {
+      const h = hex(1, meadow.capacity);
+      const into = new Float32Array(1);
+      const total = () => h.depth[0] + h.soil[0] + h.snow[0] + into[0];
+      const start = total();
+      step(h, air(0.01, 12, into));
+      expect(into[0]).toBeCloseTo(0.01, 4);
+      expect(total()).toBeCloseTo(start, 5);
+    });
+
+    it('lets plants draw on a moist soil, less on a drying one, and not on a parched one', () => {
+      const draw = (fill: number) => {
+        const h = hex(0, fill * meadow.capacity);
+        const into = new Float32Array(1);
+        step(h, air(0.01, 12, into));
+        return into[0];
+      };
+      expect(draw(0.9)).toBeGreaterThan(draw(0.35));
+      expect(draw(0.35)).toBeGreaterThan(0);
+      expect(draw(0.1)).toBeLessThan(1e-4);
+    });
+
+    it('lets forest breathe out more than bare sand', () => {
+      const draw = (soak: ReturnType<typeof soakOf>) => {
+        const h = hex(0, 0.9 * soak.capacity, 0, soak);
+        const into = new Float32Array(1);
+        step(h, air(0.01, 12, into));
+        return into[0];
+      };
+      expect(draw(soakOf(3, 4, 1))).toBeGreaterThan(2 * draw(soakOf(0, 0, 1)));
+    });
+
+    it('gives the air little from ice and snow', () => {
+      const into = new Float32Array(1);
+      step(hex(1, meadow.capacity), air(0.01, -5, into));
+      expect(into[0]).toBeLessThan(0.003);
+      expect(into[0]).toBeGreaterThan(0);
+    });
+
+    it('snows and melts by the air it is given, not by the season', () => {
+      const h = hex(0, 0, 0);
+      step(h, { ...air(0, -3), rain: 0.02 });
+      expect(h.snow[0]).toBeCloseTo(0.02, 5);
+      step(h, { ...air(0, 6), rain: 0 });
+      expect(h.snow[0]).toBeLessThan(0.02);
+    });
+  });
+
   it('gives soaked-up water back slowly, long after the rain has stopped', () => {
     // On a slope: whatever stands on the hex runs off each step.
     const [ground, depth, soil, snow] = [Float32Array.of(1), new Float32Array(1), new Float32Array(1), new Float32Array(1)];

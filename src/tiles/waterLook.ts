@@ -1,5 +1,5 @@
 import { valueNoise2D } from '../math/noise';
-import { clamp, smoothstep } from '../math/scalar';
+import { clamp, piecewise, smoothstep } from '../math/scalar';
 import { mix, type RGB } from '../rendering/palette';
 import { MAX_ELEVATION } from './levels';
 import { sampleRaster, type Raster } from './raster';
@@ -35,6 +35,14 @@ export function lakeTemperature(level: number, warmth: number): number {
   const height = smoothstep(HIGH_LAKE_FROM, MAX_ELEVATION - 1, level);
   return clamp(0.72 - 0.42 * height + 0.45 * warmth, 0, 1);
 }
+
+/** How warm a lake looks (0 frozen … 1 warm) with its water this warm (°C): frozen below about freezing, warm from the high teens. */
+export const lakeLook = piecewise([
+  [-2, 0],
+  [0.5, 0.3],
+  [6, 0.6],
+  [17, 1],
+]);
 
 /** Wind over the water: `strength` 0 (calm) … 1 (storm), `direction` it blows toward in radians, top-down. */
 export interface Wind {

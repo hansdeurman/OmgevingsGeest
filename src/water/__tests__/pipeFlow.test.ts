@@ -33,6 +33,15 @@ describe('flowStep', () => {
     expect(total(run(w, 200))).toBeCloseTo(before, 4);
   });
 
+  it('tells how much water the sinks swallow: all that leaves', () => {
+    const w = world(bowl(() => 1).map((row, r) => row.map((h, c) => (r === 3 && c === 6 ? 0 : h))), waterAt([[3, 3, 2]]));
+    const before = total(w);
+    let swallowed = 0;
+    for (let k = 0; k < 300; k++) swallowed += flowStep(w.topo, w.ground, w.depth, w.flux, w.sink);
+    expect(swallowed).toBeGreaterThan(0.5);
+    expect(total(w) + swallowed).toBeCloseTo(before, 4);
+  });
+
   it('spreads a heap of water into every direction at once', () => {
     const w = run(world(bowl(() => 1), waterAt([[3, 3, 2]])), 1);
     const out = Array.from({ length: 12 }, (_, d) => w.flux[at(3, 3) * 12 + d]);

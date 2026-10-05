@@ -1,56 +1,82 @@
 import { describe, expect, it } from 'vitest';
-import { createClimate } from '../climate';
+import { emptyBudget } from '../heat';
 import { createHydroWorld, totalWater } from '../hydroWorld';
 import { soakOf } from '../retention';
 import { createRun } from '../waterRun';
-import { createWaterCycle, cycleModel, cycleStep } from '../waterCycle';
+import { createWaterCycle, cycleModel, cycleStep, cycleWater, defaultClimate } from '../waterCycle';
 
-/** Sea in the west, land rising to a ridge in the east. */
-const [cols, rows] = [12, 8];
-const ground = Array.from({ length: cols * rows }, (_, i) => (i % cols < 3 ? 0 : (i % cols) * 0.7));
-const cycle = () =>
-  createWaterCycle(
-    createHydroWorld({ cols, rows, ground, soak: (i) => soakOf(2, 1, ground[i]), soil: () => 0.1 }),
-    createClimate(5),
-  );
+/** Sea all round, land rising to a ridge in the middle. */
+const [cols, rows] = [14, 10];
+const n = cols * rows;
+const ground = Array.from({ length: n }, (_, i) => {
+  const [c, r] = [i % cols, Math.floor(i / cols)];
+  return c < 3 || c > 10 || r < 2 || r > 7 ? 0 : 1 + Math.max(0, 5 - 2 * Math.abs(c - 7));
+});
+const cycle = () => createWaterCycle(createHydroWorld({ cols, rows, ground, soak: (i) => soakOf(2, 1, ground[i]), soil: () => 0.1, depth: (i) => (i === 4 * cols + 5 ? 1 : 0) }));
 
 describe('createWaterCycle', () => {
-  it('starts with air as humid as the sea makes it and no clouds', () => {
+  it('starts with humid air, no clouds, and the sea where the ground is below sea level at the edge', () => {
     const c = cycle();
     expect(totalWater(c.air.vapour)).toBeGreaterThan(0);
     expect(totalWater(c.air.cloud)).toBe(0);
     expect(c.air.sea[0]).toBe(1);
-    expect(c.air.sea[cols - 1]).toBe(0);
+    expect(c.air.sea[4 * cols + 7]).toBe(0);
   });
 });
 
 describe('cycleStep', () => {
-  it('rains on the land from the air, and what evaporates rises into it', () => {
+  it('neither makes nor loses water: what the land loses fills the sea and the air', () => {
     const c = cycle();
-    let fell = 0;
-    for (let k = 0; k < 300; k++) {
-      cycleStep(c);
-      for (let i = 0; i < c.air.fall.length; i++) if (!c.world.sink[i]) fell += c.air.fall[i];
-    }
-    expect(fell).toBeGreaterThan(0);
+    const start = cycleWater(c);
+    for (let k = 0; k < 300; k++) cycleStep(c);
+    expect(cycleWater(c)).toBeCloseTo(start, 2);
     expect(c.step).toBe(300);
+  });
+
+  it('takes in only sunlight and gives heat back to space, nothing else', () => {
+    const c = cycle();
+    c.budget = emptyBudget();
+    for (let k = 0; k < 640; k++) cycleStep(c);
+    const { sun, space, evaporating, condensing } = c.budget;
+    expect(sun).toBeGreaterThan(0);
+    // Over a year what came in went out again, nearly; the water's heat goes round with it.
+    expect(Math.abs(sun - space) / sun).toBeLessThan(0.1);
+    expect(Math.abs(evaporating - condensing) / evaporating).toBeLessThan(0.15);
+  });
+
+  it('lets the lake give water to the air', () => {
+    const c = cycle();
+    let rose = 0;
+    for (let k = 0; k < 100; k++) {
+      cycleStep(c);
+      rose += c.air.evaporated[4 * cols + 5];
+    }
+    expect(rose).toBeGreaterThan(0.05);
+  });
+
+  it('follows its settings: more sun, a warmer world', () => {
+    const warm = defaultClimate();
+    warm.heat.sun *= 1.2;
+    const [a, b] = [cycle(), createWaterCycle(cycle().world, { params: warm })];
+    for (let k = 0; k < 300; k++) [a, b].forEach(cycleStep);
+    const mean = (c: typeof a) => c.heat.air.reduce((s, t) => s + t, 0) / n;
+    expect(mean(b)).toBeGreaterThan(mean(a) + 2);
   });
 });
 
 describe('cycleModel', () => {
   it('goes back to a moment and on again exactly as it went the first time', () => {
     const run = createRun(cycleModel(cycle()), Infinity, 25);
-    const seen = [run.at(60), run.at(130)].map((v) => ({ depth: Array.from(v.depth), cloud: Array.from(v.sky.cloud) }));
+    const look = (v: ReturnType<typeof run.at>) => ({ depth: Array.from(v.depth), cloud: Array.from(v.sky.cloud), wind: Array.from(v.sky.windX), air: Array.from(v.sky.temperature) });
+    const seen = [look(run.at(60)), look(run.at(130))];
     run.at(10);
-    expect({ depth: Array.from(run.at(60).depth), cloud: Array.from(run.at(60).sky.cloud) }).toEqual(seen[0]);
-    expect({ depth: Array.from(run.at(130).depth), cloud: Array.from(run.at(130).sky.cloud) }).toEqual(seen[1]);
+    expect(look(run.at(60))).toEqual(seen[0]);
+    expect(look(run.at(130))).toEqual(seen[1]);
   });
 
-  it('shows the sky with the water: clouds, what falls, the wind and the season', () => {
+  it('shows the sky with the water: clouds, what falls, the wind, the temperatures and the season', () => {
     const { sky } = createRun(cycleModel(cycle())).at(40);
-    expect(sky.cloud.length).toBe(cols * rows);
-    expect(sky.fall.length).toBe(cols * rows);
-    expect(Math.hypot(sky.wind.x, sky.wind.y)).toBeGreaterThan(0);
-    expect(sky.yearShare).toBeGreaterThan(0);
+    for (const a of [sky.cloud, sky.fall, sky.windX, sky.windY, sky.temperature, sky.surface]) expect(a.length).toBe(n);
+    expect(sky.yearShare).toBeGreaterThan(0.25);
   });
 });

@@ -6,7 +6,8 @@ import type { GroundTextures } from './placeholderTextures';
 import { paintRaster } from './raster';
 import type { LakeShape } from './shores';
 import type { WallStrip } from './wallStrip';
-import { lakeTemperature, type WaterTextures, type Wind } from './waterLook';
+import { LAPSE } from '../water/retention';
+import { lakeLook, lakeTemperature, type WaterTextures, type Wind } from './waterLook';
 
 /**
  * From what the world knows about a high lake (its water, the level at which
@@ -29,9 +30,33 @@ export interface Weather {
   /** -1 winter … 1 summer. */
   warmth: number;
   wind: Wind;
+  /** The air over the lakes as warm as it is at sea level (°C), where the climate is simulated: each lake as much colder as it lies higher. Rules over `warmth`. */
+  air?: number;
 }
 
 export const DEFAULT_WEATHER: Weather = { warmth: 0, wind: { strength: 0.25, direction: 0.4 } };
+
+/** Wind (hex spacings per step) that whips up the lakes like a storm. */
+const STORM = 0.4;
+
+/**
+ * The weather over the lakes as the simulated sky has it, over the hexes
+ * they lie in: the air brought to sea level (°C) and the wind. Rounded, to
+ * 3°, a quarter of a storm and 45°, so lakes are painted again (and that
+ * takes a while) only when it changed enough to show.
+ */
+export function lakeWeather(sky: { temperature: ArrayLike<number>; windX: ArrayLike<number>; windY: ArrayLike<number> }, heights: ArrayLike<number>, cells: readonly number[]): Weather {
+  if (!cells.length) return DEFAULT_WEATHER;
+  const mean = (f: (i: number) => number) => cells.reduce((s, i) => s + f(i), 0) / cells.length;
+  const air = 3 * Math.round(mean((i) => sky.temperature[i] + LAPSE * Math.max(0, heights[i])) / 3);
+  const [x, y] = [mean((i) => sky.windX[i]), mean((i) => sky.windY[i])];
+  const step = Math.PI / 4;
+  return {
+    warmth: clamp((air - 6) / 8, -1, 1),
+    air,
+    wind: { strength: Math.round(clamp(Math.hypot(x, y) / STORM, 0, 1) * 4) / 4, direction: Math.round(Math.atan2(y, x) / step) * step },
+  };
+}
 
 /** The water leaving a lake per step (steps of water), and where most of it leaves (frame px). */
 export interface Outflow {
@@ -55,7 +80,7 @@ export function lakeState(shape: LakeShape, weather: Weather, outflow: Outflow =
   const pours = outflow.amount >= POURS && outflow.at;
   return {
     spill: clamp((outflow.amount - SPILL_FROM) / SPILL_RANGE, 0, 1),
-    temperature: lakeTemperature(shape.level, weather.warmth),
+    temperature: weather.air === undefined ? lakeTemperature(shape.level, weather.warmth) : lakeLook(weather.air - LAPSE * shape.level),
     wind: weather.wind,
     outlet: pours ? outflow.at : undefined,
     outflow: pours ? outflow.amount : 0,

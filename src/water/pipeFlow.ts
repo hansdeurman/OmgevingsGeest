@@ -21,7 +21,7 @@ export interface FlowParams {
 
 export const DEFAULT_FLOW: FlowParams = { gravity: 0.04, damping: 0.97 };
 
-/** One step of flow. `flux` (per pipe) and `depth` (per hex) are updated; sinks (`sink[i]`) swallow their water. */
+/** One step of flow. `flux` (per pipe) and `depth` (per hex) are updated; sinks (`sink[i]`) swallow their water: how much is returned. */
 export function flowStep(
   topo: HexTopology,
   ground: Float32Array,
@@ -29,7 +29,7 @@ export function flowStep(
   flux: Float32Array,
   sink: Uint8Array,
   { gravity, damping }: FlowParams = DEFAULT_FLOW,
-): void {
+): number {
   const { cols, rows, n, dirs, dc, dr, length } = topo;
   const surface = scratch(n);
   for (let i = 0; i < n; i++) surface[i] = ground[i] + depth[i];
@@ -76,6 +76,7 @@ export function flowStep(
     }
   }
   // Move the water: in through the pipes pointing here, out through this hex's own.
+  let swallowed = 0;
   for (let row = 0, i = 0; row < rows; row++) {
     const steps = (row & 1) * dirs;
     for (let col = 0; col < cols; col++, i++) {
@@ -86,9 +87,11 @@ export function flowStep(
         if (j >= 0) change += flux[j * dirs + back[d]] - flux[i * dirs + d];
       }
       const next = depth[i] + change;
+      if (sink[i] && next > 0) swallowed += next;
       depth[i] = sink[i] || next < 0 ? 0 : next;
     }
   }
+  return swallowed;
 }
 
 /** A reused buffer of at least `n` floats: a step allocates nothing. */

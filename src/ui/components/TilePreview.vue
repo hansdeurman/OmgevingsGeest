@@ -6,17 +6,17 @@ import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type Wa
 import { loadSprites } from '../../tiles/imageSprites';
 import { createPlaceholderSprites, type SpriteSet } from '../../tiles/placeholderSprites';
 import { TEXTURE_FILES, loadCliff, loadGroundTextures, loadLakeKit, loadPoolFace, loadWalls, textureSize } from '../../tiles/imageTextures';
-import type { LakeKit } from '../../tiles/highLakes';
+import { lakeWeather, type LakeKit } from '../../tiles/highLakes';
 import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
-import { hydroWorldOf } from '../../tiles/mapHydro';
+import { groundCoverOf, hydroWorldOf } from '../../tiles/mapHydro';
 import type { HexTopology } from '../../water/hexTopology';
 import { createRun, type Run } from '../../water/waterRun';
-import { createClimate, seasonOf, YEAR } from '../../water/climate';
-import { temperature } from '../../water/retention';
-import { createWaterCycle, cycleModel, type CycleSnapshot } from '../../water/waterCycle';
+import { seasonOf, YEAR } from '../../water/sun';
+import { createWaterCycle, cycleModel, defaultClimate, type CycleSnapshot } from '../../water/waterCycle';
+import { CLIMATE_SETTINGS, climateReadout, setValue, valueOf, type ClimateSetting } from '../climateSettings';
 import { createDeck, deckMap, type CloudDeck, type SkyField } from '../../clouds/cloudDeck';
 import { CloudGL, type SkyLook } from '../../clouds/cloudGL';
 import { cloudAtlas } from '../../clouds/cloudSprites';
@@ -72,16 +72,23 @@ let map: DemoMap = demoMap(mapId.value, seed.value);
  * weather, the air brings rain and snow to the mountains, the rivers run.
  * Its clouds drift on as puffs between the model's steps.
  */
-let run: { water: Run<CycleSnapshot>; topo: HexTopology; ground: Float32Array; deck: CloudDeck; map: DemoMap } | null = null;
+let run: { water: Run<CycleSnapshot>; topo: HexTopology; ground: Float32Array; deck: CloudDeck; map: DemoMap; lakes: number[] } | null = null;
+/** The climate's settings, which the run reads as it goes, and the sliders' copy of them. */
+const params = defaultClimate();
+const settings = ref(CLIMATE_SETTINGS.map((s) => valueOf(params, s)));
 const step = ref(0);
 /** The furthest step run so far, and the earliest it can still go back to. */
 const steps = ref(0);
 const firstStep = ref(0);
+/** Counts runs started, so what is shown of the run follows a new one. */
+const runs = ref(0);
 const playing = ref(false);
 /** Steps played per second; when painting a step takes longer, playback skips ahead rather than slowing down. */
-const STEPS_PER_SECOND = 12;
+const speed = ref(12);
 /** The run starts in spring with its high lakes full; the view opens at midsummer, the rivers worn in and running with melt. */
 const OPENS_AT = YEAR / 4;
+/** While playing, props settle around changed rivers and lakes at most once in this many steps. */
+const SETTLE_EVERY = 4;
 /** Moments the run keeps to go back to: a few years' worth. */
 const KEPT = 64;
 let frame = 0;
@@ -91,19 +98,35 @@ function startRun(): void {
   const { grid } = map;
   if (grid.elevation.some((e) => e > 0)) {
     const world = hydroWorldOf(grid, 12, map.water);
-    const cycle = createWaterCycle(world, createClimate(seed.value));
+    const cycle = createWaterCycle(world, { cover: groundCoverOf(grid), params, seed: seed.value });
     const deck = createDeck(deckMap(grid.cols, grid.rows, HEX, gridFrame(grid.cols, grid.rows, HEX)), seed.value);
-    run = { water: createRun(cycleModel(cycle), Infinity, 40, KEPT), topo: world.topo, ground: Float32Array.from(grid.elevation), deck, map };
+    const lakes = (map.water ?? []).flatMap((d, i) => (d > 0 ? [i] : []));
+    run = { water: createRun(cycleModel(cycle), Infinity, 40, KEPT), topo: world.topo, ground: Float32Array.from(grid.elevation), deck, map, lakes };
   } else run = null;
   step.value = steps.value = run ? OPENS_AT : 0;
   firstStep.value = 0;
+  runs.value++;
 }
 
-/** Year, season and step of the moment shown. */
+/** Year, season and step of the moment shown, and the weather then. */
 const clock = computed(() => {
-  if (!run || !steps.value) return '';
+  if (!run || !steps.value || !runs.value) return '';
   return `Year ${Math.floor(step.value / YEAR) + 1} · ${seasonOf(run.water.at(step.value).sky.yearShare)} · step ${step.value}`;
 });
+const weatherNow = computed(() => (run && steps.value && runs.value ? climateReadout(run.water.at(step.value).sky, run.ground) : ''));
+
+/** A setting changed: the run reads it from now on, and forgets the future it ran with the old one. */
+function tweak(k: number, value: number): void {
+  settings.value[k] = value;
+  setValue(params, CLIMATE_SETTINGS[k], value);
+  run?.water.forget();
+  steps.value = step.value;
+}
+
+function resetClimate(): void {
+  const defaults = defaultClimate();
+  CLIMATE_SETTINGS.forEach((s: ClimateSetting, k) => tweak(k, valueOf(defaults, s)));
+}
 /** The water as the run has it now: what stands where and how it flows. */
 const waterNow = () => {
   if (!run) return undefined;
@@ -123,13 +146,13 @@ function togglePlay(): void {
   const tick = (now: number) => {
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
-    at += dt * STEPS_PER_SECOND;
+    at += dt * speed.value;
     if (Math.floor(at) !== step.value) step.value = Math.floor(at);
     steps.value = Math.max(steps.value, step.value);
     if (run) firstStep.value = run.water.first;
     skyTime += dt;
     const field = skyField();
-    if (field) run!.deck.update(field, dt * STEPS_PER_SECOND);
+    if (field) run!.deck.update(field, dt * speed.value);
     drawSky();
     frame = requestAnimationFrame(tick);
   };
@@ -154,8 +177,7 @@ let placed: ViewTransform | undefined;
 function skyField(): SkyField | undefined {
   if (!run || run.map !== map) return undefined;
   const { sky } = run.water.at(step.value);
-  const ground = run.ground;
-  return { cloud: sky.cloud, fall: sky.fall, wind: sky.wind, snow: (i) => temperature(ground[i], sky.warmth) < 0 };
+  return { cloud: sky.cloud, fall: sky.fall, windX: sky.windX, windY: sky.windY, snow: (i) => sky.temperature[i] < 0 };
 }
 
 /** The clouds as the sky has them now, at once: after a jump in time or a new map. */
@@ -207,12 +229,17 @@ function schedule(f: () => void): void {
   pending.add(f);
 }
 
+/** The lakes' weather: the run's, where the climate is simulated; else as set by hand. */
 function lakeOptions(): LakeOptions {
+  const sky = run && run.map === map ? run.water.at(step.value).sky : undefined;
   return {
     hexSize: HEX,
     view: { squash: SQUASH, thickness: THICKNESS },
     groundElsewhere: !!groundGl,
-    weather: { warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
+    settleEvery: playing.value ? SETTLE_EVERY : 1,
+    weather: sky
+      ? lakeWeather(sky, run!.ground, run!.lakes)
+      : { warmth: season.value / 100, wind: { strength: wind.value / 100, direction: (windDir.value * Math.PI) / 180 } },
   };
 }
 
@@ -398,6 +425,11 @@ watch(cloudMode, drawSky);
         <input v-model.number="step" type="range" :min="firstStep" :max="steps" step="1" />
       </label>
       <p v-if="steps > 0" class="hint">{{ clock }}</p>
+      <p v-if="steps > 0" class="hint">{{ weatherNow }}</p>
+      <label v-if="steps > 0">
+        Speed {{ speed }}/s
+        <input v-model.number="speed" type="range" min="2" max="48" step="2" />
+      </label>
       <label v-if="steps > 0">
         Clouds
         <select v-model="cloudMode">
@@ -406,15 +438,26 @@ watch(cloudMode, drawSky);
           <option value="off">Off</option>
         </select>
       </label>
-      <label>
-        Season {{ season < 0 ? 'winter' : season > 0 ? 'summer' : 'spring' }}
-        <input v-model.number="season" type="range" min="-100" max="100" step="10" />
-      </label>
-      <label>
-        Wind {{ wind }}%
-        <input v-model.number="wind" type="range" min="0" max="100" step="5" />
-        <input v-model.number="windDir" type="range" min="0" max="360" step="15" title="Wind direction" class="dir" />
-      </label>
+      <details v-if="steps > 0" class="climate">
+        <summary>Climate</summary>
+        <label v-for="(s, k) in CLIMATE_SETTINGS" :key="s.key" :title="s.hint">
+          <span class="name">{{ s.label }}</span>
+          <input type="range" :min="s.min" :max="s.max" :step="s.step" :value="settings[k]" @input="tweak(k, +($event.target as HTMLInputElement).value)" />
+          <span class="value">{{ settings[k] }}</span>
+        </label>
+        <button type="button" @click="resetClimate">Reset</button>
+      </details>
+      <template v-else>
+        <label>
+          Season {{ season < 0 ? 'winter' : season > 0 ? 'summer' : 'spring' }}
+          <input v-model.number="season" type="range" min="-100" max="100" step="10" />
+        </label>
+        <label>
+          Wind {{ wind }}%
+          <input v-model.number="wind" type="range" min="0" max="100" step="5" />
+          <input v-model.number="windDir" type="range" min="0" max="360" step="15" title="Wind direction" class="dir" />
+        </label>
+      </template>
       <label class="check"><input v-model="showGrid" type="checkbox" /> Hex grid</label>
       <label class="check"><input v-model="contours" type="checkbox" /> Height lines</label>
       <label class="check"><input v-model="useArt" type="checkbox" /> Generated art</label>
@@ -451,4 +494,10 @@ canvas.sky { pointer-events: none; }
 .controls input[type='number'] { width: 64px; }
 .controls input.dir { width: 60px; }
 .controls .hint { margin: 0; font-size: 12px; color: #8a8a99; }
+.controls .climate summary { cursor: pointer; }
+.controls .climate { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; overflow-y: auto; }
+.controls .climate label { gap: 6px; }
+.controls .climate .name { width: 96px; }
+.controls .climate input { width: 110px; }
+.controls .climate .value { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
 </style>

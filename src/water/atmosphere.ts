@@ -1,153 +1,152 @@
-import { EDGE_VECTORS, hexTopology, isInner, opposite, pipeSteps, pipeTarget, type HexTopology } from './hexTopology';
-import { temperature } from './retention';
+import { carry, divergence } from './airGrid';
+import { hexTopology, type HexTopology } from './hexTopology';
 
 /**
- * The air over a hex map: per hex the water vapour it carries and the cloud
- * it has condensed into, both moved by the wind (nothing lost on the way,
- * only over the map's edge, while air from beyond the edge the wind comes
- * from brings sea air in). Warm air holds more vapour than cold air, so air
- * the wind drives up a mountainside cools, its vapour condenses into cloud
- * and heavy clouds rain (or snow) on the slope; behind the ridge the air
- * comes down, warms and its clouds dissolve: a rain shadow. The sea moistens
- * the air over it; what evaporates on land (`rise`) is taken up each step.
- * Water in steps, as on the ground; wind in hex spacings per step.
+ * The water in the air over a hex map: per hex the vapour the air carries
+ * and the cloud it has condensed into, both moved by the wind and never
+ * lost (the map's edges are closed: the world is the map). Warm air holds
+ * more vapour than cold air, so air the wind drives up a mountainside
+ * cools, its vapour condenses into cloud and heavy clouds rain (or snow)
+ * on the slope; behind the ridge it comes down, warms, and its clouds
+ * dissolve. Where the wind closes in the air rises and clouds form; where
+ * it spreads out the air sinks and clears. Water comes into the air only
+ * by evaporating: from the sea (drawn from it), from lakes, rivers, the
+ * soil through its plants, and snow (`rise`, from the ground's model), as
+ * much as the air over it takes: the more, the warmer that water, the
+ * drier and windier the air (Dalton's law), up to the humidity air over
+ * water keeps (drier air from above mixes in). Water in steps; wind in hex
+ * spacings per step; temperatures in °C.
  */
 export interface Air {
   topo: HexTopology;
-  /** The ground the air lies on (the sea's surface: 0), which sets how warm it is. */
+  /** The ground the air lies on (the sea's surface: 0): rising ground holds the wind back. */
   floor: Float32Array;
   sea: Uint8Array;
   vapour: Float32Array;
   cloud: Float32Array;
   /** Rain or snow that fell from each hex's clouds in the last step. */
   fall: Float32Array;
-  /** Water that rose from each hex since the last step: added to its vapour. */
+  /** Water that rose from the ground of each hex since the last step: taken up next step. */
   rise: Float32Array;
-  /** Scratch for carrying. */
-  next: Float32Array;
+  /** How much water the air over each hex would take up now (steps): open water gives all of it. */
+  demand: Float32Array;
+  /** Water that evaporated into each hex's air in the last step (it cooled that surface), and that condensed there (it warmed the air; below 0: cloud evaporated). */
+  evaporated: Float32Array;
+  condensed: Float32Array;
+  /** How much the wind spreads out at each hex (closing in: below 0). */
+  spread: Float32Array;
 }
 
-/** The weather the air moves in: the season's warmth (-1 winter … 1 summer), the wind, and where weather systems lift the air (0–1 per hex). */
+/** The air's surroundings this step, per hex: its own temperature, that of the surface under it, the wind. */
 export interface Sky {
-  warmth: number;
-  wind: { x: number; y: number };
-  lift?: ArrayLike<number>;
+  temperature: ArrayLike<number>;
+  surface: ArrayLike<number>;
+  windX: ArrayLike<number>;
+  windY: ArrayLike<number>;
 }
 
 export interface AirParams {
-  /** Share of vapour beyond what the air holds that condenses per step… */
+  /** Share of the vapour beyond what the air holds that condenses per step… */
   condense: number;
   /** …and of what it could still hold that its cloud gives back as vapour. */
   dissolve: number;
   /** Cloud (steps) above which it rains, and the share of the rest that falls per step. */
   rainFrom: number;
   rainRate: number;
-  /** How humid the sea makes the air over it, and the share of the way there per step. */
-  seaHumidity: number;
-  seaRate: number;
+  /** Share of what the air could still take up from water under it that it takes per step in still air, and how much more per hex spacing of wind per step. */
+  evaporate: number;
+  gust: number;
+  /** Water gives air at most this humid (share of what air as warm as the water holds): drier air from above keeps mixing in. */
+  humidity: number;
   /** How much each step of rising ground holds the wind back. */
   block: number;
-  /** Share less air holds where weather systems lift it fully. */
-  lift: number;
+  /** How much less the air holds where the wind closes in (it rises and cools), and more where it spreads out (it sinks and warms), per unit of closing in. */
+  rising: number;
 }
 
 export const DEFAULT_AIR: AirParams = {
   condense: 0.5,
   dissolve: 0.3,
-  rainFrom: 0.06,
-  rainRate: 0.15,
-  seaHumidity: 0.85,
-  seaRate: 0.1,
+  rainFrom: 0.05,
+  rainRate: 0.05,
+  evaporate: 0.015,
+  gust: 2,
+  humidity: 0.8,
   block: 0.1,
-  lift: 0.2,
+  rising: 0.15,
 };
 
-/** Vapour (steps) saturated air holds at 0°, and how much more per degree warmer. */
-const SATURATION = { at0: 0.35, perDegree: 0.1 };
+/** Vapour (steps) saturated air holds at 0°, and how much more per degree warmer (about 7% per degree: Clausius–Clapeyron). */
+const SATURATION = { at0: 0.35, perDegree: 0.07 };
+/** Sea ice forms below this temperature, and gives the air only a share of what open sea would. */
+const SEA_ICE = { below: -1.8, gives: 0.15 };
+/** Rising air holds at most this much less. */
+const MOST_LIFT = 0.6;
 
 /** The most vapour air this warm (°) holds. */
 export const saturation = (t: number) => SATURATION.at0 * Math.exp(SATURATION.perDegree * t);
 
-/** Of a hex's air, the share that leaves across one edge per step for each hex spacing the wind blows that way: edge length over area. */
-const EDGE_SHARE = 2 / 3;
-/** At most this share of a hex's air leaves it per step, however strong the wind. */
-const MOST_LEAVING = 0.9;
-
 export function createAir(cols: number, rows: number, ground: ArrayLike<number>, sea: Uint8Array): Air {
   const n = cols * rows;
+  const array = () => new Float32Array(n);
   return {
     topo: hexTopology(cols, rows, 6),
     floor: Float32Array.from(ground, (g) => Math.max(0, g)),
     sea,
-    vapour: new Float32Array(n),
-    cloud: new Float32Array(n),
-    fall: new Float32Array(n),
-    rise: new Float32Array(n),
-    next: new Float32Array(n),
+    vapour: array(),
+    cloud: array(),
+    fall: array(),
+    rise: array(),
+    demand: array(),
+    evaporated: array(),
+    condensed: array(),
+    spread: array(),
   };
 }
 
-/** Air as humid as the sea makes it everywhere, without clouds: a start that needs no spin-up. */
-export function humidAir(air: Air, warmth: number, p: AirParams = DEFAULT_AIR): void {
-  air.floor.forEach((h, i) => (air.vapour[i] = p.seaHumidity * Math.min(saturation(temperature(0, warmth)), saturation(temperature(h, warmth)))));
+/** Air this humid (share of what it holds) everywhere, without clouds: a start that needs little spin-up. */
+export function humidAir(air: Air, temperature: ArrayLike<number>, humidity = 0.8): void {
+  air.vapour.forEach((_, i) => (air.vapour[i] = humidity * saturation(temperature[i])));
   air.cloud.fill(0);
 }
 
-/**
- * Move `q` (vapour or cloud, per hex) one step with the `wind`, in place: each hex
- * sends a share across every edge the wind blows through, less uphill;
- * what crosses the map's edge is gone, and through edges facing the wind
- * air carrying `ambient` comes in.
- */
-export function carry(air: Air, q: Float32Array, wind: { x: number; y: number }, ambient: number, p: AirParams = DEFAULT_AIR): void {
-  const { topo, floor, next } = air;
-  const { cols, rows } = topo;
-  const out = EDGE_VECTORS.map(([x, y]) => EDGE_SHARE * Math.max(0, wind.x * x + wind.y * y));
-  const total = out.reduce((a, b) => a + b, 0);
-  if (total > MOST_LEAVING) out.forEach((o, d) => (out[d] = (o * MOST_LEAVING) / total));
-  const steps = pipeSteps(topo);
-  next.fill(0);
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const i = row * cols + col;
-      const inner = isInner(topo, row, col);
-      let left = q[i];
-      for (let d = 0; d < 6; d++) {
-        const j = inner ? i + steps[(row & 1) * 6 + d] : pipeTarget(topo, i, d);
-        if (j < 0) {
-          next[i] += out[opposite(d)] * ambient; // air from beyond the edge
-          left -= out[d] * q[i];
-          continue;
-        }
-        if (!out[d]) continue;
-        const moved = (out[d] * q[i]) / (1 + p.block * Math.max(0, floor[j] - floor[i]));
-        next[j] += moved;
-        left -= moved;
-      }
-      next[i] += left;
-    }
+/** How much water the air over each hex would take up now, into `air.demand`. */
+export function airDemand(air: Air, sky: Sky, p: AirParams = DEFAULT_AIR): void {
+  for (let i = 0; i < air.demand.length; i++) {
+    const wind = Math.hypot(sky.windX[i], sky.windY[i]);
+    air.demand[i] = p.evaporate * (1 + p.gust * wind) * Math.max(0, p.humidity * saturation(sky.surface[i]) - air.vapour[i]);
   }
-  q.set(next);
 }
 
-/** One step of the air, in place: the sea moistens it, what rose is taken up, the wind carries it, vapour and cloud trade places, heavy clouds fall (into `fall`). */
-export function airStep(air: Air, sky: Sky, p: AirParams = DEFAULT_AIR): void {
-  const { floor, sea, vapour, cloud, fall, rise } = air;
-  const { wind } = sky;
-  const seaAir = p.seaHumidity * saturation(temperature(0, sky.warmth));
+/**
+ * One step of the air, in place: what rose is taken up and the sea gives
+ * what is asked of it, the wind carries vapour and cloud, vapour and cloud
+ * trade places, heavy clouds fall (into `fall`). Returns the water drawn
+ * from the sea.
+ */
+export function airStep(air: Air, sky: Sky, p: AirParams = DEFAULT_AIR): number {
+  const { sea, vapour, cloud, fall, rise, demand, evaporated, condensed, spread } = air;
+  let drawn = 0;
   for (let i = 0; i < vapour.length; i++) {
-    vapour[i] += rise[i] + (sea[i] ? p.seaRate * Math.max(0, seaAir - vapour[i]) : 0);
+    const fromSea = sea[i] ? demand[i] * (sky.surface[i] < SEA_ICE.below ? SEA_ICE.gives : 1) : 0;
+    evaporated[i] = rise[i] + fromSea;
+    vapour[i] += evaporated[i];
+    drawn += fromSea;
     rise[i] = 0;
   }
-  carry(air, vapour, wind, seaAir, p);
-  carry(air, cloud, wind, 0, p);
+  carry(air.topo, vapour, sky.windX, sky.windY, air.floor, p.block);
+  carry(air.topo, cloud, sky.windX, sky.windY, air.floor, p.block);
+  divergence(air.topo, sky.windX, sky.windY, spread);
   for (let i = 0; i < vapour.length; i++) {
-    const holds = saturation(temperature(floor[i], sky.warmth)) * (1 - p.lift * (sky.lift?.[i] ?? 0));
+    const lift = Math.min(MOST_LIFT, p.rising * Math.max(0, -spread[i]));
+    const holds = saturation(sky.temperature[i]) * (1 - lift) * (1 + p.rising * Math.max(0, spread[i]));
     const beyond = vapour[i] - holds;
     const trade = beyond > 0 ? p.condense * beyond : -Math.min(cloud[i], p.dissolve * -beyond);
     vapour[i] -= trade;
     cloud[i] += trade;
+    condensed[i] = trade;
     fall[i] = cloud[i] > p.rainFrom ? p.rainRate * (cloud[i] - p.rainFrom) : 0;
     cloud[i] -= fall[i];
   }
+  return drawn;
 }
