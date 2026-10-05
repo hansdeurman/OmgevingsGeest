@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WETNESS } from '../../water/wetness';
 import { gridFrame, frameCentre } from '../geometry';
-import { paintGroundWater, wetLayer, RIVER_BED } from '../groundWater';
+import { paintGroundWater, riverBedAt, wetLayer, RIVER_BED } from '../groundWater';
 import { createRaster, getPixel, setPixel } from '../raster';
 import type { RGB } from '../../rendering/palette';
 
@@ -67,6 +67,14 @@ describe('paintGroundWater', () => {
     const column = Array.from({ length: SIZE }, (_, k) => getPixel(flat.ground, x, Math.round(y / 2) - SIZE / 2 + k));
     expect(column.some(isWater)).toBe(true);
     expect(flat.river.data.length).toBe(Math.ceil(flat.ground.width / flat.river.cell) * Math.ceil(flat.ground.height / flat.river.cell));
+  });
+
+  it('shows a stream in the mountains from a thinner bed than a river needs below', () => {
+    const thin = { ...river(0.1), bed: new Float32Array(n).fill(RIVER_BED * 0.5) };
+    const at = (height: number) => paintGroundWater(base, layer, { wetness: even(WETNESS.normal), river: thin, ground: new Float32Array(n).fill(height) }, { water: () => WATER }).river;
+    expect(at(0).data.some((v) => v)).toBe(false);
+    expect(at(7).data.some((v) => v)).toBe(true);
+    expect(riverBedAt(7)).toBeLessThan(riverBedAt(1));
   });
 
   it('draws no river where the bed is worn too little', () => {

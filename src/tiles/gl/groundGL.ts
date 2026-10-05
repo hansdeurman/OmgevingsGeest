@@ -2,6 +2,7 @@ import type { RGB } from '../../rendering/palette';
 import { UNDER_WATER, type WaterLook, type WetLayer } from '../groundWater';
 import type { Raster } from '../raster';
 import { LOOK_RES, lookTable } from '../wetGround';
+import { glAttribute, glProgram, glUniforms, type Uniforms } from './glKit';
 import { RIVER_VERTEX, riverMesh } from './groundGLData';
 
 /**
@@ -136,8 +137,6 @@ void main() {
 }
 `;
 
-type Uniforms = Record<string, WebGLUniformLocation | null>;
-
 export class GroundGL {
   private readonly ground: { program: WebGLProgram; u: Uniforms; quad: WebGLBuffer };
   private readonly river: { program: WebGLProgram; u: Uniforms; bed: WebGLBuffer; water: WebGLBuffer };
@@ -157,23 +156,8 @@ export class GroundGL {
   }
 
   private constructor(private readonly gl: WebGL2RenderingContext) {
-    const program = (vs: string, fs: string) => {
-      const p = gl.createProgram()!;
-      for (const [type, src] of [
-        [gl.VERTEX_SHADER, vs],
-        [gl.FRAGMENT_SHADER, fs],
-      ] as const) {
-        const s = gl.createShader(type)!;
-        gl.shaderSource(s, src);
-        gl.compileShader(s);
-        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader');
-        gl.attachShader(p, s);
-      }
-      gl.linkProgram(p);
-      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? 'program');
-      return p;
-    };
-    const uniforms = (p: WebGLProgram, names: string[]) => Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)]));
+    const program = (vs: string, fs: string) => glProgram(gl, vs, fs);
+    const uniforms = (p: WebGLProgram, names: string[]) => glUniforms(gl, p, names);
     const shared = ['uFrame', 'uView', 'uCanvas', 'uKeep', 'uField', 'uGrid', 'uWater', 'uWaterSize'];
     const g = program(GROUND_VERTEX, GROUND_FRAGMENT);
     this.ground = { program: g, u: uniforms(g, [...shared, 'uBase', 'uLook', 'uLookWidth', 'uDetail', 'uDetailSize']), quad: gl.createBuffer()! };
@@ -303,10 +287,6 @@ export class GroundGL {
   }
 
   private attribute(program: WebGLProgram, name: string, buffer: WebGLBuffer, size: number): void {
-    const gl = this.gl;
-    const at = gl.getAttribLocation(program, name);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.enableVertexAttribArray(at);
-    gl.vertexAttribPointer(at, size, gl.FLOAT, false, 0, 0);
+    glAttribute(this.gl, program, name, buffer, size);
   }
 }

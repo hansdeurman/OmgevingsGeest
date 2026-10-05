@@ -13,8 +13,13 @@ import { createPlaceholderTextures, type GroundTextures } from '../../tiles/plac
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
 import { hydroWorldOf } from '../../tiles/mapHydro';
 import type { HexTopology } from '../../water/hexTopology';
-import { createWaterRun, type WaterRun } from '../../water/waterRun';
-import { phaseAt, phaseEnd, seasonScript, type WaterScript } from '../../water/waterScript';
+import { createRun, type Run } from '../../water/waterRun';
+import { createClimate, seasonOf, YEAR } from '../../water/climate';
+import { temperature } from '../../water/retention';
+import { createWaterCycle, cycleModel, type CycleSnapshot } from '../../water/waterCycle';
+import { createDeck, deckMap, type CloudDeck, type SkyField } from '../../clouds/cloudDeck';
+import { CloudGL, type SkyLook } from '../../clouds/cloudGL';
+import { cloudAtlas } from '../../clouds/cloudSprites';
 import { timed } from '../perf';
 import { hexSizeFor } from '../display';
 import { asyncLakes, type LakeReply } from '../../tiles/lakeSource';
@@ -62,30 +67,43 @@ let labels: MapLabel[] = [];
 let resizeObs: ResizeObserver | null = null;
 let map: DemoMap = demoMap(mapId.value, seed.value);
 
-/** The scripted water run of the current map, played as it goes. */
-let run: { script: WaterScript; water: WaterRun; topo: HexTopology } | null = null;
+/**
+ * The current map's water cycle, run on as it plays: the climate makes the
+ * weather, the air brings rain and snow to the mountains, the rivers run.
+ * Its clouds drift on as puffs between the model's steps.
+ */
+let run: { water: Run<CycleSnapshot>; topo: HexTopology; ground: Float32Array; deck: CloudDeck; map: DemoMap } | null = null;
 const step = ref(0);
+/** The furthest step run so far, and the earliest it can still go back to. */
 const steps = ref(0);
+const firstStep = ref(0);
 const playing = ref(false);
 /** Steps played per second; when painting a step takes longer, playback skips ahead rather than slowing down. */
 const STEPS_PER_SECOND = 12;
-/** Years of weather in the water run. */
-const YEARS = 3;
+/** The run starts in spring with its high lakes full; the view opens at midsummer, the rivers worn in and running with melt. */
+const OPENS_AT = YEAR / 4;
+/** Moments the run keeps to go back to: a few years' worth. */
+const KEPT = 64;
 let frame = 0;
 
 function startRun(): void {
   stopPlaying();
-  const { grid, water } = map;
-  if (water?.some((d) => d > 0)) {
-    const world = hydroWorldOf(grid);
-    const script = seasonScript(grid.cols, grid.rows, grid.elevation, water, YEARS);
-    run = { script, water: createWaterRun(world, script), topo: world.topo };
+  const { grid } = map;
+  if (grid.elevation.some((e) => e > 0)) {
+    const world = hydroWorldOf(grid, 12, map.water);
+    const cycle = createWaterCycle(world, createClimate(seed.value));
+    const deck = createDeck(deckMap(grid.cols, grid.rows, HEX, gridFrame(grid.cols, grid.rows, HEX)), seed.value);
+    run = { water: createRun(cycleModel(cycle), Infinity, 40, KEPT), topo: world.topo, ground: Float32Array.from(grid.elevation), deck, map };
   } else run = null;
-  steps.value = run ? run.water.length : 0;
-  step.value = run ? phaseEnd(run.script, 'Spring rain') + 20 : 0; // open just after the cloudburst, rivers running
+  step.value = steps.value = run ? OPENS_AT : 0;
+  firstStep.value = 0;
 }
 
-const phase = computed(() => (run && steps.value ? phaseAt(run.script, step.value).label : ''));
+/** Year, season and step of the moment shown. */
+const clock = computed(() => {
+  if (!run || !steps.value) return '';
+  return `Year ${Math.floor(step.value / YEAR) + 1} · ${seasonOf(run.water.at(step.value).sky.yearShare)} · step ${step.value}`;
+});
 /** The water as the run has it now: what stands where and how it flows. */
 const waterNow = () => {
   if (!run) return undefined;
@@ -100,15 +118,74 @@ function stopPlaying(): void {
 
 function togglePlay(): void {
   if (playing.value) return stopPlaying();
-  if (step.value >= steps.value) step.value = 0;
   playing.value = true;
-  const [from, start] = [step.value, performance.now()];
-  const tick = () => {
-    step.value = Math.min(steps.value, from + Math.floor(((performance.now() - start) / 1000) * STEPS_PER_SECOND));
-    if (step.value < steps.value) frame = requestAnimationFrame(tick);
-    else stopPlaying();
+  let [last, at] = [performance.now(), step.value];
+  const tick = (now: number) => {
+    const dt = Math.min(0.25, (now - last) / 1000);
+    last = now;
+    at += dt * STEPS_PER_SECOND;
+    if (Math.floor(at) !== step.value) step.value = Math.floor(at);
+    steps.value = Math.max(steps.value, step.value);
+    if (run) firstStep.value = run.water.first;
+    skyTime += dt;
+    const field = skyField();
+    if (field) run!.deck.update(field, dt * STEPS_PER_SECOND);
+    drawSky();
+    frame = requestAnimationFrame(tick);
   };
   frame = requestAnimationFrame(tick);
+}
+
+/** The sky over the map, on the GPU (when there is WebGL2): clouds, their shadows, rain and snow. */
+const skyCanvas = ref<HTMLCanvasElement | null>(null);
+let skyGl: CloudGL | undefined;
+const cloudMode = ref<SkyLook['mode'] | 'off'>('see-through');
+/** Clouds float this high (frame px) over the ground. */
+const ALTITUDE = 1.3 * HEX;
+/** The sky is soft: drawn at one canvas pixel per CSS pixel, however sharp the screen. */
+const SKY_DPR = 1;
+/** Where the player points, in CSS px over the map, if anywhere; and the sky's clock (s), for falling rain. */
+let focus: { x: number; y: number } | undefined;
+let skyTime = 0;
+/** Where the map was last drawn on the canvas. */
+let placed: ViewTransform | undefined;
+
+/** The sky the run has now, for the clouds to follow. */
+function skyField(): SkyField | undefined {
+  if (!run || run.map !== map) return undefined;
+  const { sky } = run.water.at(step.value);
+  const ground = run.ground;
+  return { cloud: sky.cloud, fall: sky.fall, wind: sky.wind, snow: (i) => temperature(ground[i], sky.warmth) < 0 };
+}
+
+/** The clouds as the sky has them now, at once: after a jump in time or a new map. */
+function resetSky(): void {
+  const field = skyField();
+  if (field) run!.deck.reset(field);
+  drawSky();
+}
+
+function drawSky(): void {
+  const el = skyCanvas.value;
+  const box = host.value;
+  if (!skyGl || !el || !box) return;
+  const dpr = Math.min(SKY_DPR, window.devicePixelRatio || 1);
+  fit(el, box.clientWidth, box.clientHeight, dpr);
+  if (cloudMode.value === 'off' || !run || run.map !== map || !placed || scene?.grid !== map.grid) return skyGl.clear();
+  const t = placed;
+  const look: SkyLook = { mode: cloudMode.value, focus: focus && { x: focus.x * dpr, y: focus.y * dpr }, time: skyTime };
+  timed('sky', () => skyGl!.render(run!.deck.puffs, { scale: t.scale * dpr, x: t.x * dpr, y: t.y * dpr, squash: SQUASH, altitude: ALTITUDE }, look, Math.sqrt(3) * HEX * t.scale * dpr));
+}
+
+function point(e: PointerEvent): void {
+  const box = host.value!.getBoundingClientRect();
+  focus = { x: e.clientX - box.left, y: e.clientY - box.top };
+  if (!playing.value) schedule(drawSky);
+}
+
+function unpoint(): void {
+  focus = undefined;
+  if (!playing.value) schedule(drawSky);
 }
 
 const groundTextures = () => (useArt.value ? { ...placeholders, ...art } : placeholders);
@@ -185,6 +262,7 @@ async function rebuild(): Promise<void> {
     }),
   );
   draw();
+  resetSky();
 }
 
 function repaintWater(): void {
@@ -227,6 +305,7 @@ function draw(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const t = fitTransform(s, w, h, 48);
+  placed = t;
   const onGpu = !!(groundGl && s.look && s.wet);
   if (groundGl && groundCanvas.value) {
     fit(groundCanvas.value, w, h, dpr);
@@ -236,6 +315,7 @@ function draw(): void {
   }
   timed('draw', () => renderer.draw(ctx, s, t, { grid: showGrid.value, ground: !onGpu }));
   drawLabels(ctx, s, t);
+  if (!playing.value) drawSky();
 }
 
 function newMap(): void {
@@ -248,6 +328,9 @@ onMounted(() => {
   if (groundCanvas.value && new URLSearchParams(window.location.search).get('gpu') !== '0') groundGl = GroundGL.create(groundCanvas.value);
   startRun();
   rebuild();
+  // Placeholder cloud art, painted while the map's ground is painted in the workers.
+  const cell = Math.round(Math.min(192, Math.max(128, HEX * 4.8)));
+  if (skyCanvas.value) skyGl = CloudGL.create(skyCanvas.value, cloudAtlas(cell, Math.round((cell * 2) / 3)));
   Promise.all([loadGroundTextures(TEXTURE_FILES, textureSize(HEX)), loadSprites(HEX), loadWalls(), loadCliff(HEX), loadPoolFace(HEX), loadLakeKit(HEX)])
     .then(([textures, sprites, walls, cliff, poolFace, lakes]) => {
       art = textures;
@@ -272,12 +355,16 @@ onBeforeUnmount(() => {
 watch([mapId, seed], newMap);
 watch([blend, useArt, relief, mountainStyle, contours], rebuild);
 watch([step, season, wind, windDir], repaintWater);
+watch(step, () => playing.value || resetSky());
 watch(showGrid, draw);
+watch(cloudMode, drawSky);
 </script>
 
 <template>
   <div class="tiles">
-    <div ref="host" class="stage"><canvas ref="groundCanvas" /><canvas ref="canvas" /></div>
+    <div ref="host" class="stage" @pointermove="point" @pointerdown="point" @pointerleave="unpoint">
+      <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="skyCanvas" class="sky" />
+    </div>
     <div class="controls">
       <label>
         Map
@@ -308,9 +395,17 @@ watch(showGrid, draw);
       <label v-if="steps > 0">
         Water
         <button type="button" :title="playing ? 'Pause' : 'Play the water run'" @click="togglePlay">{{ playing ? '⏸' : '▶' }}</button>
-        <input v-model.number="step" type="range" min="0" :max="steps" step="1" />
+        <input v-model.number="step" type="range" :min="firstStep" :max="steps" step="1" />
       </label>
-      <p v-if="steps > 0" class="hint">Step {{ step }} / {{ steps }} · {{ phase }}</p>
+      <p v-if="steps > 0" class="hint">{{ clock }}</p>
+      <label v-if="steps > 0">
+        Clouds
+        <select v-model="cloudMode">
+          <option value="see-through">See-through</option>
+          <option value="solid">Solid</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
       <label>
         Season {{ season < 0 ? 'winter' : season > 0 ? 'summer' : 'spring' }}
         <input v-model.number="season" type="range" min="-100" max="100" step="10" />
@@ -336,6 +431,7 @@ watch(showGrid, draw);
 }
 .stage { position: absolute; inset: 0; }
 canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+canvas.sky { pointer-events: none; }
 .controls {
   position: absolute;
   bottom: 12px;

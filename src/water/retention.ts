@@ -27,6 +27,8 @@ export interface Weather {
   rain: number | ArrayLike<number>;
   warmth: number;
   evaporation: number;
+  /** Where evaporated water goes, added per hex (into the air); gone if absent. */
+  into?: Float32Array;
 }
 
 /** Temperature (°, roughly) at sea level in spring, how far the seasons swing it, and how much colder each step up is. */
@@ -65,7 +67,7 @@ export const glacierOf = (elevation: number) => Math.max(0, elevation - GLACIER.
 
 /** One step of weather on every hex, in place: precipitation, melt, soaking in and seeping out, evaporation. */
 export function weatherStep(ground: Float32Array, depth: Float32Array, soil: Float32Array, snow: Float32Array, soak: SoakMap, weather: Weather): void {
-  const { rain, warmth, evaporation } = weather;
+  const { rain, warmth, evaporation, into } = weather;
   for (let i = 0; i < depth.length; i++) {
     const t = temperature(ground[i], warmth);
     const p = typeof rain === 'number' ? rain : rain[i];
@@ -78,5 +80,6 @@ export function weatherStep(ground: Float32Array, depth: Float32Array, soil: Flo
     soil[i] += soaked - seep;
     const water = depth[i] + melt - soaked + seep;
     depth[i] = Math.max(0, water - evaporation * clamp(t / EVAPORATION_AT, 0, 1.5) * Math.min(1, water / OPEN_WATER));
+    if (into) into[i] += Math.max(0, water - depth[i]);
   }
 }

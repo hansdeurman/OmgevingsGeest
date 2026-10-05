@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createHydroWorld, type HydroSnapshot } from '../hydroWorld';
 import { soakOf } from '../retention';
-import { createWaterRun } from '../waterRun';
+import { createRun, createWaterRun } from '../waterRun';
 import { runScript, scriptLength, type WaterScript } from '../waterScript';
 
 /** A sloping 6x5 map with a hollow, meadow soaking up rain. */
@@ -43,5 +43,30 @@ describe('createWaterRun', () => {
 
   it('holds the last moment past the end', () => {
     same(createWaterRun(world(), script).at(999), reference[scriptLength(script)]);
+  });
+});
+
+describe('createRun', () => {
+  /** A counter as a model: its view is how many steps it took. */
+  const counter = () => {
+    let n = 0;
+    return { step: () => void n++, save: () => n, restore: (s: number) => void (n = s), view: () => n };
+  };
+
+  it('runs on without end when given no length', () => {
+    const run = createRun(counter());
+    expect(run.length).toBe(Infinity);
+    expect(run.at(5000)).toBe(5000);
+  });
+
+  it('keeps at most so many moments, dropping the oldest, and goes back no further than it holds', () => {
+    const run = createRun(counter(), Infinity, 10, 5);
+    run.at(200);
+    expect(run.kept).toBe(5);
+    expect(run.first).toBe(160);
+    expect(run.at(0)).toBe(160);
+    expect(run.at(173)).toBe(173);
+    expect(run.at(250)).toBe(250);
+    expect(run.first).toBe(210);
   });
 });

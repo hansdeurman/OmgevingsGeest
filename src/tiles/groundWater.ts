@@ -1,3 +1,4 @@
+import { smoothstep } from '../math/scalar';
 import type { RGB } from '../rendering/palette';
 import type { RiverState } from '../water/hydroWorld';
 import { WETNESS } from '../water/wetness';
@@ -77,6 +78,9 @@ function riverMask(lines: readonly RiverLine[], width: number, height: number, s
 
 /** A river shows where its bed carried at least this much (steps per step)… */
 export const RIVER_BED = 0.04;
+/** …in the mountains, where rivers spring from rain and melt, already a stream at this share of it… */
+const STREAM = { share: 0.25, from: 3, full: 6 };
+export const riverBedAt = (ground: number) => RIVER_BED * (1 - (1 - STREAM.share) * smoothstep(STREAM.from, STREAM.full, ground));
 /** …except where water stands over it this wet: the river runs into the lake. */
 export const UNDER_WATER = 4.5;
 
@@ -96,7 +100,7 @@ export function waterLook(width: number, height: number, layer: WetLayer, state:
   const { river } = state;
   const [W, H] = [width, Math.ceil(height * squash)];
   if (!river) return { field, lines: [], river: riverMask([], W, H, squash) };
-  const isRiver = (i: number) => river.bed[i] >= RIVER_BED && state.wetness[i] < WETNESS.flooded;
+  const isRiver = (i: number) => river.bed[i] >= riverBedAt(state.ground[i]) && state.wetness[i] < WETNESS.flooded;
   const centre = (i: number) => frameCentre(i % cols, Math.floor(i / cols), size, frame);
   const lines = riverLines(riverPaths(river.down, river.bed, isRiver), { centre, size, seed, bed: river.bed, flow: river.flow, ground: state.ground });
   return { field, lines, river: riverMask(lines, W, H, squash) };

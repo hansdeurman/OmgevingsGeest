@@ -24,6 +24,9 @@ const EDGES: readonly [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [
 /** Past corner c, between edges c and c + 1: their sum. */
 const CORNERS = EDGES.map(([q, r], c): [number, number] => [q + EDGES[(c + 1) % 6][0], r + EDGES[(c + 1) % 6][1]]);
 
+/** Unit vector of each edge direction on the map (x east, y south), in hex spacings. */
+export const EDGE_VECTORS: readonly [number, number][] = EDGES.map(([q, r]) => [q + r / 2, (Math.sqrt(3) / 2) * r]);
+
 /** The direction pointing back. */
 export const opposite = (d: number) => (d < 6 ? (d + 3) % 6 : 6 + ((d - 3) % 6));
 

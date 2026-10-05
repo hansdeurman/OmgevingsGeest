@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { neighbourIndices } from '../../tiles/hydrology';
-import { besideCorner, hexTopology, opposite, pipeTarget } from '../hexTopology';
+import { offsetToPixel } from '../../math/hex';
+import { besideCorner, EDGE_VECTORS, hexTopology, opposite, pipeTarget } from '../hexTopology';
 
 const COLS = 7;
 const ROWS = 6;
@@ -15,6 +16,16 @@ describe('hexTopology', () => {
       const edges = pipes(i).slice(0, 6).filter((j) => j >= 0).sort((a, b) => a - b);
       expect(edges).toEqual(neighbourIndices(map, i).sort((a, b) => a - b));
     }
+  });
+
+  it('points each edge vector at the neighbour across that edge', () => {
+    const i = 3 * COLS + 3;
+    const at = (j: number) => offsetToPixel(j % COLS, Math.floor(j / COLS), 1 / Math.sqrt(3));
+    EDGE_VECTORS.forEach(([x, y], d) => {
+      const [from, to] = [at(i), at(pipeTarget(t, i, d))];
+      expect(to.x - from.x).toBeCloseTo(x);
+      expect(to.y - from.y).toBeCloseTo(y);
+    });
   });
 
   it('leads the other six past its corners, each between the two neighbours beside that corner', () => {

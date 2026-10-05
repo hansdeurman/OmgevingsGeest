@@ -43,6 +43,17 @@ describe('weatherStep', () => {
     expect(steps[199].depth).toBeGreaterThan(0.1);
   });
 
+  it('sends what evaporates into the air, if asked: all the water lost', () => {
+    const [ground, depth, soil, snow] = [Float32Array.of(1), Float32Array.of(0.5), Float32Array.of(meadow.capacity), new Float32Array(1)];
+    const into = new Float32Array(1);
+    const map = soakMap([meadow]);
+    const total = () => depth[0] + soil[0] + snow[0] + into[0];
+    const start = total();
+    for (let k = 0; k < 50; k++) weatherStep(ground, depth, soil, snow, map, { rain: 0, warmth: 1, evaporation: 0.01, into });
+    expect(into[0]).toBeGreaterThan(0.1);
+    expect(total()).toBeCloseTo(start, 5);
+  });
+
   it('gives soaked-up water back slowly, long after the rain has stopped', () => {
     // On a slope: whatever stands on the hex runs off each step.
     const [ground, depth, soil, snow] = [Float32Array.of(1), new Float32Array(1), new Float32Array(1), new Float32Array(1)];
