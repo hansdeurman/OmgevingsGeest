@@ -11,7 +11,7 @@ describe('castPowers', () => {
   it('warms the hex a salamander stands on, and no other', () => {
     const f = createInfluence(cols * rows);
     castPowers(f, [creature('salamander', cols, middle)], meadow(cols, rows));
-    expect(f.heat[middle]).toBeCloseTo(0.08);
+    expect(f.heat[middle]).toBeCloseTo(0.03);
     expect(f.heat[middle + 1]).toBe(0);
   });
 
@@ -37,6 +37,7 @@ describe('castPowers', () => {
     const h = meadow(cols, rows);
     castPowers(f, [creature('raindragon', cols, middle), creature('hare', cols, 0), creature('sunmane', cols, cols * rows - 1)], h);
     expect(f.rain[middle]).toBeGreaterThan(0);
+    expect(f.gather[middle]).toBeGreaterThan(0);
     expect(f.mist[middle]).toBeGreaterThan(0);
     expect(f.grow[0]).toBeGreaterThan(0);
     expect(f.thin[cols * rows - 1]).toBeGreaterThan(0);

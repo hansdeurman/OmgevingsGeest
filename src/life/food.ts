@@ -1,4 +1,4 @@
-import { smoothstep } from '../math/scalar';
+import { smoothstep, soft } from '../math/scalar';
 import type { Habitat } from './habitat';
 
 /**
@@ -45,12 +45,15 @@ function growing(h: Habitat, i: number): number {
 /** Logistic growth of `x` towards `most`, at `rate`, from at least `seed`; above `most`, it falls back to it. */
 const toward = (x: number, most: number, rate: number, seed: number) => (x > most ? most + (x - most) * 0.95 : x + rate * (x + seed) * (1 - x / most));
 
-/** One step of growing, in place; `boost` per hex makes plants grow that many times faster again. */
+/** The most powers make plants grow faster, all together: so many times again. */
+const MOST_BOOST = 4;
+
+/** One step of growing, in place; `boost` per hex makes plants grow that many times faster again (tailing off towards `MOST_BOOST`). */
 export function growFood(food: Food, h: Habitat, boost: ArrayLike<number>): void {
   const { plants, fish } = food;
   for (let i = 0; i < plants.length; i++) {
     const most = meadow(food, h, i);
-    plants[i] = most > 0 ? toward(plants[i], most, GROW.rate * growing(h, i) * (1 + boost[i]), GROW.seed) : 0;
+    plants[i] = most > 0 ? toward(plants[i], most, GROW.rate * growing(h, i) * (1 + soft(boost[i], MOST_BOOST)), GROW.seed) : 0;
     if (h.temperature[i] < GROW.below) plants[i] *= 1 - GROW.frost;
     const holds = pond(h, i);
     fish[i] = holds > 0.01 ? Math.min(holds, toward(fish[i], holds, BREED.rate * (h.temperature[i] > 0 ? 1 : 0.3), BREED.seed)) : 0;

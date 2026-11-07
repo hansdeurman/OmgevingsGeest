@@ -8,6 +8,9 @@ export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+/** `x`, tailing off smoothly towards `most` (either way): about `x` while small, never beyond `most`. */
+export const soft = (x: number, most: number) => most * Math.tanh(x / most);
+
 /** Hermite ramp from 0 (at e0) to 1 (at e1). */
 export function smoothstep(e0: number, e1: number, x: number): number {
   const t = clamp((x - e0) / (e1 - e0), 0, 1);
