@@ -11,11 +11,15 @@ import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
-import { groundCoverOf, hydroWorldOf } from '../../tiles/mapHydro';
+import { groundCoverOf, hydroWorldOf, plantRoomOf } from '../../tiles/mapHydro';
 import type { HexTopology } from '../../water/hexTopology';
 import { createRun, type Run } from '../../water/waterRun';
 import { seasonOf, YEAR } from '../../water/sun';
-import { createWaterCycle, cycleModel, defaultClimate, type CycleSnapshot } from '../../water/waterCycle';
+import { createWaterCycle, defaultClimate } from '../../water/waterCycle';
+import { createEcosystem, ecoModel, schedule as letIn, type EcoSnapshot, type Ecosystem, type LifeSnapshot } from '../../life/ecosystem';
+import { hexAt } from '../../life/hexSpace';
+import { creatureAt, CreatureSprites, drawCreatures, placeCreatures, type Placed } from '../creatureLayer';
+import { callRows, describe, kindRows, loreOf, RELEASABLE } from '../lifePanel';
 import { CLIMATE_SETTINGS, climateReadout, setValue, valueOf, type ClimateSetting } from '../climateSettings';
 import { drawWind, windArrows } from '../windOverlay';
 import { createDeck, deckMap, type CloudDeck, type SkyField } from '../../clouds/cloudDeck';
@@ -73,7 +77,7 @@ let map: DemoMap = demoMap(mapId.value, seed.value);
  * weather, the air brings rain and snow to the mountains, the rivers run.
  * Its clouds drift on as puffs between the model's steps.
  */
-let run: { water: Run<CycleSnapshot>; topo: HexTopology; ground: Float32Array; deck: CloudDeck; map: DemoMap; lakes: number[] } | null = null;
+let run: { water: Run<EcoSnapshot>; eco: Ecosystem; topo: HexTopology; ground: Float32Array; deck: CloudDeck; map: DemoMap; lakes: number[] } | null = null;
 /** The climate's settings, which the run reads as it goes, and the sliders' copy of them. */
 const params = defaultClimate();
 const settings = ref(CLIMATE_SETTINGS.map((s) => valueOf(params, s)));
@@ -100,12 +104,14 @@ function startRun(): void {
   if (grid.elevation.some((e) => e > 0)) {
     const world = hydroWorldOf(grid, 12, map.water);
     const cycle = createWaterCycle(world, { cover: groundCoverOf(grid), params, seed: seed.value });
+    const eco = createEcosystem(cycle, plantRoomOf(grid), seed.value);
     const deck = createDeck(deckMap(grid.cols, grid.rows, HEX, gridFrame(grid.cols, grid.rows, HEX)), seed.value);
     const lakes = (map.water ?? []).flatMap((d, i) => (d > 0 ? [i] : []));
-    run = { water: createRun(cycleModel(cycle), Infinity, 40, KEPT), topo: world.topo, ground: Float32Array.from(grid.elevation), deck, map, lakes };
+    run = { water: createRun(ecoModel(eco), Infinity, 40, KEPT), eco, topo: world.topo, ground: Float32Array.from(grid.elevation), deck, map, lakes };
   } else run = null;
   step.value = steps.value = run ? OPENS_AT : 0;
   firstStep.value = 0;
+  lifeShown = undefined;
   runs.value++;
 }
 
@@ -138,6 +144,7 @@ const waterNow = () => {
 function stopPlaying(): void {
   cancelAnimationFrame(frame);
   playing.value = false;
+  between = 1;
 }
 
 function togglePlay(): void {
@@ -149,6 +156,7 @@ function togglePlay(): void {
     last = now;
     at += dt * speed.value;
     if (Math.floor(at) !== step.value) step.value = Math.floor(at);
+    between = at - step.value;
     steps.value = Math.max(steps.value, step.value);
     if (run) firstStep.value = run.water.first;
     skyTime += dt;
@@ -194,6 +202,72 @@ function drawWindLayer(): void {
   drawWind(ctx, arrows, { x: box.clientWidth - 150, y: 12 });
 }
 
+/** The creatures, over the map and under the clouds: they glide from one step's place to the next. */
+const lifeCanvas = ref<HTMLCanvasElement | null>(null);
+const showLife = ref(true);
+const hovered = ref('');
+const sprites = new CreatureSprites();
+/** How far playback is between the step shown and the next (1: at the step itself, when paused). */
+let between = 1;
+/** The life of the step shown and of the one before it, to glide between. */
+let lifeShown: { step: number; prev?: LifeSnapshot; cur: LifeSnapshot } | undefined;
+let placedLife: Placed[] = [];
+
+/** The life of the step shown, and of the step before it if that was the one shown last. */
+function lifeNow(): { prev?: LifeSnapshot; cur: LifeSnapshot } | undefined {
+  if (!run || run.map !== map) return undefined;
+  if (lifeShown?.step !== step.value) {
+    const cur = run.water.at(step.value).life;
+    lifeShown = { step: step.value, prev: lifeShown && lifeShown.step === step.value - 1 ? lifeShown.cur : undefined, cur };
+  }
+  return lifeShown;
+}
+
+function drawLife(): void {
+  const el = lifeCanvas.value;
+  const box = host.value;
+  if (!el || !box) return;
+  const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
+  fit(el, box.clientWidth, box.clientHeight, dpr);
+  const ctx = el.getContext('2d')!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, el.width, el.height);
+  const life = showLife.value ? lifeNow() : undefined;
+  const s = scene;
+  if (!life || !placed || !s || s.grid !== map.grid) return void (placedLife = []);
+  const t = placed;
+  const { cols, rows } = map.grid;
+  const spacing = Math.sqrt(3) * HEX;
+  const toScreen = (x: number, y: number) => {
+    const i = hexAt(cols, rows, x, y);
+    const lift = tileAt(s, i % cols, Math.floor(i / cols))?.lift ?? 0;
+    return projectToScreen(s, t, { x: s.frame.ox + x * spacing, y: s.frame.oy + y * spacing }, lift);
+  };
+  placedLife = placeCreatures(life.prev?.creatures, life.cur.creatures, between, { toScreen, spacing: spacing * t.scale }, performance.now() / 1000);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  timed('life', () => drawCreatures(ctx, placedLife, sprites, performance.now() / 1000));
+}
+
+/** The life the panel shows: the kinds alive, the mystic creatures called. */
+const lifeNowShown = computed(() => (run && steps.value && runs.value ? run.water.at(step.value).life : undefined));
+const kindsNow = computed(() => (lifeNowShown.value ? kindRows(lifeNowShown.value) : []));
+const callsNow = computed(() => (lifeNowShown.value ? callRows(lifeNowShown.value) : []));
+const creaturesNow = computed(() => kindsNow.value.reduce((n, r) => n + r.count, 0));
+const releaseKind = ref(RELEASABLE[0].kind);
+/** On a wide screen the Life panel opens by itself; on a phone it would cover the map. */
+const wide = window.innerWidth >= 720;
+/** Creatures let in at a time. */
+const RELEASE = 4;
+
+/** Let a few creatures of the chosen kind in now: the run forgets the future it ran without them. */
+function releaseNow(): void {
+  if (!run) return;
+  letIn(run.eco, step.value, { kind: releaseKind.value, count: RELEASE });
+  run.water.forget();
+  steps.value = step.value;
+  if (!playing.value) step.value++;
+}
+
 /** The sky over the map, on the GPU (when there is WebGL2): clouds, their shadows, rain and snow. */
 const skyCanvas = ref<HTMLCanvasElement | null>(null);
 let skyGl: CloudGL | undefined;
@@ -224,6 +298,7 @@ function resetSky(): void {
 
 function drawSky(): void {
   drawWindLayer();
+  drawLife();
   const el = skyCanvas.value;
   const box = host.value;
   if (!skyGl || !el || !box) return;
@@ -238,11 +313,15 @@ function drawSky(): void {
 function point(e: PointerEvent): void {
   const box = host.value!.getBoundingClientRect();
   focus = { x: e.clientX - box.left, y: e.clientY - box.top };
+  const near = creatureAt(placedLife, focus.x, focus.y);
+  const view = near && lifeShown?.cur.creatures.find((c) => c.id === near.id);
+  hovered.value = view ? describe(view) : '';
   if (!playing.value) schedule(drawSky);
 }
 
 function unpoint(): void {
   focus = undefined;
+  hovered.value = '';
   if (!playing.value) schedule(drawSky);
 }
 
@@ -427,13 +506,14 @@ watch([step, season, wind, windDir], repaintWater);
 watch(step, () => playing.value || resetSky());
 watch(showGrid, draw);
 watch(cloudMode, drawSky);
+watch(showLife, drawSky);
 watch([shift, windOn], drawWindLayer);
 </script>
 
 <template>
   <div class="tiles">
     <div ref="host" class="stage" @pointermove="point" @pointerdown="point" @pointerleave="unpoint">
-      <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="skyCanvas" class="sky" /><canvas ref="windCanvas" class="sky" />
+      <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="lifeCanvas" class="sky" /><canvas ref="skyCanvas" class="sky" /><canvas ref="windCanvas" class="sky" />
     </div>
     <div class="controls">
       <label>
@@ -482,6 +562,23 @@ watch([shift, windOn], drawWindLayer);
           <option value="off">Off</option>
         </select>
       </label>
+      <details v-if="steps > 0" class="climate life" :open="wide">
+        <summary>Life · {{ creaturesNow }}</summary>
+        <label class="check"><input v-model="showLife" type="checkbox" /> Creatures</label>
+        <p v-for="c in callsNow" :key="c.kind" class="hint call">✦ {{ c.name }} is called by {{ c.need }} · {{ Math.round(c.share * 100) }}%</p>
+        <div v-for="r in kindsNow" :key="r.kind" class="kind" :title="loreOf(r.kind)">
+          <span class="chips"><span v-for="c in r.chips" :key="c.name" class="chip" :style="{ background: c.colour }" :title="c.name" /></span>
+          <span class="name" :class="{ mystic: r.mystic }">{{ r.mystic ? '✦ ' : '' }}{{ r.name }}</span>
+          <span class="value">{{ r.count }}<small v-if="r.away"> ({{ r.away }} away)</small><small v-else-if="r.asleep"> ({{ r.asleep }} asleep)</small></span>
+        </div>
+        <label>
+          <select v-model.number="releaseKind">
+            <option v-for="k in RELEASABLE" :key="k.kind" :value="k.kind">{{ k.name }}</option>
+          </select>
+          <button type="button" :title="`Let ${RELEASE} in`" @click="releaseNow">Release</button>
+        </label>
+      </details>
+      <p v-if="hovered" class="hint">{{ hovered }}</p>
       <details v-if="steps > 0" class="climate">
         <summary>Climate</summary>
         <label v-for="(s, k) in CLIMATE_SETTINGS" :key="s.key" :title="s.hint">
@@ -544,4 +641,13 @@ canvas.sky { pointer-events: none; }
 .controls .climate .name { width: 96px; }
 .controls .climate input { width: 110px; }
 .controls .climate .value { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.controls .life .kind { display: flex; align-items: center; gap: 6px; }
+.controls .life label.check { justify-content: flex-start; }
+.controls .life .chips { display: inline-flex; gap: 2px; width: 26px; }
+.controls .life .chip { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.controls .life .name { flex: 1; min-width: 110px; }
+.controls .life .name.mystic { color: #ffe08a; }
+.controls .life .value { width: auto; min-width: 40px; }
+.controls .life small { color: #8a8a99; }
+.controls .call { color: #ffe08a; }
 </style>

@@ -54,6 +54,8 @@ export interface LifeSnapshot {
   creatures: CreatureView[];
   counts: Int32Array;
   plants: Float32Array;
+  /** Per kind: how loud the world calls for it (mystic kinds), in steps of full need. */
+  calling: Float32Array;
 }
 
 export interface EcoSnapshot extends CycleSnapshot {
@@ -62,7 +64,7 @@ export interface EcoSnapshot extends CycleSnapshot {
 
 const viewOf = ({ id, kind, x, y, heading, energy, doing, age }: Creature): CreatureView => ({ id, kind, x, y, heading, energy, doing, age });
 
-export const lifeView = (life: Life): LifeSnapshot => ({ creatures: life.creatures.map(viewOf), counts: countsOf(life), plants: life.food.plants.slice() });
+export const lifeView = (life: Life): LifeSnapshot => ({ creatures: life.creatures.map(viewOf), counts: countsOf(life), plants: life.food.plants.slice(), calling: life.calling.slice() });
 
 /** The world and its life as a model to run. */
 export function ecoModel(e: Ecosystem): Model<{ world: CycleState; life: LifeState }, EcoSnapshot> {
