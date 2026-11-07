@@ -56,10 +56,26 @@ export function needField(need: Need, env: Surroundings, out = new Float32Array(
 }
 
 /** How much the world needs it: how much the hexes that need it most do, on average (`wide`: their share of the map; 0, the neediest alone). */
-export const howNeeded = (field: Float32Array, wide = 0.15) => {
+export function howNeeded(field: Float32Array, wide = 0.15): number {
   const top = Math.max(1, Math.round(wide * field.length));
-  return [...field].sort((a, b) => b - a).slice(0, top).reduce((s, v) => s + v, 0) / top;
-};
+  if (top === 1) return Math.max(...field);
+  // Needs lie between 0 and 1: sorted into bins, the neediest are taken bin by bin from the top.
+  const bins = new Float64Array(BINS + 1);
+  const sums = new Float64Array(BINS + 1);
+  for (const v of field) {
+    const b = Math.round(Math.max(0, Math.min(1, v)) * BINS);
+    bins[b]++;
+    sums[b] += v;
+  }
+  let [left, sum] = [top, 0];
+  for (let b = BINS; b >= 0 && left > 0; b--) {
+    const take = Math.min(left, bins[b]);
+    if (take) sum += (sums[b] / bins[b]) * take;
+    left -= take;
+  }
+  return sum / top;
+}
+const BINS = 100;
 
 /** Need beyond which the world calls; how long it calls (in steps of full need) before the creature comes; how much slower it fades while still needed. */
 export const NEEDED = 0.6;

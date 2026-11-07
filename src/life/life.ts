@@ -68,7 +68,7 @@ function surroundingsOf(life: Life, h: Habitat, year: number, work: LifeWork): S
   counts.forEach((n, k) => (life.peaks[k] = Math.max(life.peaks[k], n)));
   const population = { counts, peaks: life.peaks };
   feel(h, life.food.plants, work.census.crowd, work.feel);
-  return {
+  const env: Surroundings = {
     h,
     feel: work.feel,
     food: life.food,
@@ -79,7 +79,9 @@ function surroundingsOf(life: Life, h: Habitat, year: number, work: LifeWork): S
     minds: mindsOf(life.creatures, population),
     ...population,
     born: (kind, x, y, energy) => ({ id: life.nextId++, kind, x, y, heading: random(life.rng) * 2 * Math.PI, energy, age: 0, doing: 'roam', left: 0 }),
+    settle: (kind) => spotFor(kind, env),
   };
+  return env;
 }
 
 /** Hexes a newcomer looks at to settle on: the best of them for it. */

@@ -3,7 +3,7 @@ import { YEAR } from '../water/sun';
 import { appeal, foodAt } from './appeal';
 import { BESTIARY, preyOf, type Species } from './bestiary';
 import { closest, countNear, middleOf, type Census } from './census';
-import { asleep, away, canBe, discomfort, drawOf, speciesOf, type Creature, type Doing } from './creature';
+import { asleep, BACK, canBe, discomfort, drawOf, leaves, speciesOf, type Creature, type Doing } from './creature';
 import { matchup } from './elements';
 import { take, type Food } from './food';
 import type { Feel, Habitat } from './habitat';
@@ -31,6 +31,8 @@ export interface Surroundings extends Population {
   minds: readonly Mind[];
   /** A new creature: its id and place in the world are given it there. */
   born(kind: number, x: number, y: number, energy: number): Creature;
+  /** A spot that would suit a creature of `kind` coming into the world now, if any. */
+  settle(kind: number): { x: number; y: number } | undefined;
 }
 
 /** A creature that pulls (lure: above 0) or pushes (scare) others' minds within `reach` (of the kinds it `pulls`, or all others), and keeps hunters from hunting within `calm` of it. */
@@ -164,7 +166,7 @@ function turn(c: Creature, v: Vec, rng: Rng): void {
 /** Decide what to do and which way to head; what it will do is returned, and kept on it. */
 export function steer(c: Creature, s: Species, env: Surroundings): { doing: Doing; prey?: Creature } {
   const t = env.h.temperature[hexOf(env, c)];
-  if (away(s, t, c.doing === 'away', inSeason(env.year))) return { doing: 'away' };
+  if (c.doing === 'away' ? !homecoming(c, s, env) : leaves(s, t)) return { doing: 'away' };
   if (asleep(s, t)) return { doing: 'sleep' };
   let v = habitatPull(c, s, env);
   const fed = foodAt(s, env.feel, env.food, hexOf(env, c)) > s.burn;
@@ -177,6 +179,14 @@ export function steer(c: Creature, s: Species, env: Surroundings): { doing: Doin
   v = add(v, mindPull(c, env));
   turn(c, v, env.rng);
   return { doing, prey };
+}
+
+/** Back from the winter, in its season, to a spot warm enough for it, if there is one: whether it came. */
+function homecoming(c: Creature, s: Species, env: Surroundings): boolean {
+  const spot = inSeason(env.year) ? env.settle(c.kind) : undefined;
+  if (!spot || env.h.temperature[hexOf(env, spot)] < s.comfort[0] + BACK) return false;
+  [c.x, c.y] = [spot.x, spot.y];
+  return true;
 }
 
 /** The next spot ahead, `speed` along `heading`. */

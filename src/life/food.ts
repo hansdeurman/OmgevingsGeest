@@ -5,7 +5,7 @@ import type { Habitat } from './habitat';
  * What the land and the water give to eat: plants on every hex of land, up
  * to what its grass and trees let grow, and fish in the sea and in lakes
  * and rivers deep enough. Plants grow in mild, moist and sunny weather,
- * rest under snow, die back in the frost and drown where a lake rises; the
+ * rest under snow, die back in the cold and drown where a lake rises; the
  * creatures graze them down, and they grow back from what is left (and
  * from seed). Fish breed up to what their water holds, and die with it.
  */
@@ -16,8 +16,8 @@ export interface Food {
   fish: Float32Array;
 }
 
-/** Share of plants that grows per step at best, what grows from seed, and the share that dies per step in the frost. */
-const GROW = { rate: 0.02, seed: 0.02, frost: 0.002 };
+/** Share of plants that grows per step at best, what grows from seed, and the share that dies back per step when it is too cold to grow. */
+const GROW = { rate: 0.012, seed: 0.02, frost: 0.0015, below: 2 };
 /** Share of fish born per step at best, and from their few. */
 const BREED = { rate: 0.02, seed: 0.02 };
 
@@ -51,7 +51,7 @@ export function growFood(food: Food, h: Habitat, boost: ArrayLike<number>): void
   for (let i = 0; i < plants.length; i++) {
     const most = meadow(food, h, i);
     plants[i] = most > 0 ? toward(plants[i], most, GROW.rate * growing(h, i) * (1 + boost[i]), GROW.seed) : 0;
-    if (h.temperature[i] < 0) plants[i] *= 1 - GROW.frost;
+    if (h.temperature[i] < GROW.below) plants[i] *= 1 - GROW.frost;
     const holds = pond(h, i);
     fish[i] = holds > 0.01 ? Math.min(holds, toward(fish[i], holds, BREED.rate * (h.temperature[i] > 0 ? 1 : 0.3), BREED.seed)) : 0;
   }

@@ -65,6 +65,7 @@ export function surroundings(h: Habitat, creatures: Creature[], options: { plant
     counts,
     peaks: options.peaks ?? counts,
     born: (kind, x, y, energy) => ({ id: nextId++, kind, x, y, heading: 0, energy, age: 0, doing: 'roam', left: 0 }),
+    settle: () => centreOf(h.cols, Math.floor((h.cols * h.rows) / 2)),
   };
 }
 

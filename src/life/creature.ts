@@ -53,11 +53,11 @@ export const discomfort = (s: Species, t: number) => Math.max(0, s.comfort[0] - 
 /** Whether it sleeps now, through the cold. */
 export const asleep = (s: Species, t: number) => !!s.sleeps && t < s.comfort[0];
 
-/** Degrees warmer than it can bear it needs before it comes back from the winter. */
-const BACK = 2;
+/** Degrees warmer than it can bear it needs somewhere on the map before it comes back from the winter. */
+export const BACK = 2;
 
-/** Whether a migrating creature is away now: it leaves when it gets too cold, and comes back once spring is warm enough (`spring`: it is the time of year). */
-export const away = (s: Species, t: number, gone: boolean, spring: boolean) => !!s.migrates && (gone ? !spring || t < s.comfort[0] + BACK : t < s.comfort[0]);
+/** Whether a migrating creature leaves for the winter: it has got too cold where it is. */
+export const leaves = (s: Species, t: number) => !!s.migrates && t < s.comfort[0];
 
 /** Whether it is about in the world now: not away for the winter. */
 export const about = (c: Creature) => c.doing !== 'away';
