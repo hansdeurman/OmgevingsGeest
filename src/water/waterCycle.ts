@@ -100,10 +100,10 @@ export function createWaterCycle(world: HydroWorld, options: CycleOptions = {}):
   return { world, air, heat, wind: createWind(n), params: options.params ?? defaultClimate(), cover, seed: options.seed ?? 1, step: 0, sea: SEA_HOLDS, temperature, clouds: array(), albedo: array(), capacity: array() };
 }
 
-/** All the water in the world: on and in the ground, in the air, falling, and in the sea. It stays the same. */
+/** All the water in the world: on and in the ground, rising, in the air, falling, and in the sea. It stays the same. */
 export function cycleWater(c: WaterCycle): number {
   const { world, air } = c;
-  return totalWater(world.depth) + totalWater(world.soil) + totalWater(world.snow) + totalWater(air.vapour) + totalWater(air.cloud) + totalWater(air.fall) + c.sea;
+  return totalWater(world.depth) + totalWater(world.soil) + totalWater(world.snow) + totalWater(air.rise) + totalWater(air.vapour) + totalWater(air.cloud) + totalWater(air.fall) + c.sea;
 }
 
 /** What each hex's surface is like now: sea (or sea ice), lake water (or ice), snow, or its bare ground, wetter soil holding more heat. */
@@ -149,7 +149,7 @@ export const skyOf = (c: WaterCycle): SkySnapshot => ({
   yearShare: yearShare(c.step),
 });
 
-interface CycleState {
+export interface CycleState {
   world: WorldState;
   arrays: Float32Array[];
   step: number;

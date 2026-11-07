@@ -1,3 +1,4 @@
+import { plantRoom } from '../life/food';
 import { createHydroWorld, type HydroWorld } from '../water/hydroWorld';
 import { hardnessOf } from '../water/erosion';
 import { albedoOf, ALBEDO } from '../water/heat';
@@ -34,3 +35,6 @@ export function groundCoverOf(grid: CoverGrid): GroundCover {
     rough: Float32Array.from(cells, (c, i) => (sea(i) ? ROUGH.sea : roughnessOf(c.trees, elevation[i]))),
   };
 }
+
+/** The most plants each hex of a map grows, by its grass, trees and height; none in the sea. */
+export const plantRoomOf = (grid: CoverGrid): Float32Array => Float32Array.from(grid.cells, (c, i) => (grid.elevation[i] <= 0 ? 0 : plantRoom(c.grass, c.trees, grid.elevation[i])));
