@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BESTIARY, kindOf } from '../../life/bestiary';
 import type { CreatureView } from '../../life/ecosystem';
-import { creatureAt, FRAMES, placeCreatures, type Projection } from '../creatureLayer';
+import { createAvatar } from '../../player/avatar';
+import { creatureAt, FRAMES, placeAvatar, placeCreatures, type Projection } from '../creatureLayer';
 
 const view: Projection = { toScreen: (x, y) => ({ x: 100 * x, y: 50 * y }), spacing: 40 };
 const at = (id: number, kind: string, x: number, y: number, more: Partial<CreatureView> = {}): CreatureView => ({ id, kind: kindOf(kind), x, y, heading: 0, energy: 0.8, doing: 'roam', age: 100, ...more });
@@ -50,5 +51,17 @@ describe('creatureAt', () => {
     const placed = placeCreatures(undefined, [at(1, 'hare', 1, 1), at(2, 'hare', 3, 1)], 1, view, 0);
     expect(creatureAt(placed, 300, 45)?.id).toBe(2);
     expect(creatureAt(placed, 200, 300)).toBeUndefined();
+  });
+});
+
+describe('placeAvatar', () => {
+  it('glides the avatar on, big, with the ring its gift reaches and where it walks to', () => {
+    const [was, now] = [createAvatar(1, 1), { ...createAvatar(1.4, 1), gift: 'rain' as const, target: { x: 4, y: 1 } }];
+    const p = placeAvatar(was, now, 0.5, view, 0);
+    expect(p.x).toBeCloseTo(120);
+    expect(p.size).toBeGreaterThan(40);
+    expect(p.ring!.rx).toBeGreaterThan(p.ring!.ry);
+    expect(p.target).toEqual({ x: 400, y: 50 });
+    expect(placeAvatar(undefined, createAvatar(1, 1), 1, view, 0).ring).toBeUndefined();
   });
 });

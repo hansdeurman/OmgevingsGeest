@@ -4,7 +4,8 @@ import { soakOf } from '../../water/retention';
 import { createWaterCycle, cycleWater } from '../../water/waterCycle';
 import { createRun } from '../../water/waterRun';
 import { kindOf } from '../bestiary';
-import { createEcosystem, ecoModel, ecoStep, schedule } from '../ecosystem';
+import { command, createEcosystem, ecoModel, ecoStep, forgetCommands } from '../ecosystem';
+import { hexAt } from '../hexSpace';
 
 /** Sea all round, a meadow rising to a ridge in the middle, a lake at its foot. */
 const [cols, rows] = [16, 12];
@@ -40,7 +41,7 @@ describe('ecoStep', () => {
   it('lets creatures in at the step they were sent for', () => {
     const e = eco();
     const eel = kindOf('stormeel');
-    schedule(e, 3, { kind: eel, count: 4 });
+    command(e, 3, { do: 'release', kind: eel, count: 4 });
     const eels = () => e.life.creatures.filter((c) => c.kind === eel).length;
     const before = eels();
     for (let k = 0; k < 3; k++) ecoStep(e);
@@ -50,14 +51,55 @@ describe('ecoStep', () => {
   });
 });
 
+describe('the avatar', () => {
+  it('walks where it is sent, at the step it is sent', () => {
+    const e = eco();
+    command(e, 2, { do: 'go', x: 2, y: 2 });
+    const start = { ...e.avatar };
+    for (let k = 0; k < 2; k++) ecoStep(e);
+    expect([e.avatar.x, e.avatar.y]).toEqual([start.x, start.y]);
+    for (let k = 0; k < 60; k++) ecoStep(e);
+    expect([e.avatar.x, e.avatar.y]).toEqual([2, 2]);
+  });
+
+  it('makes it rain where it stands with its gift, the water all accounted for, and spends its spirit', () => {
+    const e = eco();
+    for (let k = 0; k < 30; k++) ecoStep(e);
+    const water = cycleWater(e.cycle);
+    const at = hexAt(cols, rows, e.avatar.x, e.avatar.y);
+    command(e, e.cycle.step, { do: 'gift', gift: 'rain' });
+    let fell = 0;
+    for (let k = 0; k < 40; k++) {
+      ecoStep(e);
+      fell += e.cycle.air.fall[at];
+    }
+    expect(fell).toBeGreaterThan(0.05);
+    expect(e.avatar.spirit).toBeLessThan(1);
+    expect(cycleWater(e.cycle)).toBeCloseTo(water, 2);
+    command(e, e.cycle.step, { do: 'gift', gift: null });
+    ecoStep(e);
+    expect(e.avatar.gift).toBeNull();
+  });
+
+  it('forgets the commands for after a moment, to play on anew from there', () => {
+    const e = eco();
+    command(e, 5, { do: 'go', x: 2, y: 2 });
+    command(e, 9, { do: 'go', x: 4, y: 2 });
+    forgetCommands(e, 6);
+    expect([...e.commands.keys()]).toEqual([5]);
+  });
+});
+
 describe('ecoModel', () => {
   it('goes back to a moment and on again exactly as it went, releases and all', () => {
     const e = eco(2);
-    schedule(e, 50, { kind: kindOf('hare'), count: 5 });
+    command(e, 50, { do: 'release', kind: kindOf('hare'), count: 5 });
+    command(e, 20, { do: 'go', x: 3, y: 3 });
+    command(e, 30, { do: 'gift', gift: 'rain' });
     const run = createRun(ecoModel(e), Infinity, 25);
     const look = (step: number) => {
       const v = run.at(step);
-      return JSON.stringify({ c: v.life.creatures, d: Array.from(v.depth), w: Array.from(v.sky.windX), p: Array.from(v.life.plants) });
+      return JSON.stringify({ c: v.life.creatures, d: Array.from(v.depth), w: Array.from(v.sky.windX), p: Array.from(v.life.plants), a: v.avatar });
     };
     const seen = [look(70), look(120)];
     run.at(10);

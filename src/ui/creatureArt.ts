@@ -40,14 +40,14 @@ export interface Paint {
   scale(x: number, y: number): void;
 }
 
-const E = (fill: Role, cx: number, cy: number, rx: number, ry: number, turn = 0, flap?: number): Part => ({ fill, e: [cx, cy, rx, ry, turn], flap });
-const P = (fill: Role, ...p: number[]): Part => ({ fill, p });
-const eye = (x: number, y: number, r: number): Part[] => [
+export const E = (fill: Role, cx: number, cy: number, rx: number, ry: number, turn = 0, flap?: number): Part => ({ fill, e: [cx, cy, rx, ry, turn], flap });
+export const P = (fill: Role, ...p: number[]): Part => ({ fill, p });
+export const eye = (x: number, y: number, r: number): Part[] => [
   { ...E('white', x, y, r, r), eye: true },
   { ...E('dark', x + r * 0.3, y + r * 0.05, r * 0.55, r * 0.6), eye: true },
 ];
 /** A curved band (a horn, a curl): the ring around (cx, cy) of radius `r` and width `w`, from angle `a0` to `a1`. */
-function arc(fill: Role, cx: number, cy: number, r: number, a0: number, a1: number, w: number): Part {
+export function arc(fill: Role, cx: number, cy: number, r: number, a0: number, a1: number, w: number): Part {
   const n = 8;
   const at = (k: number, rr: number) => [cx + rr * Math.cos(a0 + ((a1 - a0) * k) / n), cy + rr * Math.sin(a0 + ((a1 - a0) * k) / n)];
   const outer = Array.from({ length: n + 1 }, (_, k) => at(k, r + w / 2));
@@ -61,7 +61,7 @@ const shift = (parts: Part[], dx: number, dy: number): Part[] =>
 const legs = (xs: number[], top: number, long: number, wide = 0.035): Part[] => xs.map((x) => E('shade', x, top + long / 2, wide, long / 2));
 
 /** A four-legged body, standing on legs `legs` long: legs, tail, body and belly, head and snout, ears or horns, eye. */
-function beast(o: { body: [number, number]; head: [number, number, number]; legs: number; tail?: Part[]; ears?: Part[]; over?: Part[] }): Part[] {
+export function beast(o: { body: [number, number]; head: [number, number, number]; legs: number; tail?: Part[]; ears?: Part[]; over?: Part[] }): Part[] {
   return shift(standing(o), 0, 0.3 - o.body[1] * 0.5 - o.legs);
 }
 
@@ -306,9 +306,13 @@ export interface Pose {
 
 /** Draw a creature of kind `s` at the origin, `size` px long, in `pose`. */
 export function paintCreature(ctx: Paint, s: Species, size: number, pose: Pose): void {
-  const palette = paletteOf(s);
+  paintParts(ctx, BODIES[s.body], paletteOf(s), size, pose);
+}
+
+/** Draw a body of `parts` in `palette` at the origin, `size` px long, in `pose`. */
+export function paintParts(ctx: Paint, parts: readonly Part[], palette: Palette, size: number, pose: Pose): void {
   ctx.save();
   ctx.scale(size * pose.facing, size);
-  for (const part of BODIES[s.body]) fillPart(ctx, part, palette, pose.phase, !!pose.asleep);
+  for (const part of parts) fillPart(ctx, part, palette, pose.phase, !!pose.asleep);
   ctx.restore();
 }

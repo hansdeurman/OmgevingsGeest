@@ -16,9 +16,12 @@ import type { HexTopology } from '../../water/hexTopology';
 import { createRun, type Run } from '../../water/waterRun';
 import { seasonOf, YEAR } from '../../water/sun';
 import { createWaterCycle, defaultClimate } from '../../water/waterCycle';
-import { createEcosystem, ecoModel, schedule as letIn, type EcoSnapshot, type Ecosystem, type LifeSnapshot } from '../../life/ecosystem';
+import { command, createEcosystem, ecoModel, forgetCommands, type Command, type EcoSnapshot, type Ecosystem, type LifeSnapshot } from '../../life/ecosystem';
+import { FORMS, GIFT_ORDER, GIFTS, type Avatar, type Form, type Gift } from '../../player/avatar';
+import { ELEMENT_LOOK } from '../../life/elements';
+import { screenToMap } from '../mapView';
 import { hexAt } from '../../life/hexSpace';
-import { creatureAt, CreatureSprites, drawCreatures, placeCreatures, type Placed } from '../creatureLayer';
+import { creatureAt, CreatureSprites, drawAvatar, drawCreatures, placeAvatar, placeCreatures, type Placed } from '../creatureLayer';
 import { callRows, describe, kindRows, loreOf, RELEASABLE } from '../lifePanel';
 import { CLIMATE_SETTINGS, climateReadout, setValue, valueOf, type ClimateSetting } from '../climateSettings';
 import { drawWind, windArrows } from '../windOverlay';
@@ -173,6 +176,7 @@ const windCanvas = ref<HTMLCanvasElement | null>(null);
 const shift = ref(false);
 const windOn = ref(false);
 const onKey = (e: KeyboardEvent) => {
+  if (e.type === 'keydown' && steer(e)) return;
   if (e.key !== 'Shift' || shift.value === (e.type === 'keydown')) return;
   shift.value = e.type === 'keydown';
 };
@@ -210,14 +214,19 @@ const sprites = new CreatureSprites();
 /** How far playback is between the step shown and the next (1: at the step itself, when paused). */
 let between = 1;
 /** The life of the step shown and of the one before it, to glide between. */
-let lifeShown: { step: number; prev?: LifeSnapshot; cur: LifeSnapshot } | undefined;
+let lifeShown: { step: number; prev?: Shown; cur: Shown } | undefined;
+interface Shown {
+  life: LifeSnapshot;
+  avatar: Avatar;
+}
 let placedLife: Placed[] = [];
 
-/** The life of the step shown, and of the step before it if that was the one shown last. */
-function lifeNow(): { prev?: LifeSnapshot; cur: LifeSnapshot } | undefined {
+/** The life (and the avatar) of the step shown, and of the step before it if that was the one shown last. */
+function lifeNow(): { prev?: Shown; cur: Shown } | undefined {
   if (!run || run.map !== map) return undefined;
   if (lifeShown?.step !== step.value) {
-    const cur = run.water.at(step.value).life;
+    const { life, avatar } = run.water.at(step.value);
+    const cur = { life, avatar };
     lifeShown = { step: step.value, prev: lifeShown && lifeShown.step === step.value - 1 ? lifeShown.cur : undefined, cur };
   }
   return lifeShown;
@@ -243,9 +252,11 @@ function drawLife(): void {
     const lift = tileAt(s, i % cols, Math.floor(i / cols))?.lift ?? 0;
     return projectToScreen(s, t, { x: s.frame.ox + x * spacing, y: s.frame.oy + y * spacing }, lift);
   };
-  placedLife = placeCreatures(life.prev?.creatures, life.cur.creatures, between, { toScreen, spacing: spacing * t.scale }, performance.now() / 1000);
+  const [view, time] = [{ toScreen, spacing: spacing * t.scale }, performance.now() / 1000];
+  placedLife = placeCreatures(life.prev?.life.creatures, life.cur.life.creatures, between, view, time);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  timed('life', () => drawCreatures(ctx, placedLife, sprites, performance.now() / 1000));
+  timed('life', () => drawCreatures(ctx, placedLife, sprites, time));
+  drawAvatar(ctx, placeAvatar(life.prev?.avatar, life.cur.avatar, between, view, time), time);
 }
 
 /** The life the panel shows: the kinds alive, the mystic creatures called. */
@@ -259,13 +270,57 @@ const wide = window.innerWidth >= 720;
 /** Creatures let in at a time. */
 const RELEASE = 4;
 
-/** Let a few creatures of the chosen kind in now: the run forgets the future it ran without them. */
-function releaseNow(): void {
+/** Do something now: the run forgets the future it ran without it (and what was done in it), and plays on. */
+function act(c: Command): void {
   if (!run) return;
-  letIn(run.eco, step.value, { kind: releaseKind.value, count: RELEASE });
+  forgetCommands(run.eco, step.value);
+  command(run.eco, step.value, c);
   run.water.forget();
   steps.value = step.value;
-  if (!playing.value) step.value++;
+  if (!playing.value) togglePlay();
+}
+
+/** Let a few creatures of the chosen kind in now. */
+const releaseNow = () => act({ do: 'release', kind: releaseKind.value, count: RELEASE });
+
+/** The avatar as the step shown has it. */
+const avatarNow = computed(() => (run && steps.value && runs.value ? run.water.at(step.value).avatar : undefined));
+const giftColour = (g: Gift) => ELEMENT_LOOK[GIFTS[g].element].colour;
+const toggleGift = (g: Gift) => act({ do: 'gift', gift: avatarNow.value?.gift === g ? null : g });
+const takeForm = (form: Form) => act({ do: 'form', form });
+
+/** Where on the map a point on the stage is, if the map is shown. */
+function mapPlace(sx: number, sy: number): { x: number; y: number } | undefined {
+  const s = scene;
+  if (!s || !placed || s.grid !== map.grid) return undefined;
+  return screenToMap({ ox: s.frame.ox, oy: s.frame.oy, spacing: Math.sqrt(3) * HEX }, { ...placed, squash: SQUASH }, sx, sy);
+}
+
+/** A tap or click on the map sends the avatar there. */
+function sendAvatar(e: MouseEvent): void {
+  const box = host.value!.getBoundingClientRect();
+  const to = mapPlace(e.clientX - box.left, e.clientY - box.top);
+  const { cols, rows } = map.grid;
+  if (to && to.x >= -0.5 && to.x <= cols && to.y >= -0.5 && to.y <= rows * 0.87) act({ do: 'go', x: to.x, y: to.y });
+}
+
+/** Steps the arrow keys and WASD send the avatar, in hex spacings. */
+const KEY_STEPS: Record<string, [number, number]> = { ArrowUp: [0, -1], w: [0, -1], ArrowDown: [0, 1], s: [0, 1], ArrowLeft: [-1, 0], a: [-1, 0], ArrowRight: [1, 0], d: [1, 0] };
+
+/** The keys that steer the avatar: arrows and WASD walk it on, 1–6 work a gift (again: stop), 0 or Escape stop. Whether the key was one. */
+function steer(e: KeyboardEvent): boolean {
+  const a = avatarNow.value;
+  if (!a || (e.target as HTMLElement)?.closest?.('input, select, textarea')) return false;
+  const move = KEY_STEPS[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  const gift = GIFT_ORDER.find((g) => GIFTS[g].key === e.key);
+  if (move) {
+    const from = a.target ?? a;
+    act({ do: 'go', x: from.x + move[0], y: from.y + move[1] * 0.87 });
+  } else if (gift) toggleGift(gift);
+  else if ((e.key === '0' || e.key === 'Escape') && a.gift) act({ do: 'gift', gift: null });
+  else return false;
+  e.preventDefault();
+  return true;
 }
 
 /** The sky over the map, on the GPU (when there is WebGL2): clouds, their shadows, rain and snow. */
@@ -314,7 +369,7 @@ function point(e: PointerEvent): void {
   const box = host.value!.getBoundingClientRect();
   focus = { x: e.clientX - box.left, y: e.clientY - box.top };
   const near = creatureAt(placedLife, focus.x, focus.y);
-  const view = near && lifeShown?.cur.creatures.find((c) => c.id === near.id);
+  const view = near && lifeShown?.cur.life.creatures.find((c) => c.id === near.id);
   hovered.value = view ? describe(view) : '';
   if (!playing.value) schedule(drawSky);
 }
@@ -512,7 +567,7 @@ watch([shift, windOn], drawWindLayer);
 
 <template>
   <div class="tiles">
-    <div ref="host" class="stage" @pointermove="point" @pointerdown="point" @pointerleave="unpoint">
+    <div ref="host" class="stage" @pointermove="point" @pointerdown="point" @pointerleave="unpoint" @click="sendAvatar">
       <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="lifeCanvas" class="sky" /><canvas ref="skyCanvas" class="sky" /><canvas ref="windCanvas" class="sky" />
     </div>
     <div class="controls">
@@ -562,6 +617,20 @@ watch([shift, windOn], drawWindLayer);
           <option value="off">Off</option>
         </select>
       </label>
+      <details v-if="steps > 0 && avatarNow" class="climate spirit" :open="wide">
+        <summary>You · {{ FORMS[avatarNow.form].name }}</summary>
+        <label>
+          Form
+          <select :value="avatarNow.form" @change="takeForm(($event.target as HTMLSelectElement).value as Form)">
+            <option v-for="(f, key) in FORMS" :key="key" :value="key">{{ f.name }}</option>
+          </select>
+        </label>
+        <div class="gifts">
+          <button v-for="g in GIFT_ORDER" :key="g" type="button" :class="{ on: avatarNow.gift === g }" :style="{ '--gift': giftColour(g) }" :title="`${GIFTS[g].hint} (key ${GIFTS[g].key})`" @click="toggleGift(g)">{{ GIFTS[g].name }}</button>
+        </div>
+        <div class="spirit-bar" title="Spirit: gifts spend it, rest brings it back"><span :style="{ width: `${Math.round(avatarNow.spirit * 100)}%` }" /></div>
+        <p class="hint">Tap the map to walk there · arrows/WASD · 1–6 gifts</p>
+      </details>
       <details v-if="steps > 0" class="climate life" :open="wide">
         <summary>Life · {{ creaturesNow }}</summary>
         <label class="check"><input v-model="showLife" type="checkbox" /> Creatures</label>
@@ -650,4 +719,9 @@ canvas.sky { pointer-events: none; }
 .controls .life .value { width: auto; min-width: 40px; }
 .controls .life small { color: #8a8a99; }
 .controls .call { color: #ffe08a; }
+.controls .gifts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.controls .gifts button { border: 1px solid var(--gift); background: transparent; color: #e6e6f0; border-radius: 6px; padding: 3px 4px; font-size: 12px; cursor: pointer; }
+.controls .gifts button.on { background: var(--gift); color: #10101a; font-weight: 600; }
+.controls .spirit-bar { height: 6px; border-radius: 3px; background: #2a2a38; overflow: hidden; }
+.controls .spirit-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ffd23f, #fff4c8); }
 </style>

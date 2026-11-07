@@ -2,7 +2,7 @@ import { random, rngOf, type Rng } from '../math/rng';
 import { YEAR } from '../water/sun';
 import type { Model } from '../water/waterRun';
 import { appeal } from './appeal';
-import { live, type Surroundings } from './behaviour';
+import { live, type Mind, type Surroundings } from './behaviour';
 import { BESTIARY } from './bestiary';
 import { createCensus, takeCensus, type Census } from './census';
 import { about, type Creature } from './creature';
@@ -11,6 +11,7 @@ import { createFeel, feel, type Feel, type Habitat } from './habitat';
 import { centreOf, hexAt } from './hexSpace';
 import { answer, call, type Calling } from './manifest';
 import { castPowers, createInfluence, mindsOf, type Influence } from './powers';
+import type { Population } from './population';
 
 /**
  * All life on a map: its creatures, its plants and fish, and the world's
@@ -27,6 +28,12 @@ export interface Life extends Calling {
   nextId: number;
   /** The most of each kind there have been. */
   peaks: Int32Array;
+}
+
+/** One in the world who is not among its creatures (the player): its pull on their minds, and its powers on the world, added to theirs. */
+export interface Guest {
+  mind(population: Population): Mind | undefined;
+  cast(f: Influence, h: Habitat): void;
 }
 
 /** What a step works out afresh from life and its world: kept between steps only to save making it again. */
@@ -61,7 +68,7 @@ export const countsOf = (life: Life) => {
 };
 
 /** The creatures' surroundings this step: who is where, how each hex feels, the minds at work. */
-function surroundingsOf(life: Life, h: Habitat, year: number, work: LifeWork): Surroundings {
+function surroundingsOf(life: Life, h: Habitat, year: number, work: LifeWork, guests: readonly Guest[] = []): Surroundings {
   const present = life.creatures.filter(about);
   takeCensus(work.census, present);
   const counts = countsOf(life);
@@ -76,7 +83,7 @@ function surroundingsOf(life: Life, h: Habitat, year: number, work: LifeWork): S
     creatures: present,
     rng: life.rng,
     year,
-    minds: mindsOf(life.creatures, population),
+    minds: [...mindsOf(life.creatures, population), ...guests.flatMap((g) => g.mind(population) ?? [])],
     ...population,
     born: (kind, x, y, energy) => ({ id: life.nextId++, kind, x, y, heading: random(life.rng) * 2 * Math.PI, energy, age: 0, doing: 'roam', left: 0 }),
     settle: (kind) => spotFor(kind, env),
@@ -123,9 +130,9 @@ export function populate(life: Life, h: Habitat, work = createWork(life)): void 
 /** Share of the most plants a hex grows that a creature (of size 1) gives back to it when it dies. */
 const ROT = 0.1;
 
-/** One step of all life on `h`, in place, `year` the share of the year since midwinter: its influence on the world is left in `work`. */
-export function lifeStep(life: Life, h: Habitat, year: number, work: LifeWork): void {
-  const env = surroundingsOf(life, h, year, work);
+/** One step of all life on `h`, in place, `year` the share of the year since midwinter, with `guests` among it: its influence on the world (theirs too) is left in `work`. */
+export function lifeStep(life: Life, h: Habitat, year: number, work: LifeWork, guests: readonly Guest[] = []): void {
+  const env = surroundingsOf(life, h, year, work, guests);
   const young: Creature[] = [];
   for (const c of [...life.creatures]) {
     if (c.energy <= 0) continue;
@@ -133,6 +140,7 @@ export function lifeStep(life: Life, h: Habitat, year: number, work: LifeWork): 
     else young.push(...live(c, env));
   }
   castPowers(work.influence, life.creatures, h);
+  for (const g of guests) g.cast(work.influence, h);
   growFood(life.food, h, work.influence.grow);
   const came = call(life, env);
   life.creatures = life.creatures.filter((c) => c.energy > 0 || rot(life, c));

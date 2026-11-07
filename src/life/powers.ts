@@ -44,7 +44,7 @@ const SHINE_THINS = 0.05;
 const SPARK_GROWS = 2;
 
 /** Each power's work on hex `i`, at strength `s` (its own, weakened by distance), by creature `c`. */
-const EFFECTS: Record<WorldPower, (f: Influence, i: number, s: number, c: Creature) => void> = {
+const EFFECTS: Record<WorldPower, (f: Influence, i: number, s: number, c: Caster) => void> = {
   warm: (f, i, s) => (f.heat[i] += s),
   chill: (f, i, s) => (f.heat[i] -= s),
   gust: (f, i, s, c) => {
@@ -80,38 +80,58 @@ export function within(cols: number, rows: number, x: number, y: number, reach: 
     }
 }
 
+/** Where a power is worked from, and which way its worker faces. */
+export interface Caster {
+  x: number;
+  y: number;
+  heading: number;
+}
+
+/** Add one power's work, from `at`, to the influence (mind powers work on minds instead: see `mindOf`). */
+export function castPower(f: Influence, p: Power, at: Caster, cols: number, rows: number): void {
+  if (!isWorldPower(p.kind)) return;
+  const effect = EFFECTS[p.kind];
+  within(cols, rows, at.x, at.y, p.reach, (i, w) => effect(f, i, p.strength * w, at));
+}
+
+/** Clear the influence, for a step afresh. */
+export const clearInfluence = (f: Influence) => Object.values(f).forEach((a: Float32Array) => a.fill(0));
+
 /** This step's influence of all the creatures awake, afresh. */
 export function castPowers(f: Influence, creatures: readonly Creature[], h: Habitat): void {
-  Object.values(f).forEach((a: Float32Array) => a.fill(0));
+  clearInfluence(f);
   for (const c of creatures) {
     if (c.doing === 'sleep' || c.doing === 'away' || c.energy <= 0) continue;
-    for (const p of BESTIARY[c.kind].powers) {
-      if (!isWorldPower(p.kind)) continue;
-      const effect = EFFECTS[p.kind];
-      within(h.cols, h.rows, c.x, c.y, p.reach, (i, w) => effect(f, i, p.strength * w, c));
-    }
+    for (const p of BESTIARY[c.kind].powers) castPower(f, p, c, h.cols, h.rows);
   }
 }
 
 /** Whom a mind power works on: its prey, the kinds about to vanish, or (undefined) all others. */
 const onWhom = (p: Power, kind: number, population: Population) => (p.on === 'prey' ? preyOf(BESTIARY[kind]) : p.on === 'few' ? vanishingKinds(population) : undefined);
 
+const isMindPower = (p: Power) => p.kind === 'lure' || p.kind === 'scare' || p.kind === 'calm';
+
+/** The pull on minds of one with these powers at (x, y), of kind `kind` (-1: no creature's), if any: how far, how hard and whom, and how far around it no one hunts. */
+export function mindOf(powers: readonly Power[], at: { x: number; y: number }, kind: number, population: Population): Mind | undefined {
+  const mind = powers.filter(isMindPower);
+  if (!mind.length) return undefined;
+  const pulls = mind.filter((p) => p.kind !== 'calm');
+  return {
+    x: at.x,
+    y: at.y,
+    kind,
+    reach: Math.max(0, ...pulls.map((p) => p.reach)),
+    pull: pulls.reduce((sum, p) => sum + (p.kind === 'lure' ? p.strength : -p.strength), 0),
+    pulls: pulls.length && kind >= 0 ? onWhom(pulls[0], kind, population) : undefined,
+    calm: Math.max(0, ...mind.filter((p) => p.kind === 'calm').map((p) => p.reach)),
+  };
+}
+
 /** The creatures that work on others' minds: how far, pulling or pushing how hard and whom, and how far around they keep hunting from happening. */
 export function mindsOf(creatures: readonly Creature[], population: Population = { counts: [], peaks: [] }): Mind[] {
-  const minds: Mind[] = [];
-  for (const c of creatures) {
-    const powers = BESTIARY[c.kind].powers.filter((p) => p.kind === 'lure' || p.kind === 'scare' || p.kind === 'calm');
-    if (!powers.length || c.doing === 'sleep' || c.doing === 'away' || c.energy <= 0) continue;
-    const pulls = powers.filter((p) => p.kind !== 'calm');
-    minds.push({
-      x: c.x,
-      y: c.y,
-      kind: c.kind,
-      reach: Math.max(0, ...pulls.map((p) => p.reach)),
-      pull: pulls.reduce((sum, p) => sum + (p.kind === 'lure' ? p.strength : -p.strength), 0),
-      pulls: pulls.length ? onWhom(pulls[0], c.kind, population) : undefined,
-      calm: Math.max(0, ...powers.filter((p) => p.kind === 'calm').map((p) => p.reach)),
-    });
-  }
-  return minds;
+  return creatures.flatMap((c) => {
+    if (c.doing === 'sleep' || c.doing === 'away' || c.energy <= 0) return [];
+    const mind = mindOf(BESTIARY[c.kind].powers, c, c.kind, population);
+    return mind ? [mind] : [];
+  });
 }

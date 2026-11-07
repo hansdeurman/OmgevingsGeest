@@ -1,5 +1,8 @@
 import { BESTIARY } from '../life/bestiary';
 import type { CreatureView } from '../life/ecosystem';
+import { GIFTS, powersOf, type Avatar } from '../player/avatar';
+import { ELEMENT_LOOK } from '../life/elements';
+import { paintAvatar } from './avatarArt';
 import { paintCreature, paletteOf, type Paint } from './creatureArt';
 
 /**
@@ -137,4 +140,91 @@ function glow(ctx: CanvasRenderingContext2D, p: Placed, time: number): void {
   ctx.beginPath();
   ctx.ellipse(cx, cy, r, r, 0, 0, 2 * Math.PI);
   ctx.fill();
+}
+
+/** Where and how the avatar is drawn: like a creature, bigger, with the ring its gift reaches and where it is walking to. */
+export interface PlacedAvatar {
+  avatar: Avatar;
+  x: number;
+  y: number;
+  size: number;
+  facing: 1 | -1;
+  phase: number;
+  /** The ring its gift reaches on the ground (screen px), in the gift's colour; none at rest. */
+  ring?: { rx: number; ry: number; colour: string };
+  /** Where it is walking to, on screen. */
+  target?: { x: number; y: number };
+}
+
+/** The avatar's size (hex spacings), and least size (px). */
+const AVATAR = { size: 1.6, least: 32 };
+
+/** Where to draw the avatar, `t` of the way from where it was (`prev`) to where it is now, at `time` (s). */
+export function placeAvatar(prev: Avatar | undefined, cur: Avatar, t: number, view: Projection, time: number): PlacedAvatar {
+  const glides = prev && Math.hypot(prev.x - cur.x, prev.y - cur.y) < JUMP;
+  const [x, y] = glides ? [mix(prev.x, cur.x, t), mix(prev.y, cur.y, t)] : [cur.x, cur.y];
+  const ground = view.toScreen(x, y);
+  const walking = !!glides && Math.hypot(prev.x - cur.x, prev.y - cur.y) > 0.01;
+  const reach = Math.max(-1, ...powersOf(cur).map((p) => p.reach));
+  const edge = (dx: number, dy: number) => view.toScreen(x + dx, y + dy);
+  return {
+    avatar: cur,
+    x: ground.x,
+    y: ground.y,
+    size: Math.max(AVATAR.least, AVATAR.size * view.spacing),
+    facing: Math.cos(cur.heading) >= 0 ? 1 : -1,
+    phase: walking ? (time * BEATS.walk) % 1 : 0,
+    ring: cur.gift && reach >= 0 ? { rx: Math.abs(edge(reach + 0.5, 0).x - ground.x), ry: Math.abs(edge(0, reach + 0.5).y - ground.y), colour: ELEMENT_LOOK[GIFTS[cur.gift].element].colour } : undefined,
+    target: cur.target && view.toScreen(cur.target.x, cur.target.y),
+  };
+}
+
+/** Draw the avatar: the ring its gift reaches, a marker where it walks to, a glow, and the avatar itself. */
+export function drawAvatar(ctx: CanvasRenderingContext2D, p: PlacedAvatar, time: number): void {
+  const pulse = 0.5 + 0.5 * Math.sin(time * 3);
+  if (p.ring) {
+    ctx.globalAlpha = 0.18 + 0.1 * pulse;
+    ctx.fillStyle = p.ring.colour;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.ring.rx, p.ring.ry, 0, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  if (p.target) {
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = '#FFD23F';
+    ctx.beginPath();
+    ctx.ellipse(p.target.x, p.target.y, 6 + 2 * pulse, 3 + pulse, 0, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#0B1020';
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y, p.size * 0.3, p.size * 0.08, 0, 0, 2 * Math.PI);
+  ctx.fill();
+  const g = ctx.createRadialGradient(p.x, p.y - p.size * 0.3, 0, p.x, p.y - p.size * 0.3, p.size * 0.8);
+  g.addColorStop(0, 'rgba(255, 244, 200, 0.45)');
+  g.addColorStop(1, 'rgba(255, 244, 200, 0)');
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y - p.size * 0.3, p.size * 0.8, p.size * 0.8, 0, 0, 2 * Math.PI);
+  ctx.fill();
+  ctx.save();
+  ctx.translate(p.x, p.y - 0.3 * p.size);
+  paintAvatar(ctx as unknown as Paint, p.avatar.form, p.avatar.gift, p.size, { phase: p.phase, facing: p.facing });
+  ctx.restore();
+  marker(ctx, p.x, p.y - p.size * (p.avatar.form === 'keeper' ? 1.05 : 0.85) - 3 * pulse);
+}
+
+/** A small gold chevron over the avatar: you are here. */
+function marker(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.globalAlpha = 0.95;
+  ctx.fillStyle = '#FFD23F';
+  ctx.beginPath();
+  ctx.moveTo(x - 7, y - 6);
+  ctx.lineTo(x + 7, y - 6);
+  ctx.lineTo(x, y + 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
 }

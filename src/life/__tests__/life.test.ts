@@ -50,6 +50,21 @@ describe('lifeStep', () => {
     expect(work.influence.grow.some((g) => g > 0)).toBe(true);
   });
 
+  it('takes in what a guest does: its powers on the world, its pull on the creatures', () => {
+    const life = fresh();
+    const work = createWork(life);
+    const at = { x: 8, y: 5 };
+    const guest = {
+      mind: () => ({ ...at, kind: -1, reach: 20, pull: 3, calm: 0 }),
+      cast: (f: { grow: Float32Array }) => void f.grow.fill(5),
+    };
+    const near = () => life.creatures.filter((c) => !BESTIARY[c.kind].mystic && Math.hypot(c.x - at.x, c.y - at.y) < 3).length;
+    const before = near();
+    for (let k = 0; k < 40; k++) lifeStep(life, h, 0.4, work, [guest]);
+    expect(work.influence.grow.every((g) => g >= 5)).toBe(true);
+    expect(near()).toBeGreaterThan(before + 10);
+  });
+
   it('keeps life going on a mild meadow for a year', () => {
     const life = fresh();
     const work = createWork(life);
