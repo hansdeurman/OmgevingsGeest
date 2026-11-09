@@ -64,4 +64,14 @@ describe('mindsOf', () => {
     expect(minds[0]).toMatchObject({ ...centreOf(cols, middle), pull: 1, reach: 2 });
     expect(minds[1].pull).toBeGreaterThan(0);
   });
+
+  it('lets the kitsune keep hunters off the kinds about to vanish only', () => {
+    const fox = kindOf('sparkfox');
+    const counts = new Float32Array(30);
+    const peaks = new Float32Array(30);
+    [counts[fox], peaks[fox]] = [1, 6];
+    const [kitsune] = mindsOf([creature('kitsune', cols, 5)], { counts, peaks });
+    expect(kitsune.shields).toEqual([fox]);
+    expect(mindsOf([creature('dreamowl', cols, 5)])[0].shields).toBeUndefined();
+  });
 });

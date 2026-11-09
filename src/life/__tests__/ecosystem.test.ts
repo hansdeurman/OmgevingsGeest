@@ -22,7 +22,7 @@ const eco = (seed = 1) => {
 describe('createEcosystem', () => {
   it('starts the world with its creatures, plants and fish', () => {
     const e = eco();
-    expect(e.life.creatures.length).toBeGreaterThan(50);
+    expect(e.life.creatures.length).toBeGreaterThan(30);
     expect(e.life.food.plants.some((p) => p > 0)).toBe(true);
     expect(e.life.food.fish[0]).toBeGreaterThan(0);
   });

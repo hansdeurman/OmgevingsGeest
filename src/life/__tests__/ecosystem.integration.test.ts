@@ -47,8 +47,8 @@ describe('the highlands’ ecosystem, over two years', () => {
     const last = seen[seen.length - 1].counts;
     expect(ordinary.filter((k) => last[k] > 0).length).toBeGreaterThanOrEqual(ordinary.length - 3);
     const total = ordinary.reduce((s, k) => s + last[k], 0);
-    expect(total).toBeGreaterThan(80);
-    expect(total).toBeLessThan(800);
+    expect(total).toBeGreaterThan(35);
+    expect(total).toBeLessThan(150);
   });
 
   it('keeps grazers, hunters and fishers: the food web holds', () => {

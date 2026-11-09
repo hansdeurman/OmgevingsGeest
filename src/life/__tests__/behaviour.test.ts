@@ -100,8 +100,8 @@ describe('minds', () => {
     const env = surroundings(h, [hare], { minds: [owl, kitsune] });
     expect(mindPull(hare, env).x).toBeGreaterThan(0);
     expect(mindPull(creature('dreamowl', cols, middle), env).x).toBe(0);
-    expect(calmAt(env, spot(cols, 1))).toBe(true);
-    expect(calmAt(env, hare)).toBe(false);
+    expect(calmAt(env, spot(cols, 1), hare.kind)).toBe(true);
+    expect(calmAt(env, hare, hare.kind)).toBe(false);
   });
 });
 

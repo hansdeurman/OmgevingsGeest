@@ -133,6 +133,7 @@ export function mindOf(powers: readonly Power[], at: { x: number; y: number }, k
     pull: pulls.reduce((sum, p) => sum + (p.kind === 'lure' ? p.strength : -p.strength), 0),
     pulls: pulls.length && kind >= 0 ? onWhom(pulls[0], kind, population) : undefined,
     calm: Math.max(0, ...mind.filter((p) => p.kind === 'calm').map((p) => p.reach)),
+    shields: mind.filter((p) => p.kind === 'calm' && p.on).map((p) => onWhom(p, kind, population) ?? [])[0],
   };
 }
 

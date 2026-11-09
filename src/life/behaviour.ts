@@ -35,7 +35,7 @@ export interface Surroundings extends Population {
   settle(kind: number): { x: number; y: number } | undefined;
 }
 
-/** A creature that pulls (lure: above 0) or pushes (scare) others' minds within `reach` (of the kinds it `pulls`, or all others), and keeps hunters from hunting within `calm` of it. */
+/** A creature that pulls (lure: above 0) or pushes (scare) others' minds within `reach` (of the kinds it `pulls`, or all others), and keeps hunters from hunting within `calm` of it (the kinds it `shields`, or any). */
 export interface Mind {
   x: number;
   y: number;
@@ -44,12 +44,13 @@ export interface Mind {
   pull: number;
   pulls?: readonly number[];
   calm: number;
+  shields?: readonly number[];
 }
 
 type Vec = { x: number; y: number };
 
-/** How far it sees (hex spacings), and catches prey (beyond both their sizes). */
-const SENSE = { fly: 4, other: 3, hunt: 5, mate: 8 };
+/** How far it sees (hex spacings), scents prey when hungry, seeks a mate; and catches prey (beyond both their sizes). */
+const SENSE = { fly: 4, other: 3, hunt: 12, mate: 8 };
 const CATCH = 0.3;
 /** Share of its speed it goes at, doing each thing. */
 export const PACE: Record<Doing, number> = { roam: 0.6, graze: 0.2, hunt: 1.2, flee: 1.3, sleep: 0, away: 0, answer: 1 };
@@ -66,11 +67,14 @@ const COST = 0.5;
 const MEAT = 0.8;
 const CATCHES = 0.3;
 const HIDE = 8;
+/** Asleep, a creature is tucked away: this much as likely to be caught. */
+const HIDDEN = 0.4;
 /** Breeding: from spring to late summer; energy it takes per young; most creatures around for it to breed; most of a kind there can be. */
 export const SEASON = [0.25, 0.65] as const;
 const BROOD_COST = 0.12;
 const CROWDED = { within: 1.5, most: 10 };
-export const MOST_OF_A_KIND = 90;
+/** The most there can be of a kind that does not say. */
+export const MOST_OF_A_KIND = 6;
 
 const sightOf = (s: Species) => (s.moves === 'fly' ? SENSE.fly : SENSE.other);
 const length = (v: Vec) => Math.hypot(v.x, v.y);
@@ -151,8 +155,8 @@ export function mindPull(c: Creature, env: Surroundings): Vec {
   return v;
 }
 
-/** Whether a calming mind keeps hunting from happening here. */
-export const calmAt = (env: Surroundings, p: Vec) => env.minds.some((m) => m.calm > 0 && Math.hypot(m.x - p.x, m.y - p.y) <= m.calm);
+/** Whether a calming mind keeps creatures of `kind` from being hunted here. */
+export const calmAt = (env: Surroundings, p: Vec, kind: number) => env.minds.some((m) => m.calm > 0 && Math.hypot(m.x - p.x, m.y - p.y) <= m.calm && (!m.shields || m.shields.includes(kind)));
 
 /** Turn towards `v` (by at most TURN), wandering a little; with nowhere to go, wander more. */
 function turn(c: Creature, v: Vec, rng: Rng): void {
@@ -243,9 +247,9 @@ export function feed(c: Creature, s: Species, env: Surroundings): number {
 /** Try to catch `prey` if near enough, and eat it. */
 export function strike(c: Creature, s: Species, env: Surroundings, prey: Creature): boolean {
   const ps = speciesOf(prey);
-  if (Math.hypot(prey.x - c.x, prey.y - c.y) > CATCH + (s.size + ps.size) / 2 || calmAt(env, c)) return false;
+  if (Math.hypot(prey.x - c.x, prey.y - c.y) > CATCH + (s.size + ps.size) / 2 || calmAt(env, c, prey.kind)) return false;
   const few = env.counts[prey.kind] / (env.counts[prey.kind] + HIDE);
-  const chance = CATCHES * matchup(s.types, ps.types) * few * (prey.doing === 'sleep' ? 1.5 : 1);
+  const chance = CATCHES * matchup(s.types, ps.types) * few * (prey.doing === 'sleep' ? HIDDEN : 1);
   if (random(env.rng) >= chance) return false;
   prey.energy = 0;
   c.energy = Math.min(1, c.energy + (MEAT * ps.size) / s.size);
@@ -261,7 +265,7 @@ export const inSeason = (year: number) => year >= SEASON[0] && year <= SEASON[1]
 export function breed(c: Creature, s: Species, env: Surroundings): Creature[] {
   const window = (SEASON[1] - SEASON[0]) * YEAR;
   if (s.mystic || c.doing === 'away' || c.age < s.matures || c.energy < 0.7 || !inSeason(env.year) || c.left < window / (2 * s.broods)) return [];
-  if (env.counts[c.kind] >= MOST_OF_A_KIND || random(env.rng) >= s.broods / window) return [];
+  if (env.counts[c.kind] >= (s.most ?? MOST_OF_A_KIND) || random(env.rng) >= s.broods / window) return [];
   const mate = nearest(c, s, env, SELF[c.kind], (o) => o.age >= s.matures && o.doing !== 'sleep', 2);
   if (!mate || countNear(env.census, env.creatures, c.x, c.y, CROWDED.within) > CROWDED.most) return [];
   c.energy -= BROOD_COST * s.brood;
