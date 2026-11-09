@@ -95,7 +95,7 @@ describe('touchWorld', () => {
     expect(cycleWater(c)).toBeCloseTo(before, 5);
   });
 
-  it('lifts no more water than the air can still hold, and freezes none in the warm', () => {
+  it('lifts no more water than the air can still hold, and freezes less in the warm', () => {
     const c = cycle();
     const f = createInfluence(n);
     [f.mist[0], f.freeze[lake]] = [5, 1];
@@ -104,6 +104,12 @@ describe('touchWorld', () => {
     const [sea, snow] = [c.sea, c.world.snow[lake]];
     touchWorld(c, f);
     expect(sea - c.sea).toBeLessThanOrEqual(0.001 + 1e-6);
-    expect(c.world.snow[lake]).toBe(snow);
+    const frozeWarm = c.world.snow[lake] - snow;
+    expect(frozeWarm).toBeGreaterThan(0);
+    const cold = cycle();
+    cold.temperature[lake] = -10;
+    const before = cold.world.snow[lake];
+    touchWorld(cold, f);
+    expect(cold.world.snow[lake] - before).toBeGreaterThan(2 * frozeWarm);
   });
 });

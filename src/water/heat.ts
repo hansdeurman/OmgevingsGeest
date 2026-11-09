@@ -73,6 +73,9 @@ const IN_AIR = 0.2;
 const TRADE = { still: 0.3, wind: 2 };
 /** Heat radiated to space per degree above SPACE: by the surface, straight through the air, and by the air. */
 const RADIATES = { surface: 0.02, air: 0.05 };
+/** Above this (°C) warmth is also carried off ever faster, from the ground and the air (convection, and radiation's steep rise): a hot world does not run away. Degrees beyond it that double the loss. */
+const HOT = { from: 26, doubles: 18 };
+const hotter = (t: number) => 1 + (Math.max(0, t - HOT.from) / HOT.doubles) ** 2;
 const SPACE = -30;
 /** Share of the sunlight a full cloud cover keeps off, and of the air's radiation it holds back. */
 const CLOUD = { shade: 0.6, trap: 0.35 };
@@ -125,9 +128,9 @@ export function heatStep(h: Heat, share: number, surface: Surface, flows: HeatFl
     const each = 1 / cs + 1 / AIR_HOLDS;
     const gap = ts[i] - ta;
     const traded = (gap * (1 - Math.exp(-rate * each))) / each;
-    const [onGround, window] = [light * (1 - surface.albedo[i]) * (1 - IN_AIR), RADIATES.surface * (ts[i] - SPACE)];
+    const [onGround, window] = [light * (1 - surface.albedo[i]) * (1 - IN_AIR), RADIATES.surface * (ts[i] - SPACE) * hotter(ts[i])];
     // The air radiates from high up, where it is as warm everywhere as its sea-level temperature says: mountains do not warm their own sky.
-    const [inAir, out] = [light * IN_AIR, outAir * (1 - CLOUD.trap * cover) * (air[i] - SPACE)];
+    const [inAir, out] = [light * IN_AIR, outAir * (1 - CLOUD.trap * cover) * (air[i] - SPACE) * hotter(ta)];
     const condensing = LATENT * flows.condensed[i];
     ts[i] += (onGround - window - LATENT * flows.evaporated[i] - traded) / cs;
     air[i] += (inAir + traded + LATENT_HERE * condensing - out) / AIR_HOLDS;

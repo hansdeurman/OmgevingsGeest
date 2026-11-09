@@ -58,9 +58,14 @@ describe('cycleStep', () => {
     const warm = defaultClimate();
     warm.heat.sun *= 1.2;
     const [a, b] = [cycle(), createWaterCycle(cycle().world, { params: warm })];
-    for (let k = 0; k < 300; k++) [a, b].forEach(cycleStep);
     const mean = (c: typeof a) => c.heat.air.reduce((s, t) => s + t, 0) / n;
-    expect(mean(b)).toBeGreaterThan(mean(a) + 2);
+    // The weather comes and goes: the climate is the warmth over the run, not at one moment.
+    const climate = [0, 0];
+    for (let k = 0; k < 300; k++) {
+      [a, b].forEach(cycleStep);
+      if (k >= 60) [climate[0], climate[1]] = [climate[0] + mean(a) / 240, climate[1] + mean(b) / 240];
+    }
+    expect(climate[1]).toBeGreaterThan(climate[0] + 1.5);
   });
 });
 

@@ -20,7 +20,7 @@ export interface ClimateSetting<G extends keyof ClimateParams = keyof ClimatePar
 const setting = <G extends keyof ClimateParams>(s: ClimateSetting<G>): ClimateSetting => s as unknown as ClimateSetting;
 
 export const CLIMATE_SETTINGS: readonly ClimateSetting[] = [
-  setting({ group: 'heat', key: 'sun', label: 'Sun', hint: 'How strong the sun shines: the only heat from outside', min: 1.5, max: 4, step: 0.05 }),
+  setting({ group: 'heat', key: 'sun', label: 'Sun', hint: 'How strong the sun shines: the only heat from outside', min: 0.8, max: 3.2, step: 0.05 }),
   setting({ group: 'heat', key: 'tilt', label: 'Seasons', hint: 'How much stronger the summer sun is than the winter sun', min: 0, max: 0.6, step: 0.02 }),
   setting({ group: 'heat', key: 'greenhouse', label: 'Greenhouse', hint: 'How much of its heat the air holds back from space', min: 0, max: 0.6, step: 0.02 }),
   setting({ group: 'heat', key: 'seaMemory', label: 'Sea warmth', hint: 'How much more heat the sea holds than land: how slowly it warms and cools', min: 2, max: 40, step: 1 }),

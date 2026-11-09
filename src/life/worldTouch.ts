@@ -9,7 +9,7 @@ import type { Influence } from './powers';
  * after its step: heat into the air and (half as much) the ground, a push
  * on the wind and the wind stilled, and water moved, never made or lost:
  * water gathered from the ground into cloud, cloud into rain or back into vapour, standing water (or the sea, or wet
- * soil) lifted into the air, standing water frozen into ice in the cold.
+ * soil) lifted into the air, standing water frozen into ice (most readily in the cold; in the warm it melts again).
  * Powers nudge the world, they do not shove it: however many pile up on a
  * hex, what they do there in a step tails off towards a most (`LIMITS`), and
  * the world's own ways (wind, mixing, radiation, rain) keep working against
@@ -30,14 +30,15 @@ export function touchWorld(c: WaterCycle, f: Influence): void {
     const room = Math.max(0, humidity * saturation(c.temperature[i]) - air.vapour[i] - air.rise[i]);
     const lift = Math.min(soft(f.mist[i], LIMITS.mist), room);
     air.rise[i] += fromWater(c, i, lift);
-    if (!air.sea[i]) world.snow[i] += share(world.depth, i, soft(f.freeze[i], LIMITS.share) * smoothstep(COLD.from, COLD.full, c.temperature[i]));
+    if (!air.sea[i]) world.snow[i] += share(world.depth, i, soft(f.freeze[i], LIMITS.share) * (WARM_FREEZE + (1 - WARM_FREEZE) * smoothstep(COLD.from, COLD.full, c.temperature[i])));
   }
 }
 
 /** The most powers do on a hex in a step, all together: heat (°C), a push on the wind (hex spacings per step), the share of the wind stilled, the share of its cloud rained out or of standing water frozen, the share of its cloud thinned, water lifted or gathered into cloud (steps). */
-export const LIMITS = { heat: 0.25, gust: 0.1, still: 0.8, share: 0.6, thin: 0.1, mist: 0.02 };
-/** Standing water freezes from this air temperature (°C), fully at this one. */
+export const LIMITS = { heat: 0.4, gust: 0.1, still: 0.8, share: 0.6, thin: 0.1, mist: 0.02 };
+/** Standing water freezes readily from this air temperature (°C), fully at this one; in the warm, a share as readily (and it melts again). */
 const COLD = { from: 2, full: -4 };
+const WARM_FREEZE = 0.3;
 
 /** Take up to `want` from `a` at `i`: what was taken. */
 const take = (a: Float32Array, i: number, want: number) => {

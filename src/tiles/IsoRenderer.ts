@@ -15,6 +15,15 @@ export interface ViewTransform {
 /** Wall textures per wall kind; kinds without one fall back to a flat colour. */
 export type WallImages = Partial<Record<Exclude<WallKind, 'none'>, HTMLImageElement>>;
 
+/** Draw `image` at device px (x, y), only the part the canvas shows. */
+function blitSeen(ctx: CanvasRenderingContext2D, image: HTMLCanvasElement, x: number, y: number): void {
+  const [x0, y0] = [Math.max(0, Math.floor(-x)), Math.max(0, Math.floor(-y))];
+  const [x1, y1] = [Math.min(image.width, Math.ceil(ctx.canvas.width - x)), Math.min(image.height, Math.ceil(ctx.canvas.height - y))];
+  if (x1 > x0 && y1 > y0) ctx.drawImage(image, x0, y0, x1 - x0, y1 - y0, x + x0, y + y0, x1 - x0, y1 - y0);
+}
+
+/** Most pixels the props layer holds to keep the whole map. */
+const LAYER_MOST = 4096 * 4096;
 /** Headroom above the highest ground for props (trees), in hex radii. */
 const PROP_HEADROOM = 1.2;
 /** Height of the ground-coloured lip along a wall's top edge, in scene pixels. */
@@ -99,7 +108,7 @@ export class IsoRenderer {
       const layer = this.layerOf(ctx, scene);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(layer, 0, 0);
+      blitSeen(ctx, layer.canvas, layer.x, layer.y);
       ctx.restore();
     } else {
       this.drawFaces(ctx, scene);
@@ -112,24 +121,36 @@ export class IsoRenderer {
     ctx.restore();
   }
 
-  /** The flat map's faces and props, drawn with `ctx`'s view onto a canvas of its size, kept while they and the view stay. */
-  private layerOf(ctx: CanvasRenderingContext2D, scene: Scene): HTMLCanvasElement {
+  /**
+   * The flat map's faces and props, drawn once at the view's scale onto a
+   * canvas holding the whole map, kept while they and the scale stay: the
+   * view moving (a camera following someone) only moves where it is shown.
+   */
+  private layerOf(ctx: CanvasRenderingContext2D, scene: Scene): { canvas: HTMLCanvasElement; x: number; y: number } {
     const m = ctx.getTransform();
-    const key = [ctx.canvas.width, ctx.canvas.height, m.a, m.d, m.e, m.f].join();
+    const pad = scene.hexSize;
+    const top = Math.min(0, ...scene.bands.map((b) => b.slice.top)) - scene.hexSize * PROP_HEADROOM;
+    const [left, right, bottom] = [-pad, scene.frame.width + pad, scene.frame.height * scene.view.squash + scene.view.thickness + pad];
+    const [w, h] = [Math.ceil((right - left) * m.a), Math.ceil((bottom - top) * m.d)];
+    // Too big to keep whole (zoomed far in on a big screen): only what the view shows, as before.
+    const whole = w * h <= LAYER_MOST;
+    const key = whole ? [m.a, m.d].join() : [ctx.canvas.width, ctx.canvas.height, m.a, m.d, m.e, m.f].join();
+    const at = whole ? { x: m.e + left * m.a, y: m.f + top * m.d } : { x: 0, y: 0 };
     const l = this.layer;
-    if (l && l.bands === scene.bands && l.tiles === scene.tiles && l.key === key) return l.canvas;
+    if (l && l.bands === scene.bands && l.tiles === scene.tiles && l.key === key) return { canvas: l.canvas, ...at };
     const start = performance.now();
     const canvas = l?.canvas ?? document.createElement('canvas');
-    [canvas.width, canvas.height] = [ctx.canvas.width, ctx.canvas.height];
+    [canvas.width, canvas.height] = whole ? [w, h] : [ctx.canvas.width, ctx.canvas.height];
     const c = canvas.getContext('2d')!;
-    c.setTransform(m);
+    if (whole) c.setTransform(m.a, 0, 0, m.d, -left * m.a, -top * m.d);
+    else c.setTransform(m);
     c.lineWidth = 0.6;
     c.imageSmoothingQuality = 'high';
     this.drawFaces(c, scene);
     for (const band of scene.bands) this.drawProps(c, band.props);
     this.layer = { canvas, bands: scene.bands, tiles: scene.tiles, key };
     performance.measure('props layer', { start, end: performance.now() });
-    return canvas;
+    return { canvas, ...at };
   }
 
   private drawFaces(ctx: CanvasRenderingContext2D, scene: Scene): void {

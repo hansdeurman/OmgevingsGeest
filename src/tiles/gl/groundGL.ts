@@ -1,6 +1,7 @@
 import type { RGB } from '../../rendering/palette';
 import { UNDER_WATER, type WaterLook, type WetLayer } from '../groundWater';
 import type { Raster } from '../raster';
+import { blendField } from '../hexField';
 import { LOOK_RES, lookTable } from '../wetGround';
 import { glAttribute, glProgram, glUniforms, type Uniforms } from './glKit';
 import { RIVER_VERTEX, riverMesh } from './groundGLData';
@@ -12,6 +13,13 @@ import { RIVER_VERTEX, riverMesh } from './groundGLData';
  * grades every pixel and draws the rivers, as wetGround and riverPaint do
  * on the CPU. So playing the water costs next to nothing per frame.
  */
+
+/** How the season looks per hex (each 0–1): snow on the land, ice on the water, how lush the plants are. */
+export interface SeasonFields {
+  snow: ArrayLike<number>;
+  ice: ArrayLike<number>;
+  vigour: ArrayLike<number>;
+}
 
 /** Where the map goes on the canvas: canvas px = offset + frame px (squashed) * scale. */
 export interface GroundView {
@@ -73,6 +81,27 @@ uniform sampler2D uLook;
 uniform float uLookWidth;
 uniform sampler2D uDetail;
 uniform float uDetailSize;
+uniform sampler2D uSeason;
+/** The season on the ground: plants grazed or dried to straw and earth (or lush), ice on cold water, snow on the land, bare rock where the map is painted snowy but none lies. */
+vec3 seasonal(vec3 c, vec2 frame) {
+  vec3 s = texture(uSeason, (frame / uGrid.z + 0.5) / uGrid.xy).rgb;
+  float lum = dot(c, vec3(0.3, 0.59, 0.11));
+  float green = clamp((c.g - max(c.r, c.b)) / 30.0, 0.0, 1.0);
+  float blue = clamp((c.b - max(c.r, c.g) + 10.0) / 40.0, 0.0, 1.0);
+  float grey = 1.0 - clamp((max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b))) / 30.0, 0.0, 1.0);
+  float n = noise(frame * 0.06);
+  vec3 straw = vec3(lum * 1.05 + 45.0, lum * 0.9 + 30.0, lum * 0.45 + 10.0);
+  vec3 earth = vec3(lum * 0.85 + 38.0, lum * 0.68 + 24.0, lum * 0.5 + 10.0);
+  c = mix(c, mix(straw, earth, ramp(0.35, 0.0, s.b)), green * ramp(0.7, 0.15, s.b + 0.15 * (n - 0.5)) * 0.85);
+  c = mix(c, c * vec3(0.84, 1.06, 0.82), green * ramp(0.85, 1.0, s.b) * 0.5);
+  float ice = ramp(0.2, 0.7, s.g + 0.25 * (n - 0.5));
+  c = mix(c, vec3(206.0, 226.0, 240.0) + 20.0 * noise(frame * 0.25), ice * blue * 0.9);
+  float snow = ramp(0.2, 0.75, s.r + 0.35 * (n - 0.5));
+  c = mix(c, vec3(244.0, 247.0, 252.0) - 12.0 * noise(frame * 0.4), snow * 0.93 * (1.0 - blue));
+  float bare = ramp(0.25, 0.0, s.r) * ramp(200.0, 232.0, lum) * grey * (1.0 - blue);
+  c = mix(c, vec3(150.0, 140.0, 128.0) * (0.85 + 0.3 * noise(frame * 0.3)), bare * 0.75);
+  return clamp(c, 0.0, 255.0);
+}
 vec3 grade(vec3 c0, float s, float puddle, float crack, vec3 water) {
   float u = (s * ${LOOK_RES.toFixed(1)} + 0.5) / uLookWidth;
   vec4 a = texture(uLook, vec2(u, 0.25)); // straw, cracks, light, saturation
@@ -103,6 +132,7 @@ void main() {
     vec2 d = texture(uDetail, vFrame / uDetailSize).rg;
     c = grade(c, s, d.r, d.g, waterAt(vFrame));
   }
+  c = seasonal(c, vFrame);
   outColor = vec4(c / 255.0, 1.0);
 }
 `;
@@ -140,8 +170,8 @@ void main() {
 export class GroundGL {
   private readonly ground: { program: WebGLProgram; u: Uniforms; quad: WebGLBuffer };
   private readonly river: { program: WebGLProgram; u: Uniforms; bed: WebGLBuffer; water: WebGLBuffer };
-  private readonly tex: Record<'base' | 'keep' | 'field' | 'look' | 'detail' | 'water', WebGLTexture>;
-  private uploaded: { base?: Raster; keep?: Uint8Array; detail?: unknown; water?: Raster; grid?: string } = {};
+  private readonly tex: Record<'base' | 'keep' | 'field' | 'look' | 'detail' | 'water' | 'season', WebGLTexture>;
+  private uploaded: { base?: Raster; keep?: Uint8Array; detail?: unknown; water?: Raster; grid?: string; season?: SeasonFields } = {};
   private lookWidth: number;
 
   /** The GPU ground for `canvas`, or undefined where WebGL2 is not to be had. */
@@ -160,10 +190,10 @@ export class GroundGL {
     const uniforms = (p: WebGLProgram, names: string[]) => glUniforms(gl, p, names);
     const shared = ['uFrame', 'uView', 'uCanvas', 'uKeep', 'uField', 'uGrid', 'uWater', 'uWaterSize'];
     const g = program(GROUND_VERTEX, GROUND_FRAGMENT);
-    this.ground = { program: g, u: uniforms(g, [...shared, 'uBase', 'uLook', 'uLookWidth', 'uDetail', 'uDetailSize']), quad: gl.createBuffer()! };
+    this.ground = { program: g, u: uniforms(g, [...shared, 'uBase', 'uLook', 'uLookWidth', 'uDetail', 'uDetailSize', 'uSeason']), quad: gl.createBuffer()! };
     const r = program(RIVER_VERTEX_SHADER, RIVER_FRAGMENT);
     this.river = { program: r, u: uniforms(r, [...shared, 'uWaterPass', 'uUnder']), bed: gl.createBuffer()!, water: gl.createBuffer()! };
-    this.tex = { base: gl.createTexture()!, keep: gl.createTexture()!, field: gl.createTexture()!, look: gl.createTexture()!, detail: gl.createTexture()!, water: gl.createTexture()! };
+    this.tex = { base: gl.createTexture()!, keep: gl.createTexture()!, field: gl.createTexture()!, look: gl.createTexture()!, detail: gl.createTexture()!, water: gl.createTexture()!, season: gl.createTexture()! };
     const look = lookTable();
     this.lookWidth = look.width;
     this.texture('look', gl.RGBA16F, look.width, 2, gl.RGBA, gl.FLOAT, look.data, gl.LINEAR, gl.CLAMP_TO_EDGE);
@@ -217,25 +247,32 @@ export class GroundGL {
       this.texture('water', gl.RGBA8, water.width, water.height, gl.RGBA, gl.UNSIGNED_BYTE, data, gl.LINEAR, gl.REPEAT);
     }
     const grid = `${layer.blend.gw}x${layer.blend.gh}`;
-    if (u.grid !== grid) this.texture('field', gl.R16F, layer.blend.gw, layer.blend.gh, gl.RED, gl.FLOAT, new Float32Array(layer.blend.gw * layer.blend.gh), gl.LINEAR, gl.CLAMP_TO_EDGE);
-    this.uploaded = { base, keep: layer.keep, detail: layer.detail, water, grid };
+    if (u.grid !== grid) {
+      const { gw, gh } = layer.blend;
+      this.texture('field', gl.R16F, gw, gh, gl.RED, gl.FLOAT, new Float32Array(gw * gh), gl.LINEAR, gl.CLAMP_TO_EDGE);
+      const neutral = new Float32Array(gw * gh * 4);
+      for (let p = 0; p < gw * gh; p++) [neutral[4 * p + 2], neutral[4 * p + 3]] = [1, 1];
+      this.texture('season', gl.RGBA16F, gw, gh, gl.RGBA, gl.FLOAT, neutral, gl.LINEAR, gl.CLAMP_TO_EDGE);
+    }
+    this.uploaded = { ...this.uploaded, base, keep: layer.keep, detail: layer.detail, water, grid: grid === u.grid ? u.grid : grid, season: grid === u.grid ? u.season : undefined };
   }
 
   /**
    * Draw the ground `base` (frame px) graded by the water's `look`, with its
    * rivers, onto the whole canvas (cleared first), placed by `view`.
    */
-  render(base: Raster, layer: WetLayer, look: WaterLook, water: Raster, view: GroundView): void {
+  render(base: Raster, layer: WetLayer, look: WaterLook, water: Raster, view: GroundView, season?: SeasonFields): void {
     const gl = this.gl;
     const canvas = gl.canvas as HTMLCanvasElement;
     this.prepare(base, layer, water);
+    if (season && season !== this.uploaded.season) this.uploadSeason(layer, season);
     gl.bindTexture(gl.TEXTURE_2D, this.tex.field);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, layer.blend.gw, layer.blend.gh, gl.RED, gl.FLOAT, look.field);
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    const units = { uBase: 'base', uKeep: 'keep', uField: 'field', uLook: 'look', uDetail: 'detail', uWater: 'water' } as const;
+    const units = { uBase: 'base', uKeep: 'keep', uField: 'field', uLook: 'look', uDetail: 'detail', uWater: 'water', uSeason: 'season' } as const;
     const bind = (u: Uniforms) => {
       Object.entries(units).forEach(([name, tex], k) => {
         if (!u[name]) return;
@@ -277,6 +314,18 @@ export class GroundGL {
       gl.uniform1i(this.river.u.uWaterPass, pass);
       gl.drawArrays(gl.TRIANGLES, 0, mesh.length / RIVER_VERTEX);
     }
+  }
+
+  /** The season's look, blended over the map as the water's look is, into its texture. */
+  private uploadSeason(layer: WetLayer, season: SeasonFields): void {
+    const gl = this.gl;
+    const { gw, gh } = layer.blend;
+    const [snow, ice, vigour] = [season.snow, season.ice, season.vigour].map((v) => blendField(layer.blend, v));
+    const data = new Float32Array(gw * gh * 4);
+    for (let p = 0; p < gw * gh; p++) [data[4 * p], data[4 * p + 1], data[4 * p + 2], data[4 * p + 3]] = [snow[p], ice[p], vigour[p], 1];
+    gl.bindTexture(gl.TEXTURE_2D, this.tex.season);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gw, gh, gl.RGBA, gl.FLOAT, data);
+    this.uploaded.season = season;
   }
 
   /** Nothing to show: clear the canvas. */

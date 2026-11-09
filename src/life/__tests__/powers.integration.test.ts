@@ -97,7 +97,7 @@ describe('the avatar’s gifts, each worked a while in midsummer, on lowland spo
 
   it('none of them turns the whole world warmer or colder by much, nor makes or loses water', () => {
     for (const gift of ['rain', 'sun', 'frost', 'grow'] as const) {
-      expect(Math.abs(change(gift, 'land')), gift).toBeLessThan(0.3);
+      expect(Math.abs(change(gift, 'land')), gift).toBeLessThan(0.5);
       expect(seen[gift]!.water, gift).toBeLessThan(0.05);
     }
   });

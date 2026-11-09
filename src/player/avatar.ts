@@ -42,8 +42,8 @@ export interface GiftKind {
 /** The gifts, each worked as creatures' powers are, only stronger. */
 export const GIFTS: Record<Gift, GiftKind> = {
   rain: { name: 'Rain', hint: 'Gathers clouds and makes them rain', element: 'water', key: '1', icon: '🌧', powers: [{ kind: 'mist', strength: 0.012, reach: 2 }, { kind: 'rain', strength: 0.35, reach: 2 }] },
-  sun: { name: 'Sun', hint: 'Breaks the clouds, warms and dries the land', element: 'light', key: '2', icon: '☀️', powers: [{ kind: 'shine', strength: 1, reach: 2 }, { kind: 'warm', strength: 0.5, reach: 2 }] },
-  frost: { name: 'Frost', hint: 'Cools the air and freezes standing water', element: 'water', key: '3', icon: '❄️', powers: [{ kind: 'chill', strength: 0.6, reach: 2 }, { kind: 'freeze', strength: 0.12, reach: 1 }] },
+  sun: { name: 'Sun', hint: 'Breaks the clouds, warms the land, melts snow', element: 'light', key: '2', icon: '☀️', powers: [{ kind: 'shine', strength: 1.5, reach: 2 }, { kind: 'warm', strength: 0.8, reach: 2 }] },
+  frost: { name: 'Frost', hint: 'Cools the air, freezes lakes, brings snow', element: 'water', key: '3', icon: '❄️', powers: [{ kind: 'chill', strength: 0.9, reach: 2 }, { kind: 'freeze', strength: 0.25, reach: 2 }, { kind: 'rain', strength: 0.15, reach: 2 }] },
   wind: { name: 'Wind', hint: 'Drives the wind the way you face', element: 'wind', key: '4', icon: '💨', powers: [{ kind: 'gust', strength: 0.12, reach: 2 }] },
   grow: { name: 'Grow', hint: 'Makes plants grow fast', element: 'organic', key: '5', icon: '🌱', powers: [{ kind: 'grow', strength: 3, reach: 2 }] },
   calm: { name: 'Calm', hint: 'Draws creatures near; none hunts around you', element: 'psychic', key: '6', icon: '🕊', powers: [{ kind: 'lure', strength: 1.5, reach: 4 }, { kind: 'calm', strength: 1, reach: 3 }] },

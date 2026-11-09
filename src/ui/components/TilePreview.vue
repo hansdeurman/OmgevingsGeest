@@ -20,6 +20,7 @@ import { command, createEcosystem, ecoModel, forgetCommands, type Command, type 
 import { FORMS, GIFT_ORDER, GIFTS, type Avatar, type Form, type Gift } from '../../player/avatar';
 import { ELEMENT_LOOK } from '../../life/elements';
 import { mapToFrame, screenToMap } from '../mapView';
+import { seasonLook, type SeasonLook } from '../seasonLook';
 import { cameraTransform, ease, pan, zoomBy, type Camera } from '../camera';
 import { hexAt } from '../../life/hexSpace';
 import { creatureAt, CreatureSprites, drawAvatar, drawCreatures, placeAvatar, placeCreatures, type Placed } from '../creatureLayer';
@@ -166,7 +167,7 @@ function togglePlay(): void {
     steps.value = Math.max(steps.value, step.value);
     if (run) firstStep.value = run.water.first;
     skyTime += dt;
-    if (camera.zoom > 1 && camera.follow) draw();
+    if (camera.zoom > 1 && camera.follow && cameraBehind()) draw();
     const field = skyField();
     if (field) run!.deck.update(field, dt * speed.value);
     drawSky();
@@ -290,6 +291,12 @@ function avatarInFrame(): { x: number; y: number } | undefined {
 
 /** Whether the camera has been put on the avatar yet, on this map. */
 let aimed = false;
+
+/** Whether the camera is behind the avatar by a pixel or more on screen: only then is the map drawn anew to follow it. */
+function cameraBehind(): boolean {
+  const to = avatarInFrame();
+  return !!to && !!placed && Math.hypot(to.x - camera.centre.x, (to.y - camera.centre.y) * SQUASH) * placed.scale >= 1;
+}
 
 /** The camera on to its spot: the avatar, if it follows; the first time, there at once. */
 function aimCamera(at = FOLLOW): void {
@@ -602,12 +609,25 @@ function draw(): void {
   if (groundGl && groundCanvas.value) {
     fit(groundCanvas.value, w, h, dpr);
     const water = groundTextures().water[0];
-    if (onGpu) timed('ground', () => groundGl!.render(s.ground, s.wet!, s.look!, water, { scale: t.scale * dpr, x: t.x * dpr, y: t.y * dpr, squash: SQUASH }));
+    const season = seasonNow();
+    if (onGpu) timed('ground', () => groundGl!.render(s.ground, s.wet!, s.look!, water, { scale: t.scale * dpr, x: t.x * dpr, y: t.y * dpr, squash: SQUASH }, season));
     else groundGl.clear();
   }
   timed('draw', () => renderer.draw(ctx, s, t, { grid: showGrid.value, ground: !onGpu }));
   drawLabels(ctx, s, t);
   if (!playing.value) drawSky();
+}
+
+/** The season's look of the step shown: snow, ice and plants as the run has them (worked out once per step; while playing, every few steps). */
+let seasonShown: { step: number; runs: number; look: SeasonLook } | undefined;
+function seasonNow(): SeasonLook | undefined {
+  if (!run || run.map !== map) return undefined;
+  const fresh = seasonShown && seasonShown.runs === runs.value && Math.abs(seasonShown.step - step.value) < (playing.value ? SETTLE_EVERY : 1);
+  if (!fresh) {
+    const v = run.water.at(step.value);
+    seasonShown = { step: step.value, runs: runs.value, look: seasonLook({ snow: v.snow, depth: v.depth, ground: v.ground, surface: v.sky.surface, plants: v.life.plants }, run.eco.life.food.room) };
+  }
+  return seasonShown!.look;
 }
 
 function newMap(): void {
@@ -877,10 +897,9 @@ canvas.sky { pointer-events: none; }
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  background: rgba(20, 20, 28, 0.88);
+  background: rgba(20, 20, 28, 0.92);
   border: 1px solid #1f1f28;
   border-radius: 14px;
-  backdrop-filter: blur(4px);
   z-index: 6;
   user-select: none;
   -webkit-user-select: none;
