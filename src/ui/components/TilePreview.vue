@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { DEMO_MAPS, demoMap, floodedGrid, type DemoMap, type MapLabel } from '../../tiles/demoMaps';
 import { ART_HEX, frameCentre, gridFrame } from '../../tiles/geometry';
 import { IsoRenderer, fitTransform, projectToScreen, type ViewTransform, type WallImages } from '../../tiles/IsoRenderer';
@@ -19,7 +19,8 @@ import { createWaterCycle, defaultClimate } from '../../water/waterCycle';
 import { command, createEcosystem, ecoModel, forgetCommands, type Command, type EcoSnapshot, type Ecosystem, type LifeSnapshot } from '../../life/ecosystem';
 import { FORMS, GIFT_ORDER, GIFTS, type Avatar, type Form, type Gift } from '../../player/avatar';
 import { ELEMENT_LOOK } from '../../life/elements';
-import { screenToMap } from '../mapView';
+import { mapToFrame, screenToMap } from '../mapView';
+import { cameraTransform, ease, pan, zoomBy, type Camera } from '../camera';
 import { hexAt } from '../../life/hexSpace';
 import { creatureAt, CreatureSprites, drawAvatar, drawCreatures, placeAvatar, placeCreatures, type Placed } from '../creatureLayer';
 import { callRows, describe, kindRows, loreOf, RELEASABLE } from '../lifePanel';
@@ -46,7 +47,8 @@ const canvas = ref<HTMLCanvasElement | null>(null);
 /** Under the canvas: the flat map's ground, graded by the water on the GPU (unless ?gpu=0, or there is no WebGL2). */
 const groundCanvas = ref<HTMLCanvasElement | null>(null);
 let groundGl: GroundGL | undefined;
-const mapId = ref(DEMO_MAPS[0].id);
+/** The map played on: the highlands, a whole world, unless another is picked. */
+const mapId = ref(DEMO_MAPS.find((m) => m.id === 'highlands')?.id ?? DEMO_MAPS[0].id);
 const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
@@ -115,6 +117,7 @@ function startRun(): void {
   step.value = steps.value = run ? OPENS_AT : 0;
   firstStep.value = 0;
   lifeShown = undefined;
+  aimed = false;
   runs.value++;
 }
 
@@ -163,6 +166,7 @@ function togglePlay(): void {
     steps.value = Math.max(steps.value, step.value);
     if (run) firstStep.value = run.water.first;
     skyTime += dt;
+    if (camera.zoom > 1 && camera.follow) draw();
     const field = skyField();
     if (field) run!.deck.update(field, dt * speed.value);
     drawSky();
@@ -265,8 +269,90 @@ const kindsNow = computed(() => (lifeNowShown.value ? kindRows(lifeNowShown.valu
 const callsNow = computed(() => (lifeNowShown.value ? callRows(lifeNowShown.value) : []));
 const creaturesNow = computed(() => kindsNow.value.reduce((n, r) => n + r.count, 0));
 const releaseKind = ref(RELEASABLE[0].kind);
-/** On a wide screen the Life panel opens by itself; on a phone it would cover the map. */
+/** On a wide screen the panels open by themselves; on a phone they would cover the map, so they wait behind the menu button. */
 const wide = window.innerWidth >= 720;
+const panelOpen = ref(wide);
+
+/** The view: on a phone it starts zoomed in on the avatar, following it; on a wide screen, the whole map. */
+const camera = reactive<Camera>({ zoom: wide ? 1 : 2.4, follow: true, centre: { x: 0, y: 0 } });
+/** Share of the way the camera eases towards the avatar each frame. */
+const FOLLOW = 0.12;
+
+/** Where the avatar is drawn now, in frame px, if it is shown. */
+function avatarInFrame(): { x: number; y: number } | undefined {
+  const life = lifeShown;
+  const s = scene;
+  if (!life || !s) return undefined;
+  const [a, b] = [life.prev?.avatar ?? life.cur.avatar, life.cur.avatar];
+  const t = playing.value ? between : 1;
+  return mapToFrame({ ox: s.frame.ox, oy: s.frame.oy, spacing: Math.sqrt(3) * HEX }, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+}
+
+/** Whether the camera has been put on the avatar yet, on this map. */
+let aimed = false;
+
+/** The camera on to its spot: the avatar, if it follows; the first time, there at once. */
+function aimCamera(at = FOLLOW): void {
+  lifeNow();
+  const to = camera.follow ? avatarInFrame() : undefined;
+  if (!to) return;
+  ease(camera, to, aimed ? at : 1);
+  aimed = true;
+}
+
+function zoomIn(factor: number): void {
+  if (camera.zoom === 1 && factor > 1) aimCamera(1);
+  zoomBy(camera, factor);
+  schedule(draw);
+}
+
+function followAvatar(): void {
+  camera.follow = true;
+  if (camera.zoom === 1) zoomBy(camera, 2.4);
+  schedule(draw);
+}
+
+/** Fingers (or the mouse) on the map: one dragged pans, two pinched zoom; a touch that hardly moved is a tap. */
+const fingers = new Map<number, { x: number; y: number }>();
+let dragged = false;
+let pinched = 0;
+/** Px a finger may move and still tap. */
+const TAP = 8;
+let downAt = { x: 0, y: 0 };
+
+function press(e: PointerEvent): void {
+  if (!fingers.size) [dragged, downAt] = [false, { x: e.clientX, y: e.clientY }];
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  point(e);
+}
+
+function drag(e: PointerEvent): void {
+  const was = fingers.get(e.pointerId);
+  if (!was) return point(e);
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (fingers.size === 2) {
+    const [a, b] = [...fingers.values()];
+    const apart = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinched) zoomBy(camera, apart / pinched);
+    [pinched, dragged] = [apart, true];
+    return schedule(draw);
+  }
+  if (!dragged && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < TAP) return;
+  dragged = true;
+  if (camera.zoom > 1 && placed) pan(camera, e.clientX - was.x, e.clientY - was.y, placed.scale, SQUASH);
+  schedule(draw);
+}
+
+function letGo(e: PointerEvent): void {
+  fingers.delete(e.pointerId);
+  pinched = 0;
+  lift(e);
+}
+
+function wheel(e: WheelEvent): void {
+  e.preventDefault();
+  zoomIn(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+}
 /** Creatures let in at a time. */
 const RELEASE = 4;
 
@@ -298,6 +384,7 @@ function mapPlace(sx: number, sy: number): { x: number; y: number } | undefined 
 
 /** A tap or click on the map sends the avatar there. */
 function sendAvatar(e: MouseEvent): void {
+  if (dragged) return void (dragged = false);
   const box = host.value!.getBoundingClientRect();
   const to = mapPlace(e.clientX - box.left, e.clientY - box.top);
   const { cols, rows } = map.grid;
@@ -371,6 +458,13 @@ function point(e: PointerEvent): void {
   const near = creatureAt(placedLife, focus.x, focus.y);
   const view = near && lifeShown?.cur.life.creatures.find((c) => c.id === near.id);
   hovered.value = view ? describe(view) : '';
+  if (!playing.value) schedule(drawSky);
+}
+
+/** A finger lifted off the map: the clouds close again over where it was (a mouse keeps its place). */
+function lift(e: PointerEvent): void {
+  if (e.pointerType === 'mouse') return;
+  focus = undefined;
   if (!playing.value) schedule(drawSky);
 }
 
@@ -501,7 +595,8 @@ function draw(): void {
   const ctx = el.getContext('2d')!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const t = fitTransform(s, w, h, 48);
+  aimCamera();
+  const t = cameraTransform(fitTransform(s, w, h, 48), camera, { width: w, height: h }, s.frame, SQUASH);
   placed = t;
   const onGpu = !!(groundGl && s.look && s.wet);
   if (groundGl && groundCanvas.value) {
@@ -567,10 +662,26 @@ watch([shift, windOn], drawWindLayer);
 
 <template>
   <div class="tiles">
-    <div ref="host" class="stage" @pointermove="point" @pointerdown="point" @pointerleave="unpoint" @click="sendAvatar">
+    <div ref="host" class="stage" @pointermove="drag" @pointerdown="press" @pointerup="letGo" @pointercancel="letGo" @pointerleave="unpoint" @click="sendAvatar" @wheel="wheel">
       <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="lifeCanvas" class="sky" /><canvas ref="skyCanvas" class="sky" /><canvas ref="windCanvas" class="sky" />
     </div>
-    <div class="controls">
+    <button class="menu" type="button" :aria-expanded="panelOpen" :title="panelOpen ? 'Hide settings' : 'Settings'" @click="panelOpen = !panelOpen">{{ panelOpen ? '✕' : '☰' }}</button>
+    <div class="zoom">
+      <button type="button" title="Closer" @click="zoomIn(1.4)">＋</button>
+      <button type="button" title="Further" @click="zoomIn(1 / 1.4)">－</button>
+      <button type="button" :class="{ on: camera.follow && camera.zoom > 1 }" title="Follow me" @click="followAvatar">◎</button>
+    </div>
+    <div v-if="steps > 0 && avatarNow" class="hud">
+      <p class="hud-line">{{ hovered || (avatarNow.gift ? `${GIFTS[avatarNow.gift].name}: ${GIFTS[avatarNow.gift].hint.toLowerCase()}` : `${clock} · tap the map to walk`) }}</p>
+      <div class="hud-row">
+        <button type="button" class="play" :title="playing ? 'Pause' : 'Play'" @click="togglePlay">{{ playing ? '⏸' : '▶' }}</button>
+        <button v-for="g in GIFT_ORDER" :key="g" type="button" class="gift" :class="{ on: avatarNow.gift === g }" :style="{ '--gift': giftColour(g) }" :title="`${GIFTS[g].hint} (key ${GIFTS[g].key})`" @click="toggleGift(g)">
+          <span class="icon">{{ GIFTS[g].icon }}</span><span class="label">{{ GIFTS[g].name }}</span>
+        </button>
+      </div>
+      <div class="spirit-bar" title="Spirit: gifts spend it, rest brings it back"><span :style="{ width: `${Math.round(avatarNow.spirit * 100)}%` }" /></div>
+    </div>
+    <div v-show="panelOpen" class="controls">
       <label>
         Map
         <select v-model="mapId">
@@ -625,11 +736,7 @@ watch([shift, windOn], drawWindLayer);
             <option v-for="(f, key) in FORMS" :key="key" :value="key">{{ f.name }}</option>
           </select>
         </label>
-        <div class="gifts">
-          <button v-for="g in GIFT_ORDER" :key="g" type="button" :class="{ on: avatarNow.gift === g }" :style="{ '--gift': giftColour(g) }" :title="`${GIFTS[g].hint} (key ${GIFTS[g].key})`" @click="toggleGift(g)">{{ GIFTS[g].name }}</button>
-        </div>
-        <div class="spirit-bar" title="Spirit: gifts spend it, rest brings it back"><span :style="{ width: `${Math.round(avatarNow.spirit * 100)}%` }" /></div>
-        <p class="hint">Tap the map to walk there · arrows/WASD · 1–6 gifts</p>
+        <p class="hint">Tap the map to walk there · arrows/WASD · gifts below, or keys 1–6</p>
       </details>
       <details v-if="steps > 0" class="climate life" :open="wide">
         <summary>Life · {{ creaturesNow }}</summary>
@@ -682,13 +789,18 @@ watch([shift, windOn], drawWindLayer);
   inset: 0;
   background: radial-gradient(ellipse at 50% 40%, #23324a 0%, #0f1520 75%);
 }
-.stage { position: absolute; inset: 0; }
+.stage { position: absolute; inset: 0; touch-action: none; }
 canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 canvas.sky { pointer-events: none; }
 .controls {
   position: absolute;
-  bottom: 12px;
+  top: 52px;
   left: 12px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 52px - 150px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -719,9 +831,68 @@ canvas.sky { pointer-events: none; }
 .controls .life .value { width: auto; min-width: 40px; }
 .controls .life small { color: #8a8a99; }
 .controls .call { color: #ffe08a; }
-.controls .gifts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-.controls .gifts button { border: 1px solid var(--gift); background: transparent; color: #e6e6f0; border-radius: 6px; padding: 3px 4px; font-size: 12px; cursor: pointer; }
-.controls .gifts button.on { background: var(--gift); color: #10101a; font-weight: 600; }
-.controls .spirit-bar { height: 6px; border-radius: 3px; background: #2a2a38; overflow: hidden; }
-.controls .spirit-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ffd23f, #fff4c8); }
+.menu {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top, 0px));
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #1f1f28;
+  background: rgba(20, 20, 28, 0.85);
+  color: #e6e6f0;
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 7;
+}
+.zoom {
+  position: absolute;
+  right: 10px;
+  bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 120px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 6;
+}
+.zoom button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #1f1f28;
+  background: rgba(20, 20, 28, 0.85);
+  color: #e6e6f0;
+  font-size: 18px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.zoom button.on { color: #ffd23f; border-color: #ffd23f; }
+.hud {
+  position: absolute;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 16px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(20, 20, 28, 0.88);
+  border: 1px solid #1f1f28;
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  z-index: 6;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hud-line { margin: 0; font-size: 12px; color: #b8b8c8; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-row { display: grid; grid-template-columns: 44px repeat(6, 1fr); gap: 6px; }
+.hud button { min-height: 50px; border-radius: 10px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.hud .play { border: 1px solid #3a3a4c; background: #262634; color: #fff; font-size: 18px; }
+.hud .gift { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 2px; border: 1.5px solid var(--gift); background: transparent; color: #e6e6f0; }
+.hud .gift .icon { font-size: 20px; line-height: 1; }
+.hud .gift .label { font-size: 10px; }
+.hud .gift.on { background: var(--gift); color: #10101a; font-weight: 600; }
+.spirit-bar { height: 6px; border-radius: 3px; background: #2a2a38; overflow: hidden; }
+.spirit-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ffd23f, #fff4c8); transition: width 0.2s; }
 </style>

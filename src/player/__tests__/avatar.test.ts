@@ -47,8 +47,9 @@ describe('stepAvatar', () => {
 });
 
 describe('gifts', () => {
-  it('each has a name, a hint, a key and powers', () => {
+  it('each has a name, a hint, a key, an icon and powers', () => {
     expect(new Set(GIFT_ORDER.map((g) => GIFTS[g].key)).size).toBe(GIFT_ORDER.length);
+    expect(new Set(GIFT_ORDER.map((g) => GIFTS[g].icon)).size).toBe(GIFT_ORDER.length);
     GIFT_ORDER.forEach((g) => expect(GIFTS[g].powers.length).toBeGreaterThan(0));
   });
 
