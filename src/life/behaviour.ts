@@ -29,6 +29,8 @@ export interface Surroundings extends Population {
   /** Share of the year since midwinter. */
   year: number;
   minds: readonly Mind[];
+  /** How many times as many creatures as the bestiary's numbers the world holds (1 if not given). */
+  scale?: number;
   /** A new creature: its id and place in the world are given it there. */
   born(kind: number, x: number, y: number, energy: number): Creature;
   /** A spot that would suit a creature of `kind` coming into the world now, if any. */
@@ -265,7 +267,7 @@ export const inSeason = (year: number) => year >= SEASON[0] && year <= SEASON[1]
 export function breed(c: Creature, s: Species, env: Surroundings): Creature[] {
   const window = (SEASON[1] - SEASON[0]) * YEAR;
   if (s.mystic || c.doing === 'away' || c.age < s.matures || c.energy < 0.7 || !inSeason(env.year) || c.left < window / (2 * s.broods)) return [];
-  if (env.counts[c.kind] >= (s.most ?? MOST_OF_A_KIND) || random(env.rng) >= s.broods / window) return [];
+  if (env.counts[c.kind] >= (s.most ?? MOST_OF_A_KIND) * (env.scale ?? 1) || random(env.rng) >= s.broods / window) return [];
   const mate = nearest(c, s, env, SELF[c.kind], (o) => o.age >= s.matures && o.doing !== 'sleep', 2);
   if (!mate || countNear(env.census, env.creatures, c.x, c.y, CROWDED.within) > CROWDED.most) return [];
   c.energy -= BROOD_COST * s.brood;

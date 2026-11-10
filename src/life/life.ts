@@ -28,6 +28,8 @@ export interface Life extends Calling {
   nextId: number;
   /** The most of each kind there have been. */
   peaks: Int32Array;
+  /** How many times as many creatures this world holds as the bestiary's numbers are for: more on a wider land. */
+  scale: number;
 }
 
 /** One in the world who is not among its creatures (the player): its pull on their minds, and its powers on the world, added to theirs. */
@@ -43,6 +45,16 @@ export interface LifeWork {
   influence: Influence;
 }
 
+/** Land (hexes) the bestiary's numbers are for. A wider world holds more, as the square root of how much wider: they spread out, too. */
+const LAND_OF_A_WORLD = 330;
+
+/** How many times as many creatures as the bestiary's numbers a world on `h` holds: never fewer. */
+export function scaleOf(h: Habitat): number {
+  let land = 0;
+  for (let i = 0; i < h.sea.length; i++) if (!h.sea[i]) land++;
+  return Math.max(1, Math.sqrt(land / LAND_OF_A_WORLD));
+}
+
 export const createLife = (h: Habitat, room: ArrayLike<number>, seed = 1): Life => ({
   cols: h.cols,
   rows: h.rows,
@@ -53,6 +65,7 @@ export const createLife = (h: Habitat, room: ArrayLike<number>, seed = 1): Life 
   calling: new Float32Array(BESTIARY.length),
   rest: new Float32Array(BESTIARY.length),
   peaks: new Int32Array(BESTIARY.length),
+  scale: scaleOf(h),
 });
 
 export const createWork = (life: Life): LifeWork => {
@@ -85,6 +98,7 @@ function surroundingsOf(life: Life, h: Habitat, year: number, work: LifeWork, gu
     year,
     minds: [...mindsOf(life.creatures, population), ...guests.flatMap((g) => g.mind(population) ?? [])],
     ...population,
+    scale: life.scale,
     born: (kind, x, y, energy) => ({ id: life.nextId++, kind, x, y, heading: random(life.rng) * 2 * Math.PI, energy, age: 0, doing: 'roam', left: 0 }),
     settle: (kind) => spotFor(kind, env),
   };
@@ -122,9 +136,9 @@ export function release(life: Life, h: Habitat, kind: number, count: number, wor
   return added;
 }
 
-/** Start every ordinary kind off, as many of each as it starts with. */
+/** Start every ordinary kind off, as many of each as it starts with (more on a wider land). */
 export function populate(life: Life, h: Habitat, work = createWork(life)): void {
-  BESTIARY.forEach((s, kind) => s.start && release(life, h, kind, s.start, work));
+  BESTIARY.forEach((s, kind) => s.start && release(life, h, kind, Math.round(s.start * life.scale), work));
 }
 
 /** Share of the most plants a hex grows that a creature (of size 1) gives back to it when it dies. */

@@ -20,6 +20,8 @@ export interface Transform {
 }
 
 export const ZOOM = { least: 1, most: 4 };
+/** The closest the camera goes, as the scale it shows the map at (frame px per screen px): a little past the size it is painted at. */
+const MOST_SCALE = 1.25;
 
 const clamp = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
 
@@ -33,8 +35,15 @@ export function cameraTransform(fit: Transform, cam: Camera, view: { width: numb
   return { scale, x: view.width / 2 - cx * scale, y: view.height / 2 - cy * squash * scale };
 }
 
-/** Zoom by `factor`, within bounds. */
-export const zoomBy = (cam: Camera, factor: number) => (cam.zoom = Math.max(ZOOM.least, Math.min(ZOOM.most, cam.zoom * factor)));
+/** Zoom by `factor`, within bounds: no further out than the whole map, no closer than `most`. */
+export const zoomBy = (cam: Camera, factor: number, most = ZOOM.most) => (cam.zoom = Math.max(ZOOM.least, Math.min(most, cam.zoom * factor)));
+
+/** The closest zoom on a map that `fit` shows whole: on a big map, closer than on a small one, until it is shown about as big as it is painted. */
+export const mostZoom = (fit: Transform) => Math.max(ZOOM.most, MOST_SCALE / fit.scale);
+
+/** The zoom at which the map (`frame`, `squash`ed, shown whole by `fit`) covers the whole `view`: no empty bands beside it. */
+export const coverZoom = (fit: Transform, frame: { width: number; height: number }, view: { width: number; height: number }, squash: number) =>
+  Math.max(view.width / (frame.width * fit.scale), view.height / (frame.height * squash * fit.scale));
 
 /** Move the view by a drag of (dx, dy) screen px: the map goes with the finger, and the camera stops following. */
 export function pan(cam: Camera, dx: number, dy: number, scale: number, squash: number): void {

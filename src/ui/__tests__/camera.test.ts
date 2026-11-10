@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cameraTransform, ease, pan, ZOOM, zoomBy, type Camera } from '../camera';
+import { cameraTransform, coverZoom, ease, mostZoom, pan, ZOOM, zoomBy, type Camera } from '../camera';
 
 const fit = { scale: 0.25, x: 20, y: 300 };
 const view = { width: 400, height: 700 };
@@ -36,6 +36,23 @@ describe('moving the camera', () => {
     expect(c.zoom).toBe(ZOOM.most);
     zoomBy(c, 0.0001);
     expect(c.zoom).toBe(ZOOM.least);
+  });
+
+  it('zooms closer on a big map, until it is shown about as big as it is painted', () => {
+    expect(mostZoom({ ...fit, scale: 0.5 })).toBe(ZOOM.most);
+    expect(mostZoom({ ...fit, scale: 0.05 })).toBeGreaterThan(20);
+    const c = cam();
+    zoomBy(c, 100, mostZoom({ ...fit, scale: 0.05 }));
+    expect(c.zoom * 0.05).toBeLessThan(1.5);
+    expect(c.zoom).toBeGreaterThan(ZOOM.most);
+  });
+
+  it('knows the zoom that leaves no empty bands beside the map', () => {
+    const z = coverZoom(fit, frame, view, squash);
+    const t = cameraTransform(fit, cam({ zoom: z }), view, frame, squash);
+    expect(frame.width * t.scale).toBeGreaterThanOrEqual(view.width - 1e-6);
+    expect(frame.height * squash * t.scale).toBeGreaterThanOrEqual(view.height - 1e-6);
+    expect(Math.min(frame.width * t.scale - view.width, frame.height * squash * t.scale - view.height)).toBeCloseTo(0);
   });
 
   it('pans with the finger, and stops following', () => {

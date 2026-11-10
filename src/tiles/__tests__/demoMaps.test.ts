@@ -90,6 +90,67 @@ describe('highlands', () => {
   }
 });
 
+describe('wilds', () => {
+  const ROW = Math.sqrt(3) / 2;
+  /** For each mountain cell (high, dry), how narrow the mountains are through it: the shortest way across them, over a dozen directions (hex spacings). */
+  const widths = (grid: CoverGrid) => {
+    const { cols, rows } = grid;
+    const at = (x: number, y: number) => {
+      const row = Math.round(y / ROW);
+      const col = Math.round(x - (row & 1) / 2);
+      return col < 0 || row < 0 || col >= cols || row >= rows ? -1 : row * cols + col;
+    };
+    const high = (i: number) => i >= 0 && grid.elevation[i] >= 4.5 && grid.cells[i].water < 2;
+    return grid.cells.flatMap((_, i) => {
+      if (!high(i)) return [];
+      const [x, y] = [(i % cols) + (Math.floor(i / cols) & 1) / 2, Math.floor(i / cols) * ROW];
+      const across = (a: number) => [1, -1].reduce((w, s) => {
+        let d = 0.5;
+        while (d < 20 && high(at(x + s * Math.cos(a) * d, y + s * Math.sin(a) * d))) d += 0.5;
+        return w + d - 0.5;
+      }, 0);
+      return [Math.min(...Array.from({ length: 12 }, (_, k) => across((k * Math.PI) / 12)))];
+    });
+  };
+  const median = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1];
+  const highlands = demoMap('highlands', 1).grid;
+
+  it('is four times the highlands, and the same for a seed', () => {
+    const { grid } = demoMap('wilds', 1);
+    expect(grid.cols * grid.rows).toBe(4 * highlands.cols * highlands.rows);
+    expect(grid).toEqual(demoMap('wilds', 1).grid);
+    expect(grid.elevation).not.toEqual(demoMap('wilds', 2).grid.elevation);
+  });
+
+  for (const seed of [1, 2, 3]) {
+    const grid = full('wilds', seed);
+    const cells = grid.cells.map((c, i) => ({ ...c, elevation: grid.elevation[i] }));
+
+    it(`winds a long range of mountains a few hexes broad across it, up to the snow (seed ${seed})`, () => {
+      const across = widths(grid);
+      expect(across.length).toBeGreaterThan(100);
+      expect(median(across)).toBeGreaterThanOrEqual(2.5);
+      expect(median(across)).toBeLessThanOrEqual(5);
+      expect(Math.max(...grid.elevation)).toBeGreaterThanOrEqual(MAX_ELEVATION - 1);
+    });
+
+    it(`holds a lake high in the mountains and ponds in the lowland (seed ${seed})`, () => {
+      expect(cells.filter((c) => c.water >= 2 && c.elevation >= HIGH_LAKE_FROM).length).toBeGreaterThanOrEqual(4);
+      expect(cells.filter((c) => c.water >= 2 && c.elevation > 0.3 && c.elevation < HIGH_LAKE_FROM).length).toBeGreaterThanOrEqual(3);
+    });
+
+    it(`has patchy woods below the tree line, open meadow and sandy shores (seed ${seed})`, () => {
+      const land = cells.filter((c) => c.elevation > 0 && c.water < 2);
+      const share = (pred: (c: (typeof land)[number]) => boolean) => land.filter(pred).length / land.length;
+      expect(share((c) => c.trees >= 2)).toBeGreaterThan(0.1);
+      expect(share((c) => c.trees >= 2)).toBeLessThan(0.45);
+      expect(share((c) => c.trees === 0 && c.grass >= 2)).toBeGreaterThan(0.1);
+      expect(share((c) => c.grass + c.trees === 0)).toBeGreaterThan(0.03);
+      expect(cells.filter((c) => c.trees > 0 && c.elevation > 4.5)).toHaveLength(0);
+    });
+  }
+});
+
 describe('mountains (random)', () => {
   /** Each lake's surface level: connected lake cells above the sea, which all share one elevation. */
   const lakeLevels = (grid: CoverGrid) => {
@@ -144,7 +205,7 @@ describe('mountains (random)', () => {
 
 describe('natural slopes', () => {
   it('rises gradually everywhere: no hex stands more than a natural slope above its neighbour', () => {
-    for (const [id, seed] of [['highlands', 1], ['highlands', 9], ['mountains', 2], ['mountains', 4]] as const) {
+    for (const [id, seed] of [['highlands', 1], ['highlands', 9], ['mountains', 2], ['mountains', 4], ['wilds', 1], ['wilds', 3]] as const) {
       const { grid } = demoMap(id, seed);
       const ground = grid.elevation;
       for (let i = 0; i < ground.length; i++) for (const j of neighbourIndices(grid, i)) expect(ground[i] - ground[j]).toBeLessThanOrEqual(NATURAL_SLOPE + 1e-6);

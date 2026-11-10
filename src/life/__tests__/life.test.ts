@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BESTIARY, kindOf } from '../bestiary';
 import { canBe } from '../creature';
 import { hexAt } from '../hexSpace';
-import { countsOf, createLife, createWork, lifeModel, lifeStep, populate, release } from '../life';
+import { countsOf, createLife, createWork, lifeModel, lifeStep, populate, release, scaleOf } from '../life';
 import { meadow } from './fixtures';
 
 const [cols, rows] = [16, 12];
@@ -23,6 +23,18 @@ describe('populate', () => {
     BESTIARY.forEach((s, k) => expect(counts[k], s.id).toBe(s.mystic ? 0 : s.start));
     for (const c of life.creatures) expect(canBe(BESTIARY[c.kind], h, hexAt(cols, rows, c.x, c.y)), BESTIARY[c.kind].id).toBe(true);
     expect(new Set(life.creatures.map((c) => c.id)).size).toBe(life.creatures.length);
+  });
+});
+
+describe('scaleOf', () => {
+  it('holds as many as the bestiary says on a small land, more on a wider one, as the root of how much wider', () => {
+    expect(scaleOf(h)).toBe(1);
+    const wide = meadow(60, 44);
+    expect(scaleOf(wide)).toBeCloseTo(Math.sqrt((60 * 44) / 330), 5);
+    const life = createLife(wide, new Float32Array(60 * 44).fill(1));
+    populate(life, wide);
+    const hares = countsOf(life)[kindOf('hare')];
+    expect(hares).toBe(Math.round(BESTIARY[kindOf('hare')].start * scaleOf(wide)));
   });
 });
 

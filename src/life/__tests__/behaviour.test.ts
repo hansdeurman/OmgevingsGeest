@@ -157,6 +157,13 @@ describe('breed and die', () => {
     expect(a.left).toBe(0);
   });
 
+  it('has none once its kind is as many as the world holds, more in a world that holds more', () => {
+    const [a, b] = pair();
+    const crowd = (scale: number) => ({ ...surroundings(meadow(cols, rows), [a, b]), scale, counts: Float32Array.from(BESTIARY, (_, k) => (k === a.kind ? sp('hare').most! : 0)) });
+    expect(tries(crowd(1), a)).toEqual([]);
+    expect(tries(crowd(2), a)).toHaveLength(sp('hare').brood);
+  });
+
   it('has none alone, in winter, too young or hungry', () => {
     const [a, b] = pair();
     expect(tries(surroundings(meadow(cols, rows), [a]), a)).toEqual([]);

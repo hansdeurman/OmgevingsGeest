@@ -4,6 +4,7 @@ import { clamp, smoothstep } from '../math/scalar';
 import { createCoverGrid, type CellInit, type CoverGrid } from './coverGrid';
 import { fillDepressions, neighbourIndices } from './hydrology';
 import { LEVEL_NAMES, MAX_ELEVATION, MAX_LEVEL, type Cover, type Layer, type Level } from './levels';
+import { cirque, CIRQUE, rangeHeight, rangeLine, type RangeShape, type Vec } from './ranges';
 import { HIGH_LAKE_FROM } from './shores';
 
 export interface MapLabel {
@@ -228,8 +229,6 @@ const mapXY = (col: number, row: number, cols: number, rows: number) => [((col +
 
 /** Mountain massifs on the random map: how many, how high their middle stands above the lowland, how far they reach (map units). */
 const MASSIFS = { count: 2, height: 6.6, reach: [0.4, 0.55] as const };
-/** A basin's hollow: how deep its bottom lies below its floor and its lip above it (steps), where the lip is and how far out it eases into the land (shares of its radius). */
-const CIRQUE = { depth: 1, lip: 0.4, edge: 1.2, ease: 2.8 };
 /** How far (steps) the land where a basin is stamped in may stand from its floor. */
 const BASIN_FIT = 2;
 /** Floors of the basins stamped into the mountain map: from the foothills to high in the range. */
@@ -297,9 +296,7 @@ function mountains(seed: number): DemoMap {
       basins.forEach((b, k) => {
         const d = Math.hypot((nx - b.x) * 1.4, ny - b.y) / b.r;
         const peak = knolls[k].h * Math.exp(-((Math.hypot((nx - knolls[k].x) * 1.4, ny - knolls[k].y) / (KNOLL.width * b.r)) ** 2));
-        const lip = b.floor + CIRQUE.lip;
-        const bowl = d < CIRQUE.edge ? b.floor - CIRQUE.depth + (lip - b.floor + CIRQUE.depth) * (d / CIRQUE.edge) ** 2 + peak : lip;
-        e = bowl + (e - bowl) * smoothstep(CIRQUE.edge, CIRQUE.ease, d);
+        e = cirque(e, d, b.floor, peak);
       });
       e = clamp(e + (noise(7, nx * 4, ny * 4) - 0.5) * 0.6, 0.3, MAX_ELEVATION);
       elevation.push(e);
@@ -310,6 +307,108 @@ function mountains(seed: number): DemoMap {
     }
   }
   return { ...fillLakes(cols, rows, elevation, cover), labels: [] };
+}
+
+/** Hex spacings between rows, and where a cell's middle is in hex spacings. */
+const ROW = Math.sqrt(3) / 2;
+const hexXY = (col: number, row: number): Vec => ({ x: col + (row & 1) / 2, y: row * ROW });
+
+/**
+ * The wild country: its size (cells); its range's length (hex spacings), how
+ * high its crest stands over the land and how broad it is; its spur's
+ * height as a share of the range's; its high lake's radius (hex spacings).
+ */
+const WILDS = { cols: 56, rows: 40, length: [30, 38], high: 5.6, broad: [1.7, 2.7], spur: 0.7, lake: 2.3 } as const;
+/** Ponds in the lowland: how many (at most), how deep their hollows are dug (steps), their radius (hex spacings), and how far from the mountains and each other they lie. */
+const PONDS = { count: 6, deep: 1.1, radius: [1.4, 2.6], apart: 8 } as const;
+
+/**
+ * A wide wild country: a ragged coast around it, rolling lowland with small
+ * lakes and patchy woods, and one long range of mountains winding across
+ * it, only a few hexes broad, a spur off its side and a lake high in a pass.
+ * Rain fills the basins (priority-flood).
+ */
+function wilds(seed: number): DemoMap {
+  const { cols, rows } = WILDS;
+  const rng = mulberry32(seed * 389 + 29);
+  const noise = (s: number, x: number, y: number) => fbm2D(x, y, { seed: seed * 17 + s, octaves: 5, persistence: 0.5, lacunarity: 2 });
+  const along: RangeShape['noise'] = (s, t) => noise(40 + s, t * 3, s * 7.1);
+  const size = hexXY(cols - 1, rows - 1);
+  const unit = (p: Vec) => [(p.x / size.x) * 2 - 1, (p.y / size.y) * 2 - 1];
+  const ranges = wildRanges(rng, size, along);
+  const terrainAt = (p: Vec) => {
+    const [nx, ny] = unit(p);
+    const high = rangeHeight(ranges, p.x, p.y);
+    // Mountains make land: a range that runs to the coast stands out as a cape.
+    const land = noise(0, nx * 2.4, ny * 2.4) * 0.85 + (1 - Math.hypot(nx * 0.85, ny * 0.95)) * 0.85 - 0.28 + 0.04 * high;
+    const low = Math.min(2.4, (land - 0.3) * 5.5) + (noise(3, nx * 7, ny * 7) - 0.5) * 1.4;
+    return { land, e: Math.max(0.3, low) + high };
+  };
+  const lake = highLake(rng, ranges[0], (p) => terrainAt(p).e);
+  const ponds = lowPonds(rng, size, (p) => ({ ...terrainAt(p), high: rangeHeight(ranges, p.x, p.y) }));
+
+  const elevation: number[] = [];
+  const cover: ((e: number) => Partial<Cover>)[] = [];
+  for (let row = 0; row < rows; row++)
+    for (let col = 0; col < cols; col++) {
+      const p = hexXY(col, row);
+      const [nx, ny] = unit(p);
+      const { land, e } = terrainAt(p);
+      if (land < 0.3) {
+        elevation.push(0);
+        cover.push(() => ({ water: land < 0.12 ? 4 : land < 0.2 ? 3 : land < 0.26 ? 2 : 1 }));
+        continue;
+      }
+      const dug = ponds.reduce((sum, o) => sum + PONDS.deep * Math.max(0, 1 - (Math.hypot(p.x - o.x, p.y - o.y) / o.r) ** 2), 0);
+      elevation.push(clamp(cirque(e, Math.hypot(p.x - lake.x, p.y - lake.y) / WILDS.lake, lake.floor) - dug, 0.3, MAX_ELEVATION));
+      cover.push((e) => ({
+        grass: e >= 6 ? 0 : level((land - 0.3) * 8 + (noise(1, nx * 5, ny * 5) - 0.5) * 6 - Math.max(0, e - 3.5) * 2),
+        trees: e <= 4.5 ? level((noise(2, nx * 5.5, ny * 5.5) - 0.5) * 14 + (land - 0.3) * 2.5 - Math.max(0, e - 3) * 2) : 0,
+      }));
+    }
+  return { ...fillLakes(cols, rows, elevation, cover), labels: [] };
+}
+
+/** The wild country's ranges: a long one winding roughly across the middle of a map `size` big, and a shorter spur off its side. */
+function wildRanges(rng: () => number, size: Vec, noise: RangeShape['noise']) {
+  const centre = { x: size.x / 2 + (rng() - 0.5) * 12, y: size.y / 2 + (rng() - 0.5) * 8 };
+  const angle = (rng() - 0.5) * 1.2;
+  const half = (WILDS.length[0] + rng() * (WILDS.length[1] - WILDS.length[0])) / 2;
+  const [dx, dy] = [Math.cos(angle) * half, Math.sin(angle) * half];
+  const side = () => (rng() < 0.5 ? -1 : 1);
+  const range = rangeLine({ x: centre.x - dx, y: centre.y - dy }, { x: centre.x + dx, y: centre.y + dy }, { bend: side() * (3 + rng() * 4), waver: 2.5, high: WILDS.high, broad: WILDS.broad, noise });
+  const root = range[Math.floor(range.length * (0.35 + rng() * 0.3))];
+  const [off, reach] = [angle + side() * (0.9 + rng() * 0.5), 9 + rng() * 5];
+  const spur = rangeLine(root, { x: root.x + Math.cos(off) * reach, y: root.y + Math.sin(off) * reach }, {
+    bend: (rng() - 0.5) * 4,
+    waver: 1.5,
+    high: WILDS.high * WILDS.spur,
+    broad: [WILDS.broad[0], WILDS.broad[1] * 0.85],
+    noise: (s, t) => noise(s + 5, t),
+  });
+  return [range, spur];
+}
+
+/** Hollows for ponds in the lowland of a map `size` big: inland, on low ground well away from the mountains and from each other. */
+function lowPonds(rng: () => number, size: Vec, at: (p: Vec) => { land: number; e: number; high: number }): (Vec & { r: number })[] {
+  const ponds: (Vec & { r: number })[] = [];
+  for (let tries = 0; tries < 200 && ponds.length < PONDS.count; tries++) {
+    const p = { x: rng() * size.x, y: rng() * size.y };
+    const { land, e, high } = at(p);
+    if (land < 0.5 || e < 0.8 || e > 2.4 || high > 0.3 || ponds.some((o) => Math.hypot(o.x - p.x, o.y - p.y) < PONDS.apart)) continue;
+    ponds.push({ ...p, r: PONDS.radius[0] + rng() * (PONDS.radius[1] - PONDS.radius[0]) });
+  }
+  return ponds;
+}
+
+/** Where a lake lies high in a range: worn into its flank somewhere along its middle, its floor a little below the land there. */
+function highLake(rng: () => number, range: ReturnType<typeof rangeLine>, heightAt: (p: Vec) => number): Vec & { floor: number } {
+  const k = Math.floor(range.length * (0.3 + rng() * 0.4));
+  const [a, b] = [range[Math.max(0, k - 2)], range[Math.min(range.length - 1, k + 2)]];
+  const along = Math.atan2(b.y - a.y, b.x - a.x);
+  const out = (rng() < 0.5 ? -1 : 1) * 1.4 * range[k].broad;
+  const at = { x: range[k].x - Math.sin(along) * out, y: range[k].y + Math.cos(along) * out };
+  return { ...at, floor: Math.max(HIGH_LAKE_FROM + 1, heightAt(at) - CIRQUE.lip) };
 }
 
 /** Every hex random: a stress test for how well arbitrary neighbours fuse. */
@@ -326,6 +425,7 @@ function randomMix(seed: number): DemoMap {
 export const DEMO_MAPS: readonly DemoMapDef[] = [
   { id: 'levels', name: 'Levels showcase', build: levelsShowcase },
   { id: 'island', name: 'Island', build: island },
+  { id: 'wilds', name: 'Wilds', build: wilds },
   { id: 'highlands', name: 'Highlands', build: highlands },
   { id: 'mountains', name: 'Mountains (random)', build: mountains },
   { id: 'random', name: 'Random mix', build: randomMix },

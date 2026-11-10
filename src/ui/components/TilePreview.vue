@@ -22,7 +22,7 @@ import { ELEMENT_LOOK } from '../../life/elements';
 import { mapToFrame, screenToMap } from '../mapView';
 import { seasonLook, type SeasonLook } from '../seasonLook';
 import { hexReadout } from '../hexReadout';
-import { cameraTransform, ease, pan, zoomBy, type Camera } from '../camera';
+import { cameraTransform, coverZoom, ease, mostZoom, pan, ZOOM, zoomBy, type Camera } from '../camera';
 import { hexAt } from '../../life/hexSpace';
 import { creatureAt, CreatureSprites, drawAvatar, drawCreatures, placeAvatar, placeCreatures, type Placed } from '../creatureLayer';
 import { callRows, describe, kindRows, loreOf, RELEASABLE } from '../lifePanel';
@@ -49,8 +49,8 @@ const canvas = ref<HTMLCanvasElement | null>(null);
 /** Under the canvas: the flat map's ground, graded by the water on the GPU (unless ?gpu=0, or there is no WebGL2). */
 const groundCanvas = ref<HTMLCanvasElement | null>(null);
 let groundGl: GroundGL | undefined;
-/** The map played on: the highlands, a whole world, unless another is picked. */
-const mapId = ref(DEMO_MAPS.find((m) => m.id === 'highlands')?.id ?? DEMO_MAPS[0].id);
+/** The map played on: the wilds, a whole world, unless another is picked. */
+const mapId = ref(DEMO_MAPS.find((m) => m.id === 'wilds')?.id ?? DEMO_MAPS[0].id);
 const seed = ref(1);
 const blend = ref(0.6);
 const showGrid = ref(false);
@@ -120,6 +120,7 @@ function startRun(): void {
   firstStep.value = 0;
   lifeShown = undefined;
   aimed = false;
+  framed = false;
   runs.value++;
 }
 
@@ -276,7 +277,18 @@ const wide = window.innerWidth >= 720;
 const panelOpen = ref(wide);
 
 /** The view: on a phone it starts zoomed in on the avatar, following it; on a wide screen, the whole map. */
-const camera = reactive<Camera>({ zoom: wide ? 1 : 2.4, follow: true, centre: { x: 0, y: 0 } });
+const CLOSE = 2.4;
+const camera = reactive<Camera>({ zoom: wide ? 1 : CLOSE, follow: true, centre: { x: 0, y: 0 } });
+/** Where the whole map was last fitted on the screen, and whether a phone's view was put close on this map yet. */
+let fitted: ViewTransform | undefined;
+let framed = false;
+const zoomMost = () => (fitted ? mostZoom(fitted) : ZOOM.most);
+/** Close on the avatar: at least `CLOSE`, and so close that the map fills the screen, with no empty bands beside it. */
+function closeZoom(): number {
+  const box = host.value;
+  if (!fitted || !scene || !box) return CLOSE;
+  return Math.min(zoomMost(), Math.max(CLOSE, coverZoom(fitted, scene.frame, { width: box.clientWidth, height: box.clientHeight }, SQUASH)));
+}
 /** Share of the way the camera eases towards the avatar each frame. */
 const FOLLOW = 0.12;
 
@@ -310,13 +322,13 @@ function aimCamera(at = FOLLOW): void {
 
 function zoomIn(factor: number): void {
   if (camera.zoom === 1 && factor > 1) aimCamera(1);
-  zoomBy(camera, factor);
+  zoomBy(camera, factor, zoomMost());
   schedule(draw);
 }
 
 function followAvatar(): void {
   camera.follow = true;
-  if (camera.zoom === 1) zoomBy(camera, 2.4);
+  if (camera.zoom === 1) camera.zoom = closeZoom();
   schedule(draw);
 }
 
@@ -341,7 +353,7 @@ function drag(e: PointerEvent): void {
   if (fingers.size === 2) {
     const [a, b] = [...fingers.values()];
     const apart = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinched) zoomBy(camera, apart / pinched);
+    if (pinched) zoomBy(camera, apart / pinched, zoomMost());
     [pinched, dragged] = [apart, true];
     return schedule(draw);
   }
@@ -611,8 +623,13 @@ function draw(): void {
   const ctx = el.getContext('2d')!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  fitted = fitTransform(s, w, h, 48);
+  if (!framed && s.grid === map.grid) {
+    framed = true;
+    if (!wide) camera.zoom = closeZoom();
+  }
   aimCamera();
-  const t = cameraTransform(fitTransform(s, w, h, 48), camera, { width: w, height: h }, s.frame, SQUASH);
+  const t = cameraTransform(fitted, camera, { width: w, height: h }, s.frame, SQUASH);
   placed = t;
   const onGpu = !!(groundGl && s.look && s.wet);
   if (groundGl && groundCanvas.value) {
