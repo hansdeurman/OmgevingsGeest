@@ -63,7 +63,7 @@ describe('touchWorld', () => {
     const f = createInfluence(n);
     [f.rain[8], f.thin[9], f.mist[lake], f.mist[0], f.freeze[lake]] = [0.3, 0.05, 0.005, 0.005, 0.25];
     c.temperature[lake] = -6;
-    const [cloud, fall, depth, snow, sea] = [c.air.cloud.slice(), c.air.fall.slice(), c.world.depth[lake], c.world.snow[lake], c.sea];
+    const [cloud, fall, depth, snow, sea, vapour, rise] = [c.air.cloud.slice(), c.air.fall.slice(), c.world.depth[lake], c.world.snow[lake], c.sea, c.air.vapour.slice(), c.air.rise[0]];
     touchWorld(c, f);
     const rained = cloud[8] * soft(0.3, LIMITS.share);
     expect(c.air.cloud[8]).toBeCloseTo(cloud[8] - rained);
@@ -71,8 +71,9 @@ describe('touchWorld', () => {
     expect(c.air.cloud[9]).toBeLessThan(cloud[9]);
     expect(c.world.depth[lake]).toBeLessThan(depth - 0.1);
     expect(c.world.snow[lake]).toBeGreaterThan(snow + 0.1);
-    expect(c.sea).toBeLessThan(sea);
-    expect(c.air.rise[0]).toBeGreaterThan(0);
+    const [burnt, misted] = [cloud[9] + vapour[9] - c.air.cloud[9] - c.air.vapour[9], c.air.rise[0] - rise];
+    expect(misted).toBeGreaterThan(0);
+    expect(c.sea - sea).toBeCloseTo(burnt - misted, 5);
     expect(cycleWater(c)).toBeCloseTo(before, 4);
     for (let k = 0; k < 30; k++) {
       touchWorld(c, f);
@@ -81,17 +82,32 @@ describe('touchWorld', () => {
     expect(cycleWater(c)).toBeCloseTo(before, 3);
   });
 
-  it('gathers the land’s water into cloud where rain is called, under a clear sky too, leaving the air as humid as it was', () => {
+  it('draws water from the sea into cloud where rain is called, under a clear sky too, the ground and the air as they were', () => {
     const c = cycle();
     c.air.cloud.fill(0);
     const before = cycleWater(c);
     const f = createInfluence(n);
-    f.gather[lake] = 0.01;
-    const [vapour, depth] = [c.air.vapour[lake], c.world.depth[lake]];
+    f.gather[8] = 0.01;
+    const [vapour, soil, sea] = [c.air.vapour[8], c.world.soil[8], c.sea];
     touchWorld(c, f);
-    expect(c.air.cloud[lake]).toBeCloseTo(soft(0.01, LIMITS.mist), 5);
-    expect(c.world.depth[lake]).toBeCloseTo(depth - soft(0.01, LIMITS.mist), 5);
-    expect(c.air.vapour[lake]).toBe(vapour);
+    expect(c.air.cloud[8]).toBeCloseTo(soft(0.01, LIMITS.gather), 5);
+    expect(c.sea).toBeCloseTo(sea - soft(0.01, LIMITS.gather), 5);
+    expect([c.air.vapour[8], c.world.soil[8]]).toEqual([vapour, soil]);
+    expect(cycleWater(c)).toBeCloseTo(before, 5);
+  });
+
+  it('burns off cloud and the damp air under it and dries the ground where the sun works, carrying the water off over the sea', () => {
+    const c = cycle();
+    const before = cycleWater(c);
+    const f = createInfluence(n);
+    [f.thin[8], f.dry[8]] = [0.4, 0.01];
+    const [cloud, soil, vapour, sea] = [c.air.cloud[8], c.world.soil[8] + c.world.depth[8], c.air.vapour.slice(), c.sea];
+    touchWorld(c, f);
+    expect(c.air.cloud[8]).toBeLessThan(cloud * 0.7);
+    expect(c.air.vapour[8]).toBeLessThan(vapour[8] * 0.7);
+    expect(c.world.soil[8] + c.world.depth[8]).toBeLessThan(soil);
+    expect(c.air.vapour[9]).toBe(vapour[9]);
+    expect(c.sea).toBeGreaterThan(sea);
     expect(cycleWater(c)).toBeCloseTo(before, 5);
   });
 

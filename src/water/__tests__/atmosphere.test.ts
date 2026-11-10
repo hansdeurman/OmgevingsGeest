@@ -71,6 +71,19 @@ describe('airStep', () => {
     expect(water(air) + totalWater(air.fall)).toBeCloseTo(start, 5);
   });
 
+  it('dissolves a cloud held together from outside the air the less, the harder it is held', () => {
+    const left = (kept: number) => {
+      const air = createAir(6, 6, flat(6, 6), noSea(36));
+      air.vapour.fill(0.95 * saturation(8 - LAPSE));
+      air.cloud[21] = 0.03;
+      air.kept[21] = kept;
+      airStep(air, sky(flat(6, 6), 8));
+      return air.cloud[21];
+    };
+    expect(left(0.5)).toBeGreaterThan(left(0));
+    expect(left(1)).toBeCloseTo(0.03, 6);
+  });
+
   it('lets heavy clouds rain or snow', () => {
     const air = createAir(6, 6, flat(6, 6), noSea(36));
     air.vapour.fill(saturation(8 - LAPSE));

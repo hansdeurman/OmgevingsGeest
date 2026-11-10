@@ -35,6 +35,8 @@ export interface Air {
   condensed: Float32Array;
   /** How much the wind spreads out at each hex (closing in: below 0). */
   spread: Float32Array;
+  /** Share of its cloud's dissolving each hex's air is kept from next step, held together from outside the air (by a power). */
+  kept: Float32Array;
 }
 
 /** The air's surroundings this step, per hex: its own temperature, that of the surface under it, the wind. */
@@ -101,6 +103,7 @@ export function createAir(cols: number, rows: number, ground: ArrayLike<number>,
     evaporated: array(),
     condensed: array(),
     spread: array(),
+    kept: array(),
   };
 }
 
@@ -125,7 +128,7 @@ export function airDemand(air: Air, sky: Sky, p: AirParams = DEFAULT_AIR): void 
  * from the sea.
  */
 export function airStep(air: Air, sky: Sky, p: AirParams = DEFAULT_AIR): number {
-  const { sea, vapour, cloud, fall, rise, demand, evaporated, condensed, spread } = air;
+  const { sea, vapour, cloud, fall, rise, demand, evaporated, condensed, spread, kept } = air;
   let drawn = 0;
   for (let i = 0; i < vapour.length; i++) {
     const fromSea = sea[i] ? demand[i] * (sky.surface[i] < SEA_ICE.below ? SEA_ICE.gives : 1) : 0;
@@ -141,7 +144,7 @@ export function airStep(air: Air, sky: Sky, p: AirParams = DEFAULT_AIR): number 
     const lift = Math.min(MOST_LIFT, p.rising * Math.max(0, -spread[i]));
     const holds = saturation(sky.temperature[i]) * (1 - lift) * (1 + p.rising * Math.max(0, spread[i]));
     const beyond = vapour[i] - holds;
-    const trade = beyond > 0 ? p.condense * beyond : -Math.min(cloud[i], p.dissolve * -beyond);
+    const trade = beyond > 0 ? p.condense * beyond : -Math.min(cloud[i], p.dissolve * (1 - kept[i]) * -beyond);
     vapour[i] -= trade;
     cloud[i] += trade;
     condensed[i] = trade;

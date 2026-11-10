@@ -9,7 +9,7 @@ const c = (id: number, kind: string, doing: CreatureView['doing'] = 'roam'): Cre
 const snapshot = (creatures: CreatureView[], calling: Record<string, number> = {}): LifeSnapshot => {
   const counts = new Int32Array(BESTIARY.length);
   creatures.forEach((x) => counts[x.kind]++);
-  return { creatures, counts, plants: new Float32Array(0), calling: Float32Array.from(BESTIARY, (s) => calling[s.id] ?? 0) };
+  return { creatures, counts, plants: new Float32Array(0), room: new Float32Array(0), calling: Float32Array.from(BESTIARY, (s) => calling[s.id] ?? 0) };
 };
 
 group('kindRows', () => {

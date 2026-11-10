@@ -8,8 +8,12 @@ import type { Influence } from './powers';
  * The creatures' (and the avatar's) powers worked on a water cycle's world,
  * after its step: heat into the air and (half as much) the ground, a push
  * on the wind and the wind stilled, and water moved, never made or lost:
- * water gathered from the ground into cloud, cloud into rain or back into vapour, standing water (or the sea, or wet
- * soil) lifted into the air, standing water frozen into ice (most readily in the cold; in the warm it melts again).
+ * water drawn from the sea into cloud (rain called where there was none),
+ * that cloud held together (kept from dissolving into the air), cloud into rain, cloud and the damp air under it burnt off and ground
+ * dried by the sun (that water carried off over the sea, so it does not
+ * gather again where it was), standing water (or the sea, or wet soil) lifted into the
+ * air, standing water frozen into ice (most readily in the cold; in the
+ * warm it melts again).
  * Powers nudge the world, they do not shove it: however many pile up on a
  * hex, what they do there in a step tails off towards a most (`LIMITS`), and
  * the world's own ways (wind, mixing, radiation, rain) keep working against
@@ -19,23 +23,28 @@ import type { Influence } from './powers';
 export function touchWorld(c: WaterCycle, f: Influence): void {
   const { heat, wind, air, world } = c;
   const humidity = c.params.air.humidity;
+  let away = 0;
   for (let i = 0; i < f.heat.length; i++) {
     const warm = soft(f.heat[i], LIMITS.heat);
     heat.air[i] += warm;
     heat.surface[i] += warm / 2;
     pushWind(wind.x, wind.y, i, soft(f.gustX[i], LIMITS.gust), soft(f.gustY[i], LIMITS.gust), soft(f.still[i], LIMITS.still));
-    air.cloud[i] += fromWater(c, i, soft(f.gather[i], LIMITS.mist));
+    air.kept[i] = soft(f.keep[i], 1);
+    air.cloud[i] += fromSea(c, soft(f.gather[i], LIMITS.gather));
     air.fall[i] += share(air.cloud, i, soft(f.rain[i], LIMITS.share));
-    air.vapour[i] += share(air.cloud, i, soft(f.thin[i], LIMITS.thin));
+    const thin = soft(f.thin[i], LIMITS.thin);
+    away += share(air.cloud, i, thin) + share(air.vapour, i, thin);
+    if (!air.sea[i]) away += fromGround(c, i, soft(f.dry[i], LIMITS.mist));
     const room = Math.max(0, humidity * saturation(c.temperature[i]) - air.vapour[i] - air.rise[i]);
     const lift = Math.min(soft(f.mist[i], LIMITS.mist), room);
     air.rise[i] += fromWater(c, i, lift);
     if (!air.sea[i]) world.snow[i] += share(world.depth, i, soft(f.freeze[i], LIMITS.share) * (WARM_FREEZE + (1 - WARM_FREEZE) * smoothstep(COLD.from, COLD.full, c.temperature[i])));
   }
+  c.sea += away;
 }
 
-/** The most powers do on a hex in a step, all together: heat (°C), a push on the wind (hex spacings per step), the share of the wind stilled, the share of its cloud rained out or of standing water frozen, the share of its cloud thinned, water lifted or gathered into cloud (steps). */
-export const LIMITS = { heat: 0.4, gust: 0.1, still: 0.8, share: 0.6, thin: 0.1, mist: 0.02 };
+/** The most powers do on a hex in a step, all together: heat (°C), a push on the wind (hex spacings per step), the share of the wind stilled, the share of its cloud rained out or of standing water frozen, the share of its cloud burnt off, water lifted into the air or dried from the ground, and drawn from the sea into cloud (steps). */
+export const LIMITS = { heat: 0.4, gust: 0.1, still: 0.8, share: 0.6, thin: 0.5, mist: 0.02, gather: 0.03 };
 /** Standing water freezes readily from this air temperature (°C), fully at this one; in the warm, a share as readily (and it melts again). */
 const COLD = { from: 2, full: -4 };
 const WARM_FREEZE = 0.3;

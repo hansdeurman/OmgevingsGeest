@@ -85,7 +85,7 @@ const START = { air: 6, sea: 7 };
 /** Lakes this deep cover their hex: it is water, not ground, to the sun. Water this much deeper holds as much heat as the sea. */
 const LAKE = { from: 0.3, deep: 3 };
 /** Cloud (steps) that covers a hex's sky fully. */
-const OVERCAST = 0.08;
+export const OVERCAST = 0.08;
 
 export function createWaterCycle(world: HydroWorld, options: CycleOptions = {}): WaterCycle {
   const { cols, rows, n } = world.topo;
@@ -157,7 +157,7 @@ export interface CycleState {
 }
 
 /** Everything else that changes as the cycle runs. */
-const changing = (c: WaterCycle) => [c.air.vapour, c.air.cloud, c.air.fall, c.air.rise, c.heat.surface, c.heat.air, c.wind.x, c.wind.y];
+const changing = (c: WaterCycle) => [c.air.vapour, c.air.cloud, c.air.fall, c.air.rise, c.air.kept, c.heat.surface, c.heat.air, c.wind.x, c.wind.y];
 
 /** The cycle as a model to run: steps follow on from where it is. */
 export const cycleModel = (c: WaterCycle): Model<CycleState, CycleSnapshot> => ({

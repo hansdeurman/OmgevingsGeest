@@ -72,6 +72,28 @@ describe('growFood', () => {
     expect(b.plants[0]).toBeGreaterThan(a.plants[0] * 1.5);
   });
 
+  it('greens the land where growth is strong: more grows there than it was painted with, and it slowly goes back', () => {
+    const food = createFood(fill(0.2), meadow());
+    food.plants.fill(0.2);
+    steps(food, meadow(), 120, fill(3));
+    expect(food.room[0]).toBeGreaterThan(0.6);
+    expect(food.plants[0]).toBeGreaterThan(0.5);
+    expect(food.room[5]).toBe(0);
+    const greened = food.room[0];
+    steps(food, meadow(), 300);
+    expect(food.room[0]).toBeLessThan(greened);
+    expect(food.room[0]).toBeGreaterThan(0.2);
+    expect(food.base[0]).toBeCloseTo(0.2);
+  });
+
+  it('does not green the land for a little growing, nor the bare peaks', () => {
+    const food = createFood(fill(0.2), meadow({ height: Float32Array.from([1, 1, 1, 1, 1, 8]), sea: fill(0) }));
+    steps(food, meadow({ height: Float32Array.from([1, 1, 1, 1, 1, 8]), sea: fill(0) }), 120, fill(0.3));
+    expect(food.room[0]).toBeCloseTo(0.2, 2);
+    steps(food, meadow({ height: Float32Array.from([1, 1, 1, 1, 1, 8]), sea: fill(0) }), 120, fill(3));
+    expect(food.room[5]).toBeLessThan(0.21);
+  });
+
   it('breeds fish in the sea and lakes, none on land, and they die as a lake dries', () => {
     const food = createFood(room, meadow());
     food.fish.fill(0);

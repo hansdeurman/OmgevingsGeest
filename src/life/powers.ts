@@ -21,9 +21,13 @@ export interface Influence {
   still: Float32Array;
   mist: Float32Array;
   rain: Float32Array;
-  /** Water gathered from the ground (or the sea) straight into cloud (steps). */
+  /** How hard the cloud over the hex is held together, kept from dissolving into the air. */
+  keep: Float32Array;
+  /** Water drawn from the sea straight into cloud over the hex (steps). */
   gather: Float32Array;
   thin: Float32Array;
+  /** Water dried from the ground (steps). */
+  dry: Float32Array;
   freeze: Float32Array;
   grow: Float32Array;
 }
@@ -35,18 +39,26 @@ export const createInfluence = (n: number): Influence => ({
   still: new Float32Array(n),
   mist: new Float32Array(n),
   rain: new Float32Array(n),
+  keep: new Float32Array(n),
   gather: new Float32Array(n),
   thin: new Float32Array(n),
+  dry: new Float32Array(n),
   freeze: new Float32Array(n),
   grow: new Float32Array(n),
 });
 
 type WorldPower = Exclude<PowerKind, 'lure' | 'scare' | 'calm'>;
-/** Share of the cloud a shine of 1 thins per step, and growth a spark brings with its rain. */
-const SHINE_THINS = 0.05;
+/** Share of the cloud a shine of 1 thins per step, growth it brings, and growth a spark brings with its rain. */
+const SHINE_THINS = 0.25;
+const SHINE_GROWS = 0.4;
+/** Water (steps) a shine of 1 dries from the ground per step. */
+const SHINE_DRIES = 0.01;
 const SPARK_GROWS = 2;
-/** Water (steps) a rain of 1 gathers from the ground into cloud per step: rain called under a clear sky still comes, from the land's own water, and falls back on it. */
-const RAIN_GATHERS = 0.03;
+/** Water (steps) a rain of 1 draws from the sea into cloud per step: rain called under a clear sky still comes, and the land it falls on gets wetter. */
+const RAIN_GATHERS = 0.08;
+/** Share of the cloud a rain of 1 rains out per step (the rest stays, a cloud thick enough to see), and how hard it holds the cloud together. */
+const RAIN_SHARES = 0.4;
+const RAIN_KEEPS = 3;
 
 /** Each power's work on hex `i`, at strength `s` (its own, weakened by distance), by creature `c`. */
 const EFFECTS: Record<WorldPower, (f: Influence, i: number, s: number, c: Caster) => void> = {
@@ -58,9 +70,10 @@ const EFFECTS: Record<WorldPower, (f: Influence, i: number, s: number, c: Caster
   },
   shelter: (f, i, s) => (f.still[i] = 1 - (1 - f.still[i]) * (1 - Math.min(1, s))),
   shine: (f, i, s) => {
-    // A small light helps the plants; only a great one thins the clouds.
+    // A small light helps the plants; only a great one burns off the clouds and dries the ground.
     f.thin[i] += SHINE_THINS * s * Math.min(1, s);
-    f.grow[i] += s;
+    f.dry[i] += SHINE_DRIES * s * Math.min(1, s);
+    f.grow[i] += SHINE_GROWS * s;
   },
   spark: (f, i, s) => {
     f.rain[i] += s;
@@ -68,7 +81,8 @@ const EFFECTS: Record<WorldPower, (f: Influence, i: number, s: number, c: Caster
   },
   mist: (f, i, s) => (f.mist[i] += s),
   rain: (f, i, s) => {
-    f.rain[i] += s;
+    f.rain[i] += RAIN_SHARES * s;
+    f.keep[i] += RAIN_KEEPS * s;
     f.gather[i] += RAIN_GATHERS * s;
   },
   freeze: (f, i, s) => (f.freeze[i] += s),

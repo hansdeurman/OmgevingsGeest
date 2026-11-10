@@ -14,11 +14,12 @@ import { RIVER_VERTEX, riverMesh } from './groundGLData';
  * on the CPU. So playing the water costs next to nothing per frame.
  */
 
-/** How the season looks per hex (each 0–1): snow on the land, ice on the water, how lush the plants are. */
+/** How the season looks per hex (each 0–1): snow on the land, ice on the water, how full the plants are, how much greener than painted the land has grown. */
 export interface SeasonFields {
   snow: ArrayLike<number>;
   ice: ArrayLike<number>;
   vigour: ArrayLike<number>;
+  lush: ArrayLike<number>;
 }
 
 /** Where the map goes on the canvas: canvas px = offset + frame px (squashed) * scale. */
@@ -82,9 +83,9 @@ uniform float uLookWidth;
 uniform sampler2D uDetail;
 uniform float uDetailSize;
 uniform sampler2D uSeason;
-/** The season on the ground: plants grazed or dried to straw and earth (or lush), ice on cold water, snow on the land, bare rock where the map is painted snowy but none lies. */
+/** The season on the ground: plants grazed or dried to straw and earth (or lush), fresh grass and flowers where more grows than was painted, ice on cold water, snow on the land, bare rock where the map is painted snowy but none lies. */
 vec3 seasonal(vec3 c, vec2 frame) {
-  vec3 s = texture(uSeason, (frame / uGrid.z + 0.5) / uGrid.xy).rgb;
+  vec4 s = texture(uSeason, (frame / uGrid.z + 0.5) / uGrid.xy);
   float lum = dot(c, vec3(0.3, 0.59, 0.11));
   float green = clamp((c.g - max(c.r, c.b)) / 30.0, 0.0, 1.0);
   float blue = clamp((c.b - max(c.r, c.g) + 10.0) / 40.0, 0.0, 1.0);
@@ -94,6 +95,9 @@ vec3 seasonal(vec3 c, vec2 frame) {
   vec3 earth = vec3(lum * 0.85 + 38.0, lum * 0.68 + 24.0, lum * 0.5 + 10.0);
   c = mix(c, mix(straw, earth, ramp(0.35, 0.0, s.b)), green * ramp(0.7, 0.15, s.b + 0.15 * (n - 0.5)) * 0.85);
   c = mix(c, c * vec3(0.84, 1.06, 0.82), green * ramp(0.85, 1.0, s.b) * 0.5);
+  float lush = ramp(0.1, 0.7, s.a + 0.3 * (n - 0.5)) * (1.0 - blue);
+  c = mix(c, vec3(92.0, 172.0, 66.0) * (0.82 + 0.36 * noise(frame * 0.3)), lush * 0.85);
+  c = mix(c, vec3(250.0, 216.0, 92.0), lush * ramp(0.78, 0.86, noise(frame * 0.9 + 17.0)) * 0.7);
   float ice = ramp(0.2, 0.7, s.g + 0.25 * (n - 0.5));
   c = mix(c, vec3(206.0, 226.0, 240.0) + 20.0 * noise(frame * 0.25), ice * blue * 0.9);
   float snow = ramp(0.2, 0.75, s.r + 0.35 * (n - 0.5));
@@ -251,7 +255,7 @@ export class GroundGL {
       const { gw, gh } = layer.blend;
       this.texture('field', gl.R16F, gw, gh, gl.RED, gl.FLOAT, new Float32Array(gw * gh), gl.LINEAR, gl.CLAMP_TO_EDGE);
       const neutral = new Float32Array(gw * gh * 4);
-      for (let p = 0; p < gw * gh; p++) [neutral[4 * p + 2], neutral[4 * p + 3]] = [1, 1];
+      for (let p = 0; p < gw * gh; p++) neutral[4 * p + 2] = 1;
       this.texture('season', gl.RGBA16F, gw, gh, gl.RGBA, gl.FLOAT, neutral, gl.LINEAR, gl.CLAMP_TO_EDGE);
     }
     this.uploaded = { ...this.uploaded, base, keep: layer.keep, detail: layer.detail, water, grid: grid === u.grid ? u.grid : grid, season: grid === u.grid ? u.season : undefined };
@@ -320,9 +324,9 @@ export class GroundGL {
   private uploadSeason(layer: WetLayer, season: SeasonFields): void {
     const gl = this.gl;
     const { gw, gh } = layer.blend;
-    const [snow, ice, vigour] = [season.snow, season.ice, season.vigour].map((v) => blendField(layer.blend, v));
+    const fields = [season.snow, season.ice, season.vigour, season.lush].map((v) => blendField(layer.blend, v));
     const data = new Float32Array(gw * gh * 4);
-    for (let p = 0; p < gw * gh; p++) [data[4 * p], data[4 * p + 1], data[4 * p + 2], data[4 * p + 3]] = [snow[p], ice[p], vigour[p], 1];
+    for (let p = 0; p < gw * gh; p++) fields.forEach((f, k) => (data[4 * p + k] = f[p]));
     gl.bindTexture(gl.TEXTURE_2D, this.tex.season);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gw, gh, gl.RGBA, gl.FLOAT, data);
     this.uploaded.season = season;

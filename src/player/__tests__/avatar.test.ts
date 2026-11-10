@@ -53,14 +53,15 @@ describe('gifts', () => {
     GIFT_ORDER.forEach((g) => expect(GIFTS[g].powers.length).toBeGreaterThan(0));
   });
 
-  it('works rain where the avatar stands, further as a keeper, nothing without a gift or spirit', () => {
+  it('works rain where the avatar stands, holding the clouds there, further as a keeper, nothing without a gift or spirit', () => {
     const h = meadow(cols, rows);
-    const at = centreOf(cols, 3 * cols + 4);
+    const here = 3 * cols + 4;
+    const at = centreOf(cols, here);
     const a = { ...createAvatar(at.x, at.y), gift: 'rain' as const };
     const f = createInfluence(n);
     avatarGuest(a).cast(f, h);
-    expect(f.rain[3 * cols + 4]).toBeGreaterThan(0.3);
-    expect(f.mist[3 * cols + 4]).toBeGreaterThan(0);
+    expect(f.rain[here]).toBeGreaterThan(0.1);
+    expect([f.gather[here], f.keep[here], f.still[here]].every((v) => v > 0)).toBe(true);
     expect(f.rain[0]).toBe(0);
     expect(powersOf({ ...a, form: 'keeper' })[0].reach).toBe(GIFTS.rain.powers[0].reach + 1);
     expect(powersOf({ ...a, gift: null })).toEqual([]);

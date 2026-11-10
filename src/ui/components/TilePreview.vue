@@ -21,6 +21,7 @@ import { FORMS, GIFT_ORDER, GIFTS, type Avatar, type Form, type Gift } from '../
 import { ELEMENT_LOOK } from '../../life/elements';
 import { mapToFrame, screenToMap } from '../mapView';
 import { seasonLook, type SeasonLook } from '../seasonLook';
+import { hexReadout } from '../hexReadout';
 import { cameraTransform, ease, pan, zoomBy, type Camera } from '../camera';
 import { hexAt } from '../../life/hexSpace';
 import { creatureAt, CreatureSprites, drawAvatar, drawCreatures, placeAvatar, placeCreatures, type Placed } from '../creatureLayer';
@@ -378,6 +379,14 @@ const releaseNow = () => act({ do: 'release', kind: releaseKind.value, count: RE
 
 /** The avatar as the step shown has it. */
 const avatarNow = computed(() => (run && steps.value && runs.value ? run.water.at(step.value).avatar : undefined));
+/** For the developer: the hex the avatar stands on as the step shown has it, to see a gift work (switched off in the menu). */
+const devOn = ref(true);
+const hexNow = computed(() => {
+  if (!devOn.value || !run || !steps.value || !runs.value) return '';
+  const v = run.water.at(step.value);
+  const i = hexAt(map.grid.cols, map.grid.rows, v.avatar.x, v.avatar.y);
+  return hexReadout({ ...v.sky, wetness: v.wetness, snow: v.snow, plants: v.life.plants, room: v.life.room }, i, run.eco.life.food.base);
+});
 const giftColour = (g: Gift) => ELEMENT_LOOK[GIFTS[g].element].colour;
 const toggleGift = (g: Gift) => act({ do: 'gift', gift: avatarNow.value?.gift === g ? null : g });
 const takeForm = (form: Form) => act({ do: 'form', form });
@@ -625,7 +634,7 @@ function seasonNow(): SeasonLook | undefined {
   const fresh = seasonShown && seasonShown.runs === runs.value && Math.abs(seasonShown.step - step.value) < (playing.value ? SETTLE_EVERY : 1);
   if (!fresh) {
     const v = run.water.at(step.value);
-    seasonShown = { step: step.value, runs: runs.value, look: seasonLook({ snow: v.snow, depth: v.depth, ground: v.ground, surface: v.sky.surface, plants: v.life.plants }, run.eco.life.food.room) };
+    seasonShown = { step: step.value, runs: runs.value, look: seasonLook({ snow: v.snow, depth: v.depth, ground: v.ground, surface: v.sky.surface, plants: v.life.plants, room: v.life.room }, run.eco.life.food.base) };
   }
   return seasonShown!.look;
 }
@@ -692,6 +701,7 @@ watch([shift, windOn], drawWindLayer);
       <button type="button" :class="{ on: camera.follow && camera.zoom > 1 }" title="Follow me" @click="followAvatar">◎</button>
     </div>
     <div v-if="steps > 0 && avatarNow" class="hud">
+      <p v-if="hexNow" class="hud-line dev" title="The hex you stand on: air temperature, cloud cover, rain, ground wetness, plants of the most it grows now">{{ hexNow }}</p>
       <p class="hud-line">{{ hovered || (avatarNow.gift ? `${GIFTS[avatarNow.gift].name}: ${GIFTS[avatarNow.gift].hint.toLowerCase()}` : `${clock} · tap the map to walk`) }}</p>
       <div class="hud-row">
         <button type="button" class="play" :title="playing ? 'Pause' : 'Play'" @click="togglePlay">{{ playing ? '⏸' : '▶' }}</button>
@@ -736,6 +746,7 @@ watch([shift, windOn], drawWindLayer);
       <p v-if="steps > 0" class="hint">{{ clock }}</p>
       <p v-if="steps > 0" class="hint">{{ weatherNow }}</p>
       <label v-if="steps > 0" class="check" title="Or hold Shift"><input v-model="windOn" type="checkbox" /> Wind (Shift)</label>
+      <label v-if="steps > 0" class="check" title="What the hex you stand on is like now"><input v-model="devOn" type="checkbox" /> Hex readout</label>
       <label v-if="steps > 0">
         Speed {{ speed }}/s
         <input v-model.number="speed" type="range" min="2" max="48" step="2" />
@@ -905,6 +916,7 @@ canvas.sky { pointer-events: none; }
   -webkit-user-select: none;
 }
 .hud-line { margin: 0; font-size: 12px; color: #b8b8c8; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-line.dev { color: #9fd3ff; white-space: normal; font-variant-numeric: tabular-nums; }
 .hud-row { display: grid; grid-template-columns: 44px repeat(6, 1fr); gap: 6px; }
 .hud button { min-height: 50px; border-radius: 10px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .hud .play { border: 1px solid #3a3a4c; background: #262634; color: #fff; font-size: 18px; }

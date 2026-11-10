@@ -159,6 +159,7 @@ function rot(life: Life, c: Creature): false {
 export interface LifeState {
   creatures: Creature[];
   plants: Float32Array;
+  room: Float32Array;
   fish: Float32Array;
   calling: Float32Array;
   rest: Float32Array;
@@ -172,6 +173,7 @@ export const lifeModel = (life: Life): Pick<Model<LifeState, never>, 'save' | 'r
   save: () => ({
     creatures: life.creatures.map((c) => ({ ...c })),
     plants: life.food.plants.slice(),
+    room: life.food.room.slice(),
     fish: life.food.fish.slice(),
     calling: life.calling.slice(),
     rest: life.rest.slice(),
@@ -182,6 +184,7 @@ export const lifeModel = (life: Life): Pick<Model<LifeState, never>, 'save' | 'r
   restore(s) {
     life.creatures = s.creatures.map((c) => ({ ...c }));
     life.food.plants.set(s.plants);
+    life.food.room.set(s.room);
     life.food.fish.set(s.fish);
     life.calling.set(s.calling);
     life.rest.set(s.rest);
