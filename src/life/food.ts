@@ -53,7 +53,8 @@ const MOST_BOOST = 4;
 /** Growth beyond this boost greens the land: the share of what it could still grow that it gains per step per boost beyond; and the share of the way back to how it was it goes per step without. */
 const GREENING = { from: 0.5, rate: 0.004, back: 0.0003 };
 /** The most a hex at this height can ever grow (bare rock above the tree line). */
-const terrainMost = (height: number) => 1 - smoothstep(4.5, 7.5, height);
+/** The most plants ground this high grows when it is as green as it gets. */
+export const terrainMost = (height: number) => 1 - smoothstep(4.5, 7.5, height);
 
 /** One step of growing, in place; `boost` per hex makes plants grow that many times faster again (tailing off towards `MOST_BOOST`), and a strong one greens the land. */
 export function growFood(food: Food, h: Habitat, boost: ArrayLike<number>): void {

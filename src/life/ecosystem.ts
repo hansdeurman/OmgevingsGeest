@@ -6,6 +6,7 @@ import type { Creature } from './creature';
 import { habitatOf } from './habitat';
 import { centreOf } from './hexSpace';
 import { countsOf, createLife, createWork, lifeModel, lifeStep, populate, release, type Life, type LifeState, type LifeWork } from './life';
+import { applyPreset } from './presets';
 import { touchWorld } from './worldTouch';
 
 /**
@@ -25,8 +26,13 @@ export interface Ecosystem {
   commands: Map<number, Command[]>;
 }
 
-/** Something the player does: let creatures in, send the avatar somewhere, work a gift (or stop), take another form. */
-export type Command = { do: 'release'; kind: number; count: number } | { do: 'go'; x: number; y: number } | { do: 'gift'; gift: Gift | null } | { do: 'form'; form: Form };
+/** Something the player does: let creatures in, send the avatar somewhere, work a gift (or stop), take another form, put hexes (or all) in a preset state. */
+export type Command =
+  | { do: 'release'; kind: number; count: number }
+  | { do: 'go'; x: number; y: number }
+  | { do: 'gift'; gift: Gift | null }
+  | { do: 'form'; form: Form }
+  | { do: 'preset'; preset: string; cells?: number[]; seed: number };
 
 export function createEcosystem(cycle: WaterCycle, room: ArrayLike<number>, seed = 1, start = true): Ecosystem {
   const h = habitatOf(cycle);
@@ -52,6 +58,7 @@ const OBEY: { [K in Command['do']]: (e: Ecosystem, c: Extract<Command, { do: K }
   go: (e, c) => (e.avatar.target = { x: c.x, y: c.y }),
   gift: (e, c) => (e.avatar.gift = c.gift && e.avatar.spirit > 0 ? c.gift : null),
   form: (e, c) => (e.avatar.form = c.form),
+  preset: (e, c) => applyPreset(e, c.preset, c.cells, c.seed),
 };
 
 const obey = (e: Ecosystem, c: Command) => (OBEY[c.do] as (e: Ecosystem, c: Command) => void)(e, c);

@@ -22,8 +22,11 @@ import { ELEMENT_LOOK } from '../../life/elements';
 import { mapToFrame, screenToMap } from '../mapView';
 import { seasonLook, type SeasonLook } from '../seasonLook';
 import { hexReadout } from '../hexReadout';
+import { cellsIn, closeLasso, type Vec } from '../lasso';
+import { drawArea } from '../areaLayer';
+import { PRESET_GROUPS, PRESETS, type Preset } from '../../life/presets';
 import { cameraTransform, coverZoom, ease, mostZoom, pan, ZOOM, zoomBy, type Camera } from '../camera';
-import { hexAt } from '../../life/hexSpace';
+import { centreOf, hexAt } from '../../life/hexSpace';
 import { creatureAt, CreatureSprites, drawAvatar, drawCreatures, placeAvatar, placeCreatures, type Placed } from '../creatureLayer';
 import { callRows, describe, kindRows, loreOf, RELEASABLE } from '../lifePanel';
 import { CLIMATE_SETTINGS, climateReadout, setValue, valueOf, type ClimateSetting } from '../climateSettings';
@@ -121,6 +124,7 @@ function startRun(): void {
   lifeShown = undefined;
   aimed = false;
   framed = false;
+  chosen.value = null;
   runs.value++;
 }
 
@@ -250,7 +254,7 @@ function drawLife(): void {
   ctx.clearRect(0, 0, el.width, el.height);
   const life = showLife.value ? lifeNow() : undefined;
   const s = scene;
-  if (!life || !placed || !s || s.grid !== map.grid) return void (placedLife = []);
+  if (!placed || !s || s.grid !== map.grid) return void (placedLife = []);
   const t = placed;
   const { cols, rows } = map.grid;
   const spacing = Math.sqrt(3) * HEX;
@@ -259,9 +263,11 @@ function drawLife(): void {
     const lift = tileAt(s, i % cols, Math.floor(i / cols))?.lift ?? 0;
     return projectToScreen(s, t, { x: s.frame.ox + x * spacing, y: s.frame.oy + y * spacing }, lift);
   };
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawArea(ctx, stroke ?? chosen.value?.outline ?? [], toScreen, !stroke);
+  if (!life) return void (placedLife = []);
   const [view, time] = [{ toScreen, spacing: spacing * t.scale }, performance.now() / 1000];
   placedLife = placeCreatures(life.prev?.life.creatures, life.cur.life.creatures, between, view, time);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   timed('life', () => drawCreatures(ctx, placedLife, sprites, time));
   drawAvatar(ctx, placeAvatar(life.prev?.avatar, life.cur.avatar, between, view, time), time);
 }
@@ -343,6 +349,8 @@ let downAt = { x: 0, y: 0 };
 function press(e: PointerEvent): void {
   if (!fingers.size) [dragged, downAt] = [false, { x: e.clientX, y: e.clientY }];
   fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (lassoOn.value && fingers.size === 1) startStroke(e);
+  else stroke = null;
   point(e);
 }
 
@@ -350,6 +358,7 @@ function drag(e: PointerEvent): void {
   const was = fingers.get(e.pointerId);
   if (!was) return point(e);
   fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (stroke) return extendStroke(e);
   if (fingers.size === 2) {
     const [a, b] = [...fingers.values()];
     const apart = Math.hypot(a.x - b.x, a.y - b.y);
@@ -366,6 +375,7 @@ function drag(e: PointerEvent): void {
 function letGo(e: PointerEvent): void {
   fingers.delete(e.pointerId);
   pinched = 0;
+  if (stroke) endStroke();
   lift(e);
 }
 
@@ -402,6 +412,64 @@ const hexNow = computed(() => {
 const giftColour = (g: Gift) => ELEMENT_LOOK[GIFTS[g].element].colour;
 const toggleGift = (g: Gift) => act({ do: 'gift', gift: avatarNow.value?.gift === g ? null : g });
 const takeForm = (form: Form) => act({ do: 'form', form });
+
+/** World presets: their panel, whether a stroke on the map draws an area now, and the area chosen (the whole world, if none). */
+const envOpen = ref(false);
+const lassoOn = ref(false);
+const chosen = ref<{ outline: Vec[]; cells: number[] } | null>(null);
+/** The area being drawn, in map units, while it is. */
+let stroke: Vec[] | null = null;
+/** A stroke goes on only once it has moved this far (hex spacings). */
+const STROKE_STEP = 0.15;
+const presetsOf = (group: string) => PRESETS.filter((p) => p.group === group);
+const heatSetting = (key: string) => CLIMATE_SETTINGS.findIndex((s) => s.group === 'heat' && s.key === key);
+
+/** Put the area chosen (or the whole world, its climate too) in a preset state, as the run goes on from now. */
+function setPreset(p: Preset): void {
+  const cells = chosen.value?.cells;
+  if (!cells && p.climate) {
+    tweak(heatSetting('sun'), p.climate.sun);
+    tweak(heatSetting('greenhouse'), p.climate.greenhouse);
+  }
+  act({ do: 'preset', preset: p.id, cells, seed: step.value + 1 });
+}
+
+function chooseAll(): void {
+  [chosen.value, lassoOn.value] = [null, false];
+  schedule(drawSky);
+}
+
+function toggleEnv(): void {
+  envOpen.value = !envOpen.value;
+  if (envOpen.value && !wide) panelOpen.value = false;
+}
+
+/** Where on the map a pointer is, if over it. */
+function placeOf(e: PointerEvent): Vec | undefined {
+  const box = host.value!.getBoundingClientRect();
+  return mapPlace(e.clientX - box.left, e.clientY - box.top);
+}
+
+function startStroke(e: PointerEvent): void {
+  const at = placeOf(e);
+  stroke = at ? [at] : null;
+  dragged = true;
+}
+
+function extendStroke(e: PointerEvent): void {
+  const [at, last] = [placeOf(e), stroke!.at(-1)!];
+  if (at && Math.hypot(at.x - last.x, at.y - last.y) >= STROKE_STEP) stroke!.push(at);
+  schedule(drawSky);
+}
+
+/** The stroke drawn: the area it closes is chosen (if it holds any hexes), and taps walk the avatar again. */
+function endStroke(): void {
+  const outline = closeLasso(stroke!);
+  const { cols, rows } = map.grid;
+  const cells = cellsIn(outline, cols * rows, (i) => centreOf(cols, i));
+  [chosen.value, stroke, lassoOn.value] = [cells.length ? { outline, cells } : chosen.value, null, false];
+  schedule(drawSky);
+}
 
 /** Where on the map a point on the stage is, if the map is shown. */
 function mapPlace(sx: number, sy: number): { x: number; y: number } | undefined {
@@ -712,6 +780,20 @@ watch([shift, windOn], drawWindLayer);
       <canvas ref="groundCanvas" /><canvas ref="canvas" /><canvas ref="lifeCanvas" class="sky" /><canvas ref="skyCanvas" class="sky" /><canvas ref="windCanvas" class="sky" />
     </div>
     <button class="menu" type="button" :aria-expanded="panelOpen" :title="panelOpen ? 'Hide settings' : 'Settings'" @click="panelOpen = !panelOpen">{{ panelOpen ? '✕' : '☰' }}</button>
+    <button v-if="steps > 0" class="menu env" type="button" :class="{ on: envOpen }" :aria-expanded="envOpen" title="World presets: the whole world, or an area of it, in a state at once" @click="toggleEnv">🌍</button>
+    <div v-if="envOpen && steps > 0" class="env-panel">
+      <div class="env-row where">
+        <button type="button" :class="{ on: !chosen && !lassoOn }" title="Set the whole world" @click="chooseAll">🌐 Whole world</button>
+        <button type="button" :class="{ on: lassoOn }" title="Draw around the hexes to set, on the map" @click="lassoOn = !lassoOn">✏️ {{ lassoOn ? 'Draw on the map…' : chosen ? 'Draw again' : 'Draw an area' }}</button>
+        <span v-if="chosen" class="count">{{ chosen.cells.length }} hexes</span>
+      </div>
+      <div v-for="g in PRESET_GROUPS" :key="g.id" class="env-row">
+        <span class="group">{{ g.name }}</span>
+        <button v-for="p in presetsOf(g.id)" :key="p.id" type="button" class="preset" :title="p.hint" @click="setPreset(p)">
+          <span class="icon">{{ p.icon }}</span><span class="label">{{ p.name }}</span>
+        </button>
+      </div>
+    </div>
     <div class="zoom">
       <button type="button" title="Closer" @click="zoomIn(1.4)">＋</button>
       <button type="button" title="Further" @click="zoomIn(1 / 1.4)">－</button>
@@ -893,10 +975,40 @@ canvas.sky { pointer-events: none; }
   cursor: pointer;
   z-index: 7;
 }
+.menu.env { right: 58px; }
+.menu.env.on { border-color: #ffd23f; }
+.env-panel {
+  position: absolute;
+  top: calc(max(8px, env(safe-area-inset-top, 0px)) + 48px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 16px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(20, 20, 28, 0.92);
+  border: 1px solid #1f1f28;
+  border-radius: 14px;
+  z-index: 7;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.env-row { display: grid; grid-template-columns: 54px repeat(5, 1fr); gap: 5px; align-items: center; }
+.env-row.where { display: flex; flex-wrap: wrap; }
+.env-row .group { font-size: 11px; color: #8a8a99; }
+.env-row .count { font-size: 12px; color: #ffd23f; }
+.env-panel button { border-radius: 9px; border: 1px solid #3a3a4c; background: #262634; color: #e6e6f0; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.env-row.where button { padding: 6px 10px; font-size: 12px; }
+.env-panel button.on { border-color: #ffd23f; color: #ffd23f; }
+.env-panel .preset { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 2px; min-height: 42px; }
+.env-panel .preset .icon { font-size: 17px; line-height: 1; }
+.env-panel .preset .label { font-size: 10px; }
 .zoom {
   position: absolute;
   right: 10px;
-  bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 120px);
+  bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 160px);
   display: flex;
   flex-direction: column;
   gap: 6px;

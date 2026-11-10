@@ -96,6 +96,8 @@ describe('ecoModel', () => {
     command(e, 50, { do: 'release', kind: kindOf('hare'), count: 5 });
     command(e, 20, { do: 'go', x: 3, y: 3 });
     command(e, 30, { do: 'gift', gift: 'rain' });
+    command(e, 40, { do: 'preset', preset: 'storm', seed: 3 });
+    command(e, 60, { do: 'preset', preset: 'lush', cells: [5, 6, 7], seed: 4 });
     const run = createRun(ecoModel(e), Infinity, 25);
     const look = (step: number) => {
       const v = run.at(step);
@@ -105,6 +107,15 @@ describe('ecoModel', () => {
     run.at(10);
     expect(look(70)).toBe(seen[0]);
     expect(look(120)).toBe(seen[1]);
+  });
+
+  it('puts the world in a preset state as the step it was given for begins', () => {
+    const e = eco();
+    command(e, 3, { do: 'preset', preset: 'frozen', seed: 1 });
+    for (let k = 0; k < 3; k++) ecoStep(e);
+    expect(e.cycle.world.snow.some((s) => s > 0.1)).toBe(false);
+    ecoStep(e);
+    expect(e.cycle.world.snow.filter((s) => s > 0.1).length).toBeGreaterThan(n / 3);
   });
 
   it('shows the life of the moment: creatures, how many of each kind, plants', () => {
