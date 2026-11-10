@@ -1,4 +1,4 @@
-import type { Cover } from './levels';
+import type { Cover, Level } from './levels';
 
 /** Row-major grid of per-hex cover and elevation, in the same odd-r layout as the world. */
 export interface CoverGrid {
@@ -26,6 +26,17 @@ export function createCoverGrid(
     }
   }
   return { cols, rows, cells, elevation };
+}
+
+/** Set the trees on the grid's cells to `trees` (levels per cell), as they grow or are felled: whether any changed. */
+export function growTrees(grid: CoverGrid, trees: ArrayLike<number>): boolean {
+  let changed = false;
+  grid.cells.forEach((c, i) => {
+    if (c.trees === trees[i]) return;
+    c.trees = trees[i] as Level;
+    changed = true;
+  });
+  return changed;
 }
 
 export function inGrid(grid: CoverGrid, col: number, row: number): boolean {

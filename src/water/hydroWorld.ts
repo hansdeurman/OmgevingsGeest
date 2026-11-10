@@ -117,7 +117,7 @@ export interface WorldState {
   channels: { flow: Float32Array; bed: Float32Array; down: Int32Array; order: Int32Array; age: number };
 }
 
-const changing = (w: HydroWorld) => [w.ground, w.depth, w.flux, w.soil, w.snow, w.sediment];
+const changing = (w: HydroWorld) => [w.ground, w.depth, w.flux, w.soil, w.snow, w.sediment, w.soak.capacity, w.soak.infiltration, w.soak.release, w.soak.plants];
 
 export const saveWorld = (w: HydroWorld): WorldState => ({
   arrays: changing(w).map((a) => a.slice()),

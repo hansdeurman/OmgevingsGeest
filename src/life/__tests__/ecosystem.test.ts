@@ -98,10 +98,11 @@ describe('ecoModel', () => {
     command(e, 30, { do: 'gift', gift: 'rain' });
     command(e, 40, { do: 'preset', preset: 'storm', seed: 3 });
     command(e, 60, { do: 'preset', preset: 'lush', cells: [5, 6, 7], seed: 4 });
+    command(e, 65, { do: 'preset', preset: 'dense', seed: 5 });
     const run = createRun(ecoModel(e), Infinity, 25);
     const look = (step: number) => {
       const v = run.at(step);
-      return JSON.stringify({ c: v.life.creatures, d: Array.from(v.depth), w: Array.from(v.sky.windX), p: Array.from(v.life.plants), a: v.avatar });
+      return JSON.stringify({ c: v.life.creatures, d: Array.from(v.depth), w: Array.from(v.sky.windX), p: Array.from(v.life.plants), a: v.avatar, t: Array.from(v.trees) });
     };
     const seen = [look(70), look(120)];
     run.at(10);

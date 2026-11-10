@@ -11,6 +11,7 @@ import type { Raster } from '../../tiles/raster';
 import type { MountainStyle } from '../../tiles/relief';
 import { createPlaceholderTextures, type GroundTextures } from '../../tiles/placeholderTextures';
 import { buildScene, paintLakes, tileAt, type LakeOptions, type Scene } from '../../tiles/scene';
+import { growTrees } from '../../tiles/coverGrid';
 import { groundCoverOf, hydroWorldOf, plantRoomOf } from '../../tiles/mapHydro';
 import type { HexTopology } from '../../water/hexTopology';
 import { createRun, type Run } from '../../water/waterRun';
@@ -724,6 +725,11 @@ function seasonNow(): SeasonLook | undefined {
   return seasonShown!.look;
 }
 
+/** The map's trees as the step shown has them: where a preset planted or felled them, the map is painted anew. */
+function followTrees(): void {
+  if (run && run.map === map && growTrees(map.grid, run.water.at(step.value).trees)) rebuild();
+}
+
 function newMap(): void {
   map = demoMap(mapId.value, seed.value);
   startRun();
@@ -768,6 +774,7 @@ watch([mapId, seed], newMap);
 watch([blend, useArt, relief, mountainStyle, contours], rebuild);
 watch([step, season, wind, windDir], repaintWater);
 watch(step, () => playing.value || resetSky());
+watch(step, followTrees);
 watch(showGrid, draw);
 watch(cloudMode, drawSky);
 watch(showLife, drawSky);

@@ -29,10 +29,12 @@ export interface ClimateParams {
 
 export const defaultClimate = (): ClimateParams => ({ heat: { ...DEFAULT_HEAT }, wind: { ...DEFAULT_WIND }, air: { ...DEFAULT_AIR } });
 
-/** What a map's ground is, per hex: how bright it is bare, and how rough for the wind. Grass everywhere if not given. */
+/** What a map's ground is, per hex: how bright it is bare, how rough for the wind, and the grass and trees on it (levels 0–4). Grass everywhere if not given. */
 export interface GroundCover {
-  albedo: ArrayLike<number>;
-  rough: ArrayLike<number>;
+  albedo: Float32Array;
+  rough: Float32Array;
+  grass: Float32Array;
+  trees: Float32Array;
 }
 
 export interface WaterCycle {
@@ -76,6 +78,8 @@ export interface SkySnapshot {
 
 export interface CycleSnapshot extends HydroSnapshot {
   sky: SkySnapshot;
+  /** The trees on the land (levels 0–4). */
+  trees: Float32Array;
 }
 
 /** The sea's water at the start: so much that the land's water cycle hardly changes it, but counted all the same. */
@@ -90,7 +94,12 @@ export const OVERCAST = 0.08;
 export function createWaterCycle(world: HydroWorld, options: CycleOptions = {}): WaterCycle {
   const { cols, rows, n } = world.topo;
   const sea = Uint8Array.from(world.sink, (s, i) => (s && world.ground[i] <= 0 ? 1 : 0));
-  const cover = options.cover ?? { albedo: Float32Array.from(sea, (s) => (s ? ALBEDO.sea : ALBEDO.grass)), rough: Float32Array.from(sea, (s) => (s ? ROUGH.sea : ROUGH.land)) };
+  const cover = options.cover ?? {
+    albedo: Float32Array.from(sea, (s) => (s ? ALBEDO.sea : ALBEDO.grass)),
+    rough: Float32Array.from(sea, (s) => (s ? ROUGH.sea : ROUGH.land)),
+    grass: Float32Array.from(sea, (s) => (s ? 0 : 4)),
+    trees: new Float32Array(n),
+  };
   const heat = createHeat(cols, rows, world.ground, START.air);
   sea.forEach((s, i) => s && (heat.surface[i] = START.sea));
   const air = createAir(cols, rows, world.ground, sea);
@@ -156,8 +165,8 @@ export interface CycleState {
   sea: number;
 }
 
-/** Everything else that changes as the cycle runs. */
-const changing = (c: WaterCycle) => [c.air.vapour, c.air.cloud, c.air.fall, c.air.rise, c.air.kept, c.heat.surface, c.heat.air, c.wind.x, c.wind.y];
+/** Everything else that changes as the cycle runs, the ground's cover too. */
+const changing = (c: WaterCycle) => [c.air.vapour, c.air.cloud, c.air.fall, c.air.rise, c.air.kept, c.heat.surface, c.heat.air, c.wind.x, c.wind.y, c.cover.albedo, c.cover.rough, c.cover.trees];
 
 /** The cycle as a model to run: steps follow on from where it is. */
 export const cycleModel = (c: WaterCycle): Model<CycleState, CycleSnapshot> => ({
@@ -168,5 +177,5 @@ export const cycleModel = (c: WaterCycle): Model<CycleState, CycleSnapshot> => (
     changing(c).forEach((a, k) => a.set(state.arrays[k]));
     [c.step, c.sea] = [state.step, state.sea];
   },
-  view: () => ({ ...snapshot(c.world), sky: skyOf(c) }),
+  view: () => ({ ...snapshot(c.world), sky: skyOf(c), trees: c.cover.trees.slice() }),
 });

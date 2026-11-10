@@ -26,13 +26,15 @@ export function hydroWorldOf(grid: CoverGrid, dirs: 6 | 12 = 12, water?: ArrayLi
   });
 }
 
-/** How bright and how rough a map's ground is, per hex, by its grass, trees and height; the sea dark and smooth. */
+/** How bright and how rough a map's ground is, per hex, by its grass, trees and height, and those levels; the sea dark and smooth. */
 export function groundCoverOf(grid: CoverGrid): GroundCover {
   const { cells, elevation } = grid;
   const sea = (i: number) => elevation[i] <= 0;
   return {
     albedo: Float32Array.from(cells, (c, i) => (sea(i) ? ALBEDO.sea : albedoOf(c.grass, c.trees, elevation[i]))),
     rough: Float32Array.from(cells, (c, i) => (sea(i) ? ROUGH.sea : roughnessOf(c.trees, elevation[i]))),
+    grass: Float32Array.from(cells, (c) => c.grass),
+    trees: Float32Array.from(cells, (c) => c.trees),
   };
 }
 

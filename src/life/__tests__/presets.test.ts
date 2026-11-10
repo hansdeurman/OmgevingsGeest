@@ -102,6 +102,22 @@ describe('applyPreset', () => {
     expect(food.plants[0]).toBe(0);
   });
 
+  it('plants dense forest below the tree line, darker and rougher ground that holds more and grows more, none in the water', () => {
+    const w = world();
+    const { cover, world: ground } = w.cycle;
+    const [albedo, rough, base, before] = [cover.albedo.slice(), cover.rough.slice(), w.life.food.base.slice(), cycleWater(w.cycle)];
+    applyPreset(w, 'dense', undefined, 1);
+    const low = land.filter((i) => w.cycle.heat.height[i] <= 4.5 && i !== lake);
+    expect(low.every((i) => cover.trees[i] >= 3)).toBe(true);
+    expect(low.every((i) => cover.albedo[i] < albedo[i] && cover.rough[i] > rough[i] && w.life.food.base[i] >= base[i])).toBe(true);
+    expect([cover.trees[0], cover.trees[lake]]).toEqual([0, 0]);
+    expect(land.every((i) => ground.soil[i] <= ground.soak.capacity[i] + 1e-6)).toBe(true);
+    applyPreset(w, 'open', undefined, 1);
+    expect(land.every((i) => cover.trees[i] === 0)).toBe(true);
+    expect(land.every((i) => ground.soil[i] <= ground.soak.capacity[i] + 1e-6)).toBe(true);
+    expect(cycleWater(w.cycle)).toBeCloseTo(before, 3);
+  });
+
   it('does nothing for a preset it does not know', () => {
     const w = world();
     const air = w.cycle.heat.air.slice();

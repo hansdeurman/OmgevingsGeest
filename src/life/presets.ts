@@ -1,13 +1,15 @@
 import { hash2 } from '../math/noise';
 import { saturation } from '../water/atmosphere';
-import { LAPSE } from '../water/retention';
+import { albedoOf } from '../water/heat';
+import { LAPSE, soakOf } from '../water/retention';
 import { OVERCAST, type WaterCycle } from '../water/waterCycle';
-import { terrainMost } from './food';
+import { roughnessOf } from '../water/wind';
+import { plantRoom, terrainMost } from './food';
 import type { Life } from './life';
 
 /**
  * States the world can be put in at once, one button each: how warm it is,
- * how wet, how cloudy, how green. The groups stand apart from each other (a
+ * how wet, how cloudy, how green, how wooded. The groups stand apart from each other (a
  * cold world can be wet or dry, green or bare): a preset sets only its own
  * part of the world, on the hexes chosen (or all), each hex a little
  * different from the next. No water is made or lost: what a preset adds
@@ -15,7 +17,7 @@ import type { Life } from './life';
  * goes its own way; a climate set for the whole world also comes with the
  * sun and greenhouse that keep it so.
  */
-export type PresetGroup = 'climate' | 'water' | 'sky' | 'plants';
+export type PresetGroup = 'climate' | 'water' | 'sky' | 'plants' | 'forest';
 
 /** The world a preset sets: its water cycle and the life on it. */
 export interface World {
@@ -35,8 +37,10 @@ export interface Preset {
   set(w: World, i: number, wobble: number): void;
 }
 
-/** How far hexes differ from the preset, at most: degrees, share of the soil filled, of the air's humidity, of a cloud's thickness, of the plants. */
-const SPREAD = { t: 2.5, fill: 0.12, humid: 0.08, cloud: 0.3, plants: 0.12 };
+/** How far hexes differ from the preset, at most: degrees, share of the soil filled, of the air's humidity, of a cloud's thickness, of the plants, levels of trees. */
+const SPREAD = { t: 2.5, fill: 0.12, humid: 0.08, cloud: 0.3, plants: 0.12, trees: 1.2 };
+/** No trees grow higher than this (steps). */
+const TREE_LINE = 4.5;
 /** The sea freezes at this temperature; water this deep is a lake, which presets leave as it is. */
 const SEA_FREEZES = -1.8;
 const LAKE = 0.3;
@@ -114,6 +118,39 @@ const plants = (id: string, name: string, icon: string, hint: string, share: num
   },
 });
 
+/**
+ * Trees on hex `i` at `level` (0–4): the ground as bright and rough as such
+ * woods are, holding as much water (what no longer fits stands on it), and
+ * growing as much as such land does (greening kept on top).
+ */
+export function plantTrees({ cycle: c, life }: World, i: number, level: number): void {
+  const [grass, h, { food }] = [c.cover.grass[i], c.heat.height[i], life];
+  [c.cover.trees[i], c.cover.albedo[i], c.cover.rough[i]] = [level, albedoOf(grass, level, h), roughnessOf(level, h)];
+  const soak = soakOf(grass, level, h);
+  const s = c.world.soak;
+  [s.capacity[i], s.infiltration[i], s.release[i], s.plants[i]] = [soak.capacity, soak.infiltration, soak.release, soak.plants ?? s.plants[i]];
+  const over = c.world.soil[i] - soak.capacity;
+  if (over > 0) [c.world.soil[i], c.world.depth[i]] = [soak.capacity, c.world.depth[i] + over];
+  const was = food.base[i];
+  food.base[i] = plantRoom(grass, level, h);
+  food.room[i] = Math.max(food.base[i], food.room[i] + food.base[i] - was);
+  food.plants[i] = Math.min(food.plants[i], food.room[i]);
+}
+
+/** Woods: trees about this thick (levels 0–4; none at all for 0) on the land below the tree line, none in the water. */
+const forest = (id: string, name: string, icon: string, hint: string, level: number): Preset => ({
+  id,
+  group: 'forest',
+  name,
+  icon,
+  hint,
+  set(w, i, wobble) {
+    const c = w.cycle;
+    if (c.air.sea[i] || c.world.depth[i] > LAKE) return;
+    plantTrees(w, i, c.heat.height[i] > TREE_LINE ? 0 : Math.round(Math.max(0, Math.min(4, level + SPREAD.trees * Math.min(1, level) * wobble))));
+  },
+});
+
 const below = (t: number, deep: number) => (own: number) => (own < t ? deep : 0);
 
 export const PRESETS: readonly Preset[] = [
@@ -132,7 +169,11 @@ export const PRESETS: readonly Preset[] = [
   sky('storm', 'Storm', '⛈', 'Heavy clouds that rain hard', 0.3, 1),
   plants('barren', 'Barren', '🟫', 'Grazed or burnt bare: nothing growing', 0.03, false),
   plants('meadow', 'Meadow', '🌿', 'Everything grown as full as the land was painted', 1, false),
-  plants('lush', 'Lush', '🌳', 'Green as far as the land can grow, sand and all', 1, true),
+  plants('lush', 'Lush', '🌺', 'Green as far as the land can grow, sand and all', 1, true),
+  forest('open', 'Open', '🏞', 'No trees: open grass and heath', 0),
+  forest('scattered', 'Scattered', '🌳', 'A tree here and there, small copses', 1.2),
+  forest('woods', 'Woods', '🌲', 'Woodland, with glades', 2.8),
+  forest('dense', 'Dense', '🌲🌲', 'Dense old forest everywhere below the tree line', 4),
 ];
 
 export const PRESET_GROUPS: readonly { id: PresetGroup; name: string }[] = [
@@ -140,6 +181,7 @@ export const PRESET_GROUPS: readonly { id: PresetGroup; name: string }[] = [
   { id: 'water', name: 'Water' },
   { id: 'sky', name: 'Sky' },
   { id: 'plants', name: 'Plants' },
+  { id: 'forest', name: 'Forest' },
 ];
 
 const BY_ID = new Map(PRESETS.map((p) => [p.id, p]));
